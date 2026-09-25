@@ -1,0 +1,31 @@
+# Build products
+*.o
+*.d
+*.a
+*.dylib
+*.so
+*.dSYM/
+__pycache__/
+*.pyc
+
+# Test and benchmark binaries are built by `make test` next to their sources.
+# They have no extension, so they are ignored by listing what the tree keeps.
+/tests/*
+!/tests/*.c
+!/tests/*.h
+!/tests/*.inc
+!/tests/*.py
+!/tests/*.sh
+!/tests/*.md
+!/tests/*/
+
+# Generated reports and caches
+/reports/
+/build/
+
+# Local backups
+*.bak
+*.orig
+*.rej
+*~
+.DS_Store

@@ -1,0 +1,7 @@
+X86 LB-x86
+"эталон: буфер чтения на x86"
+{ }
+ P0          | P1           ;
+ MOV EAX,[x] | MOV EAX,[y]  ;
+ MOV [y],$1  | MOV [x],$1   ;
+exists (0:EAX=1 /\ 1:EAX=1)
