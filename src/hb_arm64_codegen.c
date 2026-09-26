@@ -11450,6 +11450,8 @@ static bool emit_adjacent_mem64_pair(hb_codegen_buffer_t* buf, const hb_ir_instr
     return false;
 }
 
+static void emit_zero_ymm_hi_if_vex(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr);
+
 static bool emit_xmm_load_store_pair(hb_codegen_buffer_t* buf, const hb_ir_instr_t* load,
                                      const hb_ir_instr_t* store) {
     if (!jit_direct_mem_codegen_enabled(buf) || !load || !store) return false;
@@ -11465,6 +11467,8 @@ static bool emit_xmm_load_store_pair(hb_codegen_buffer_t* buf, const hb_ir_instr
     emit_direct_mem_addr(buf, &load->src1);
     emit_direct_mem128_load_to_x20_x22(buf);
     emit_store_x20_x22_to_xmm(buf, load->dst.reg);
+    /* Fusion must retain the LOAD destination writeback, including VEX/EVEX upper zeroing. */
+    emit_zero_ymm_hi_if_vex(buf, load);
     if (direct_mem_addr_preserves_x22(buf, &store->src1)) {
         emit_direct_mem_addr(buf, &store->src1);
     } else {
@@ -15238,6 +15242,8 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 emit_direct_mem_load_to_x20(buf, instr->src1.size);
                 emit_mov_imm64(buf, 22, 0);
                 emit_store_x20_x22_to_xmm(buf, instr->dst.reg);
+                /* Preserve the IR writeback contract, even if a future lifter uses a narrow VEX LOAD. */
+                emit_zero_ymm_hi_if_vex(buf, instr);
                 hb_emit_restore_stack_access(prev_stack);
                 jit_native_mem_count(1);
                 hb_emit_note_native_exit();
