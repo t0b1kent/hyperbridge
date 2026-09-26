@@ -8094,7 +8094,18 @@ static bool emit_load_xmm_operand_to_pair(hb_codegen_buffer_t* buf, const hb_ir_
         return true;
     }
     if (jit_direct_mem_codegen_enabled(buf) && !diag_no_xmm_dload() && direct_user_xmm_mem_allowed(buf, op)) {
+        /* Claude 26.09.2026 — ЧЁРНЫЙ КАДР HK ПРИ JIT_DIRECT_MEM=1.
+         * Вторым операндом сюда идут в пару (21,23), когда в x22 уже лежит СТАРШАЯ половина
+         * первого (20,22): ANDPS/ANDNPS/ORPS/XORPS, INSERTPS, PUNPCK*QDQ. emit_direct_mem_addr
+         * пишет x22 при индексе и при смещении вне ±4095 — а RIP-относительный операнд лифтер
+         * превращает в АБСОЛЮТНЫЙ адрес, то есть почти каждую константу-маску. Старшие 64 бита
+         * результата считались от адреса константы (июль: m33 = 0x0000087e — старшая половина
+         * адреса). Сохраняем x22 в hi: его всё равно перезапишет загрузка ниже, как у записи. */
+        const bool keep_x22 = lo != 22 && hi != 22 && hi != 21 &&
+                              !direct_mem_addr_preserves_x22(buf, op);
+        if (keep_x22) emit_mov_reg(buf, hi, 22);
         emit_direct_mem_addr(buf, op);
+        if (keep_x22) emit_mov_reg(buf, 22, hi);
         if (lo == 21) {
             emit_ldr_x(buf, hi, 21, 8);
             emit_ldr_x(buf, lo, 21, 0);
