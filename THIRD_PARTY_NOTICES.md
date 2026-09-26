@@ -25,6 +25,19 @@ of HyperBridge does not replace or relicense them.
 - License: BSD, as stated in `third_party/cephes/LICENSE`, together with the
   original Cephes permission notice quoted there.
 
+## Wine (adapter files)
+
+- Location: `adapter/src/cpu.c`, `adapter/src/hb_wine_unwind.h`,
+  `adapter/src/wine/macrunner_hb_x64_packet.h`.
+- Origin: Wine (https://www.winehq.org/): `dlls/xtajit64/cpu.c`, the ntdll unwind
+  definitions and declarations from `dlls/ntdll/unixlib.h`, modified for
+  HyperBridge.
+- Copyright: Alexandre Julliard (2020, 2023, 2024) and the MacRunner authors for
+  the modifications.
+- License: GNU Lesser General Public License, version 2.1 or later. The notice
+  is kept at the top of each file; the full text is in `adapter/COPYING.LIB`.
+  `hyperbridge64.dll`, built from `adapter/src/cpu.c`, is covered by the LGPL.
+
 ## Techniques credited in comments
 
 Source comments name QEMU, box64 and FEX-Emu where HyperBridge uses a technique
