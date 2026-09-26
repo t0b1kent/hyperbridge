@@ -95,12 +95,17 @@ static uint32_t valid_mask_for(hb_lazy_flags_kind_t kind, uint64_t count) {
         case HB_LAZY_FLAGS_INC:
         case HB_LAZY_FLAGS_DEC:
             return HB_FLAG_BIT_ALL & ~(uint32_t)HB_FLAG_BIT_CF;
+        /* Claude 26.09.2026 — AF ПОСЛЕ AND/OR/XOR/TEST НЕОПРЕДЕЛЁН, А НЕ «НЕПОДДЕРЖАН» (ДОЛГ 18г).
+         * LAHF после логической операции просил AF, получал UNSUPPORTED_FEATURE — так умирала
+         * Heroes III; выпуск при этом глотал отказ и не писал AH (руки расходились 12 из 12).
+         * Железо и QEMU дают AF=0, как уже делают наши BMI (ANDN/BEXTR/BZHI): заявляем бит,
+         * compute_flag отдаёт ноль. ВТОРАЯ КОПИЯ — lazy_valid_mask_for_kind в кодогенераторе. */
         case HB_LAZY_FLAGS_AND:
         case HB_LAZY_FLAGS_OR:
         case HB_LAZY_FLAGS_XOR:
         case HB_LAZY_FLAGS_TEST:
             return HB_FLAG_BIT_ZF | HB_FLAG_BIT_SF | HB_FLAG_BIT_CF |
-                   HB_FLAG_BIT_OF | HB_FLAG_BIT_PF;
+                   HB_FLAG_BIT_OF | HB_FLAG_BIT_PF | HB_FLAG_BIT_AF;
         /* ★★★★ MacRunner 2026-08-30, лейн УСТАНОВЩИКИ — OF И AF ПОСЛЕ СДВИГА НЕОПРЕДЕЛЕНЫ,
          * А НЕ «НЕПОДДЕРЖАНЫ».
          *
@@ -258,6 +263,9 @@ static bool compute_flag(const hb_lazy_flags_t* lf, uint32_t bit) {
             hb_pf_count(0);
             return parity_even8(res);
         case HB_FLAG_BIT_AF:
+            if (lf->kind == HB_LAZY_FLAGS_AND || lf->kind == HB_LAZY_FLAGS_OR ||
+                lf->kind == HB_LAZY_FLAGS_XOR || lf->kind == HB_LAZY_FLAGS_TEST)
+                return false;                       /* неопределён; железо даёт 0 (18г) */
             return ((lhs ^ rhs ^ res) & 0x10ULL) != 0;
         case HB_FLAG_BIT_CF:
             switch (lf->kind) {

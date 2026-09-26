@@ -5994,9 +5994,9 @@ static uint32_t lazy_valid_mask_for_kind(hb_lazy_flags_kind_t kind) {
         case HB_LAZY_FLAGS_AND:
         case HB_LAZY_FLAGS_OR:
         case HB_LAZY_FLAGS_XOR:
-        case HB_LAZY_FLAGS_TEST:
+        case HB_LAZY_FLAGS_TEST:            /* AF=0 заявлен вместе с hb_flags.c (18г, 26.09) */
             return HB_FLAG_BIT_ZF | HB_FLAG_BIT_SF | HB_FLAG_BIT_CF |
-                   HB_FLAG_BIT_OF | HB_FLAG_BIT_PF;
+                   HB_FLAG_BIT_OF | HB_FLAG_BIT_PF | HB_FLAG_BIT_AF;
         /* ★ 30.08, лейн УСТАНОВЩИКИ — СДВИГИ. Ветви здесь не было вовсе, то есть
          * `default: return 0`: выпускаемый код не заявлял для сдвига НИ ОДНОГО флага,
          * тогда как `hb_flags.c` заявлял четыре. Разбор и довод — там же, в
