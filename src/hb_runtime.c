@@ -457,6 +457,24 @@ static void guard_census_flush(hb_jit_runtime_t* rt, const char* why) {
      * прогоны без единого прибора — сегодня это весь движок — не меняются ничем:
      * цена здесь ровно один вызов с проверкой счётчика на ноль. Разбор — в
      * hb_probe.h у hb_probe_census_pulse. */
+    {   /* Claude 26.09.2026: сверка SMC по поколению — сколько принято без хеша, сколько
+         * отказов записи, сколько страниц сдано как «горячие» (шторм), сколько снято Wine. */
+        extern void hb_smc_protect_stats(uint64_t* armed, uint64_t* faults);
+        extern void hb_smc_extra_stats(uint64_t* hot_pages, uint64_t* range_disarmed);
+        uint64_t armed = 0, faults = 0, hot = 0, disarmed = 0;
+        uint64_t fast = 0, rearm = 0, reverified = 0, evicted = 0;
+        hb_smc_protect_stats(&armed, &faults);
+        hb_smc_extra_stats(&hot, &disarmed);
+        hb_jit_smc_fast_stats(&fast, &rearm);
+        hb_jit_smc_reverify_stats(NULL, &reverified, &evicted, NULL);
+        if (armed || fast)
+            fprintf(stderr, "macrunner-hb-smc-fast: why=%s fast=%llu rearmed=%llu reverified=%llu "
+                    "evicted=%llu armed=%llu faults=%llu hot=%llu disarmed=%llu\n", why,
+                    (unsigned long long)fast, (unsigned long long)rearm,
+                    (unsigned long long)reverified, (unsigned long long)evicted,
+                    (unsigned long long)armed, (unsigned long long)faults,
+                    (unsigned long long)hot, (unsigned long long)disarmed);
+    }
     hb_probe_census_pulse(stderr, why);
     hb_povtor_itog_print(why);
 }
@@ -5107,6 +5125,17 @@ static int smc_trace_enabled(void) {
 extern int      hb_smc_protect_enabled(void);
 extern int      hb_smc_arm_page(void* host_addr);
 extern uint32_t hb_smc_page_generation(uint64_t host_addr);
+extern int      hb_smc_page_state(uint64_t host_addr, uint32_t* gen);
+extern void     hb_smc_note_range_changed(uint64_t start, uint64_t len, int mode);
+static uint64_t g_smc_fast_accept, g_smc_rearmed;
+
+/* Claude 26.09.2026: маска хозяйской страницы — быстрый путь только для отпечатка в одной
+ * странице (одно поколение на запись кеша). */
+static uint64_t smc_host_page_mask(void) {
+    static uint64_t m;
+    if (!m) { long v = sysconf(_SC_PAGESIZE); m = ~(uint64_t)((v > 0 ? (uint64_t)v : 16384u) - 1u); }
+    return m;
+}
 extern int      hb_smc_query_prot(uint64_t host_addr);
 
 /* Claude 25.09 — отпечаток SMC словами по 8 байт в четыре независимые дорожки.
@@ -5301,26 +5330,34 @@ static void smc_track_entry(hb_jit_runtime_t* rt, hb_block_cache_entry_t* entry,
             (last->perm & (HB_PERM_WRITE | HB_PERM_EXEC)) != (HB_PERM_WRITE | HB_PERM_EXEC))
             return;  /* static RX code cannot change under us: leave untracked */
     }
+    /* Claude 26.09.2026 — СНАЧАЛА ВЗВЕСТИ ЗАЩИТУ И СНЯТЬ ПОКОЛЕНИЕ, ПОТОМ ХЕШИРОВАТЬ.
+     * Прежний порядок (хеш, затем защита) пропускал запись другого потока между ними: хеш уже
+     * старый, а поколение снято после записи — быстрый путь принял бы устаревший перевод. Так,
+     * вероятно, и выглядел августовский отказ «быстрое принятие ничего не ловит» (итерация 984).
+     * Быстрый путь — только для отпечатка в одной хозяйской странице (одно поколение). */
+    uint32_t gen_now = 0;
+    int gen_ok = 0;
+    void* hp_first = NULL;
+    if (hb_smc_protect_enabled()) {
+        void* hp_last;
+        hp_first = hb_memory_host_ptr(rt->ctx->memory, start, 1, HB_PERM_READ);
+        hp_last = hb_memory_host_ptr(rt->ctx->memory, start + len - 1, 1, HB_PERM_READ);
+        if (hp_first && hp_last &&
+            ((((uint64_t)(uintptr_t)hp_first) ^ ((uint64_t)(uintptr_t)hp_last)) & smc_host_page_mask()) == 0 &&
+            hb_smc_arm_page(hp_first) &&
+            hb_smc_page_state((uint64_t)(uintptr_t)hp_first, &gen_now))
+            gen_ok = 1;
+    }
     h = smc_hash_current(rt, start, len);
     if (!h) { g_smc_unreadable++; return; }
     smc_len_note(len);
     entry->smc_span_start = start;
     entry->smc_span_len = (uint32_t)len;
     entry->smc_hash = h;
-    entry->smc_gen = 0;
-    entry->smc_gen_valid = 0;
-    /* Итерация 979: если защита включена — снять право записи со страниц ОБОИХ концов блока
-     * и запомнить поколение первой. Тогда на входе хватит сравнения одного числа, а хеш
-     * останется полномочным судьёй на случай, когда поколение разошлось. */
-    if (hb_smc_protect_enabled()) {
-        void* hp_first = hb_memory_host_ptr(rt->ctx->memory, start, 1, HB_PERM_READ);
-        void* hp_last  = hb_memory_host_ptr(rt->ctx->memory, start + len - 1, 1, HB_PERM_READ);
-        if (hp_first && hb_smc_arm_page(hp_first)) {
-            if (hp_last && hp_last != hp_first) hb_smc_arm_page(hp_last);
-            entry->smc_gen = hb_smc_page_generation((uint64_t)(uintptr_t)hp_first);
-            entry->smc_gen_valid = 1;
-        }
-    }
+    entry->smc_gen = gen_ok ? gen_now : 0;
+    entry->smc_gen_valid = (uint8_t)gen_ok;
+    entry->smc_host = gen_ok ? (uint64_t)(uintptr_t)hp_first : 0;
+    /* Итерация 979 (взведение после хеша) заменена порядком выше, 26.09. */
     g_smc_tracked++;
 }
 
@@ -6243,6 +6280,12 @@ uint64_t hb_jit_invalidate_guest_range_all_why(hb_jit_runtime_t* self, uint64_t 
     if (!len) return 0;
     if (why >= HB_INVAL_WHY_N) why = HB_INVAL_WHY_UNKNOWN;
     __atomic_add_fetch(&g_inval_all_calls, 1, __ATOMIC_RELAXED);
+    /* Claude 26.09.2026: защита SMC не должна пережить чужую смену памяти. VirtualProtect
+     * гостя перебивает наше R|X — записи перестали бы давать отказ, а быстрый путь принимал бы
+     * устаревший перевод. Коды: 0 flush, 1 dirty, 7 read — запись мимо защиты (вернуть право
+     * записи); 5 free, 6 unmap — память ушла (отдать слот); прочее — только снять учёт. */
+    hb_smc_note_range_changed(start, len,
+                              (why == 5u || why == 6u) ? 2 : (why == 0u || why == 1u || why == 7u) ? 1 : 0);
     pthread_mutex_lock(&g_inval_lock);
     {
         uint64_t seq = g_inval_seq;
@@ -6331,6 +6374,11 @@ uint64_t hb_jit_smc_relift_exits(void) { return g_smc_relift_exits; }
  * цикл wow64 по ним снимает записи, накрывающие страницу выселенного блока. */
 static uint64_t g_smc_last_evict_addr; static uint32_t g_smc_last_evict_len;
 uint64_t hb_jit_smc_evicted_total(void) { return g_smc_evicted; }
+/* Claude 26.09.2026: быстрый путь сверки SMC — принято без хеша / поколение обновлено после хеша. */
+void hb_jit_smc_fast_stats(uint64_t* fast_accept, uint64_t* rearmed) {
+    if (fast_accept) *fast_accept = g_smc_fast_accept;
+    if (rearmed) *rearmed = g_smc_rearmed;
+}
 void hb_jit_smc_last_evicted(uint64_t* addr, uint32_t* len) { if (addr) *addr = g_smc_last_evict_addr; if (len) *len = g_smc_last_evict_len; }
 uint64_t hb_jit_smc_relift_suppressed(void) { return g_smc_relift_suppressed; }
 
@@ -6396,58 +6444,29 @@ static hb_block_cache_entry_t* smc_reverify_entry(hb_jit_runtime_t* rt,
                 "evicted=%llu unreadable=%llu\n",
                 (unsigned long long)g_smc_tracked, (unsigned long long)g_smc_reverified,
                 (unsigned long long)g_smc_evicted, (unsigned long long)g_smc_unreadable);
-    /* Итерация 979: БЫСТРОЕ ПРИНЯТИЕ. Если страница защищена и её поколение не менялось с
-     * момента постановки отпечатка, записи в неё не было — хешировать нечего. Расхождение
-     * поколений НЕ означает, что блок изменился (страница крупнее блока), поэтому дальше
-     * идёт прежний хеш, и он остаётся полномочным судьёй. */
-    if (entry->smc_gen_valid && hb_smc_protect_enabled()) {
-        void* hp = hb_memory_host_ptr(rt->ctx->memory, entry->smc_span_start, 1, HB_PERM_READ);
-        /* ★★★ MacRunner 2026-08-16, лейн ПАМЯТЬ, итерация 18 — ВОЗВРАТ ПРАВА ИСПОЛНЕНИЯ.
-         *
-         * Это вторая половина самоизменения, та самая, про которую в моём же отчёте стояло
-         * «вернуть право исполнения некому». Теперь есть и место, и доказательство.
-         *
-         * Механика. `hb_smc_handle_write_fault` (hb_memory.c:271) при записи гостя отпускает
-         * страницу в `R|W` — с `R|W|X` платформа отказывает EACCES, это W^X. Страница остаётся
-         * БЕЗ права исполнения, и раньше вернуть его было некому. Но `hb_smc_arm_page`
-         * (hb_memory.c:190) ставит ровно `PROT_READ|PROT_EXEC` — то есть повторное взведение
-         * И ЕСТЬ возврат исполнения. Не хватало только вызвать его на входе в блок.
-         *
-         * Что доказано пробой `tests/pamyat_smc_exec_restore.c` (16.08), без прогона игры:
-         *     R|X -> исполнение прошло -> R|W -> переписали код -> R|X -> исполнение ПРОШЛО
-         *     прямой R|W|X            -> EACCES (W^X)
-         * То есть чередование работает, и команда после возврата исполняется. Проба кладёт
-         * настоящий `ret` и ВЫЗЫВАЕТ его — иначе «mprotect вернул 0» ничего бы не значило.
-         *
-         * Вызов идемпотентен: если страница уже взведена, `arm_page` возвращает 1, ничего не
-         * делая. Работа добавляется только после ЗАПИСИ гостя в кодовую страницу, то есть редко.
-         * Гейт прежний — `hb_smc_protect_enabled()`, по умолчанию ВЫКЛ, отдельного не завожу.
-         *
-         * ЧЕГО НЕ ДОКАЗАНО: что окно между записью и этим вызовом никогда не задевает гостя.
-         * Здесь блок только входит в исполнение, значит право нужно ИМЕННО сейчас; но замерить
-         * это можно лишь приёмочным прогоном с включённым гейтом. */
-        if (hp) {
-            static unsigned long long g_smc_reexec;
-            if (hb_smc_arm_page(hp) && (++g_smc_reexec <= 8 || (g_smc_reexec & 0xffffu) == 0))
-                fprintf(stderr, "macrunner-hb-smc-reexec: страница взведена заново host=%p всего=%llu\n",
-                        hp, (unsigned long long)g_smc_reexec);
+    /* Claude 26.09.2026 — БЫСТРЫЙ ПУТЬ СВЕРКИ, УРОВЕНЬ 4 (профиль HK: smc_hash_current 8,5 %
+     * основного потока + копирование окна до 4 КБ на КАЖДОМ входе через диспетчер).
+     * Страница защищена и поколение то же — записи не было, хешировать нечего. Иначе СНАЧАЛА
+     * взвести защиту и снять новое поколение, ПОТОМ хешировать: запись после взведения даст
+     * отказ и поднимет поколение, её не пропустим. Хеш остаётся полномочным судьёй.
+     * Итерации 979/984 (взведение на каждом входе, быстрый путь отключён) — заменены этим. */
+    uint32_t gen_now = 0;
+    int rearmed = 0;
+    if (entry->smc_gen_valid && entry->smc_host && hb_smc_protect_enabled()) {
+        if (hb_smc_page_state(entry->smc_host, &gen_now) && gen_now == entry->smc_gen) {
+            g_smc_fast_accept++;
+            return entry;
         }
-        /* Итерация 984: быстрое принятие ВРЕМЕННО отключено — оно коротило путь, и хеш не
-         * считался вовсе (выселений 0). Печатаем состояние и проваливаемся к хешу, чтобы
-         * увидеть права страницы в момент, когда изменение УЖЕ произошло. */
-        { static int said_fa;
-          if (said_fa++ < 4 && hp) {
-              fprintf(stderr, "macrunner-hb-smc-check: guest=0x%llx host=%p prot=%d "
-                      "поколение_страницы=%u отпечаток=%u\n",
-                      (unsigned long long)entry->smc_span_start, hp,
-                      hb_smc_query_prot((uint64_t)(uintptr_t)hp),
-                      hb_smc_page_generation((uint64_t)(uintptr_t)hp), entry->smc_gen);
-              fflush(stderr);
-          } }
+        if (hb_smc_arm_page((void*)(uintptr_t)entry->smc_host) &&
+            hb_smc_page_state(entry->smc_host, &gen_now))
+            rearmed = 1;
     }
     now = smc_hash_current(rt, entry->smc_span_start, entry->smc_span_len);
     if (!now) { g_smc_unreadable++; return entry; }
-    if (now == entry->smc_hash) return entry;
+    if (now == entry->smc_hash) {
+        if (rearmed) { entry->smc_gen = gen_now; g_smc_rearmed++; }
+        return entry;
+    }
     /* Итерация 984: хеш РАЗОШЁЛСЯ — гость точно записал. Спрашиваем права страницы ИМЕННО
      * СЕЙЧАС: если 5 (READ|EXECUTE), защита стояла и запись должна была дать отказ, которого
      * не было; если 7 — право записи кто-то вернул до записи гостя. */

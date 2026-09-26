@@ -72,6 +72,9 @@ typedef struct {
      * заменяет хеш по всем байтам блока, когда защита страниц включена. */
     uint32_t smc_gen;
     uint8_t  smc_gen_valid;
+    /* Claude 26.09.2026: хозяйский адрес начала отпечатка — быстрый путь сверки без поиска
+     * области (hot_cache_lookup был в профиле HK рядом со сверкой). Действителен при smc_gen_valid. */
+    uint64_t smc_host;
     /* MacRunner 2026-08-01 — host half of the FEX-style fault map (see hb_codegen.h).
      * host_off[i] is the offset into native_code where guest instruction i begins; the guest
      * half is block->instrs[i].guest_addr. Owned by the entry, freed on eviction. Строится
@@ -431,6 +434,7 @@ void hb_unchain_stats(uint64_t* calls, uint64_t* visited, uint64_t* matched,
  * Kill switch MACRUNNER_HB_SMC_RELIFT=0. */
 uint64_t hb_jit_smc_relift_exits(void);
 uint64_t hb_jit_smc_evicted_total(void);
+void hb_jit_smc_fast_stats(uint64_t* fast_accept, uint64_t* rearmed);
 void hb_jit_smc_last_evicted(uint64_t* addr, uint32_t* len);
 uint64_t hb_jit_smc_relift_suppressed(void);
 

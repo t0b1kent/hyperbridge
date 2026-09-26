@@ -212,9 +212,12 @@ static void hb_copy_fault_landing(void) {
  * Гейт `MACRUNNER_HB_SMC_PROTECT` по умолчанию ВЫКЛЮЧЕН — включается замером. */
 #define HB_SMC_PAGE_SLOTS 4096u
 
-struct hb_smc_page { uint64_t base; uint32_t gen; uint32_t armed; };
+/* Claude 26.09.2026: faults/hot — предохранитель от шторма. Страница, в которую пишут чаще
+ * HB_SMC_HOT_FAULTS раз, больше не взводится: блоки на ней сверяются хешем, как без защиты. */
+#define HB_SMC_HOT_FAULTS 256u
+struct hb_smc_page { uint64_t base; uint32_t gen; uint32_t armed; uint32_t faults; uint32_t hot; };
 static struct hb_smc_page g_smc_pages[HB_SMC_PAGE_SLOTS];
-static uint64_t g_smc_prot_faults, g_smc_prot_armed;
+static uint64_t g_smc_prot_faults, g_smc_prot_armed, g_smc_hot_pages, g_smc_range_disarmed;
 
 static size_t hb_smc_host_page_size(void) {
     static size_t sz;
@@ -254,6 +257,7 @@ int hb_smc_arm_page(void* host_addr) {
     if (!hb_smc_protect_enabled()) return 0;
     if (p->base && p->base != base) return 0;
     if (p->base == base && p->armed) return 1;
+    if (p->base == base && p->hot) return 0;     /* шторм записей: сверка хешем, без защиты */
     if (mprotect((void*)(uintptr_t)base, ps, PROT_READ | PROT_EXEC) != 0) {
         /* Итерация 980: печатаем ПРИЧИНУ отказа — она и есть ответ на вопрос, легла ли
          * защита вообще. Первые 8 раз, безусловно. */
@@ -351,6 +355,15 @@ static int hb_smc_handle_write_fault(void* fault_addr) {
           } }
     }
     p->armed = 0; p->gen++; g_smc_prot_faults++;
+    if (++p->faults > HB_SMC_HOT_FAULTS && !p->hot) {
+        p->hot = 1; g_smc_hot_pages++;
+        { static int said_h;
+          if (said_h++ < 8) {
+              fprintf(stderr, "macrunner-hb-smc-hot: base=%p записей=%u — больше не защищаем\n",
+                      (void*)(uintptr_t)base, p->faults);
+              fflush(stderr);
+          } }
+    }
     { static int said_f;
       if (said_f++ < 8) {
           fprintf(stderr, "macrunner-hb-smc-fault: пойман base=%p поколение=%u всего=%llu\n",
@@ -358,6 +371,67 @@ static int hb_smc_handle_write_fault(void* fault_addr) {
           fflush(stderr);
       } }
     return 1;
+}
+
+/* Claude 26.09.2026 — СОСТОЯНИЕ СТРАНИЦЫ ДЛЯ БЫСТРОГО ПУТИ СВЕРКИ (уровень 4 для SMC).
+ * 1 — слот наш и защита стоит; *gen — поколение. Пока поколение то же, записи в страницу не
+ * было: каждая запись в защищённую страницу даёт отказ, а обработчик поднимает поколение. */
+int hb_smc_page_state(uint64_t host_addr, uint32_t* gen) {
+    uint64_t base = host_addr & ~(uint64_t)(hb_smc_host_page_size() - 1);
+    const struct hb_smc_page* p = &g_smc_pages[hb_smc_slot_for(base)];
+    if (!hb_smc_protect_enabled() || p->base != base || !p->armed) return 0;
+    if (gen) *gen = p->gen;
+    return 1;
+}
+
+/* Снять учёт со страницы. Объявления Wine приходят ПОСЛЕ его собственного mprotect, поэтому:
+ * если у страницы всё ещё НАШИ права R|X (Wine их не трогал — например, гость повторно выставил
+ * те же RWX, и Wine mprotect не звал), возвращаем право записи. Иначе следующая запись гостя
+ * дала бы отказ, наш обработчик его не взял бы (слот уже не взведён), а Wine, считая страницу
+ * записываемой, вернул бы «успех» — и команда падала бы бесконечно (класс CW Hack 24945).
+ * Если права уже поставил Wine — не трогаем. mode 2 — память освобождена, слот отдаётся.
+ * Поколение только растёт — старая запись кеша с прежним поколением не совпадёт ни с этой
+ * страницей, ни с другой, занявшей слот позже. */
+int hb_smc_query_prot(uint64_t host_addr);
+
+static void smc_page_disarm(struct hb_smc_page* p, size_t ps, int mode) {
+    if (p->armed && mode != 2 && hb_smc_query_prot(p->base) == (VM_PROT_READ | VM_PROT_EXECUTE))
+        (void)mprotect((void*)(uintptr_t)p->base, ps, PROT_READ | PROT_WRITE);
+    p->armed = 0;
+    p->gen++;
+    g_smc_range_disarmed++;
+    if (mode == 2) { p->base = 0; p->faults = 0; p->hot = 0; }
+}
+
+/* Объявление Wine о памяти [start, start+len): страницы в нём больше не считаются защищёнными
+ * нами, быстрый путь сверки для них закрыт до следующего взведения. Адрес — хозяйский (в
+ * адаптере гостевой адрес с ним совпадает). */
+void hb_smc_note_range_changed(uint64_t start, uint64_t len, int mode) {
+    size_t ps = hb_smc_host_page_size();
+    uint64_t first, last, end;
+    if (!hb_smc_protect_enabled() || !len) return;
+    end = start + len;
+    if (end < start) end = UINT64_MAX;
+    first = start & ~(uint64_t)(ps - 1);
+    last = (end - 1) & ~(uint64_t)(ps - 1);
+    if ((last - first) / ps >= HB_SMC_PAGE_SLOTS) {
+        unsigned i;
+        for (i = 0; i < HB_SMC_PAGE_SLOTS; i++) {        /* широкое объявление — по слотам */
+            struct hb_smc_page* p = &g_smc_pages[i];
+            if (p->base && p->base >= first && p->base <= last) smc_page_disarm(p, ps, mode);
+        }
+        return;
+    }
+    for (uint64_t b = first; ; b += ps) {
+        struct hb_smc_page* p = &g_smc_pages[hb_smc_slot_for(b)];
+        if (p->base == b) smc_page_disarm(p, ps, mode);
+        if (b == last) break;
+    }
+}
+
+void hb_smc_extra_stats(uint64_t* hot_pages, uint64_t* range_disarmed) {
+    if (hot_pages) *hot_pages = g_smc_hot_pages;
+    if (range_disarmed) *range_disarmed = g_smc_range_disarmed;
 }
 
 /* Итерация 984: текущие права страницы по адресу. Запрос, а не провокация (см. 983). */
@@ -880,6 +954,12 @@ static void lean_fault_handler(int sig, siginfo_t* info, void* context) {
                                                   int signal, const void* host_context);
     const ucontext_t* uc = (const ucontext_t*)context;
     const struct sigaction* prev = sig == SIGBUS ? &g_prev_bus : &g_prev_segv;
+    /* Claude 26.09.2026: запись в страницу, защищённую сверкой SMC, — НАША, первой. Прежде этот
+     * обработчик (его ставит адаптер, бит 64) защиту не знал вовсе: запись уходила в перехват JIT
+     * или к Wine, поэтому MACRUNNER_HB_SMC_PROTECT в адаптере был неприменим. Для чужих отказов
+     * это одна проверка слота. На macOS запись в R|X приходит как SIGBUS — ловим оба сигнала. */
+    if (info && hb_smc_handle_write_fault(info->si_addr))
+        return;
     if (uc && uc->uc_mcontext) {
         uint64_t pc = (uint64_t)uc->uc_mcontext->__ss.__pc;
         uint64_t lr = (uint64_t)uc->uc_mcontext->__ss.__lr;
