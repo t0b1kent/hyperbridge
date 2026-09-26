@@ -3,7 +3,7 @@
  * guest exceptions are masked. Guest IE/PE delivery and imm8[3] status behavior
  * are deliberately outside this test: only MXCSR control bits are compared.
  * DAZ=1 probes directly seed internal context state; they do not claim DAZ is
- * admitted by guest LDMXCSR/FXRSTOR (the supported mask remains 0xffbf).
+ * needed for guest LDMXCSR/FXRSTOR admission (the supported mask is 0xffff since 25.09.2026).
  * Private mappings use helper memory. A fresh JIT runtime per immediate keeps
  * each measured run below the periodic cache diagnostic's FP-formatting path.
  * Diagnostic host-fenv isolation is separate from this instruction test.
@@ -238,7 +238,7 @@ static const struct{const char *name;enum hb_gate_id id;} gates[]={
 int main(void)
 {
     char *saved[sizeof(gates)/sizeof(gates[0])]={0};size_t saved_count=0;int changed=0,host_saved=0;fenv_t original_host;
-    check(HB_MXCSR_SUPPORTED_MASK==0xffbfu,"guest MXCSR admission mask unchanged; DAZ probes are internal only");
+    check(HB_MXCSR_SUPPORTED_MASK==0xffffu,"guest MXCSR admission mask admits DAZ; DAZ probes are internal only");
     for(size_t i=0;i<sizeof(gates)/sizeof(gates[0]);++i){const char *v=getenv(gates[i].name);if(v&&!check((saved[i]=strdup(v))!=NULL,"save gate"))goto done;++saved_count;}
     changed=1;for(size_t i=0;i<saved_count;++i)if(!check(setenv(gates[i].name,"0",1)==0,"select private helper memory"))goto done;
     hb_env_refresh();for(size_t i=0;i<saved_count;++i){const char *v=hb_gate(gates[i].id);if(!check(v&&!strcmp(v,"0"),"effective helper gate"))goto done;}

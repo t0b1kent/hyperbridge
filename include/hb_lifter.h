@@ -17,6 +17,11 @@ hb_result_t hb_lift_x86(const hb_decoded_t* dec, hb_ir_builder_t* b);
 int hb_lift_edinica_prodlit(const hb_decoder_t* dec, const hb_decoded_t* d, size_t merged);
 
 hb_result_t hb_lift_func_x64(hb_decoder_t* dec, hb_ir_func_t** out);
+/* Lift exactly one COMPLETE x64 decoded instruction. Caller supplies the
+ * decoded value from a successful decoder probe; no further byte is read.
+ * Output is published only on success, with explicit unit metadata retained
+ * even if the instruction emits no IR. No successor is decoded or merged. */
+hb_result_t hb_lift_unit_x64(const hb_decoded_t* dec, hb_ir_func_t** out);
 hb_result_t hb_lift_func_x86(hb_decoder_t* dec, hb_ir_func_t** out);
 
 #ifdef __cplusplus

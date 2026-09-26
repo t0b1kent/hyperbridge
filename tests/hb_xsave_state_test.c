@@ -177,7 +177,8 @@ static void run_form(unsigned restore,hb_backend_t backend)
     for(unsigned mask=0;mask<8;++mask)for(unsigned bv=0;bv<(restore?8:6);++bv)for(unsigned host=0;host<4;++host)run_case(&f,mask,restore?bv:old_bv[bv],host,NORMAL,0,GOOD);
     for(unsigned offset=1;offset<64;++offset)for(unsigned host=0;host<4;++host)run_case(&f,7,7,host,NORMAL,offset,GOOD);
     if(restore){for(unsigned bad=BAD_BV_LOW;bad<=BAD_RESERVED_HIGH;++bad)for(unsigned m=0;m<2;++m)for(unsigned host=0;host<4;++host)run_case(&f,m?7:0,7,host,NORMAL,0,bad);
-        for(unsigned bad=BAD_MXCSR_DAZ;bad<=BAD_MXCSR31;++bad)for(unsigned mask=0;mask<8;++mask)for(unsigned bv=0;bv<2;++bv)for(unsigned host=0;host<4;++host)run_case(&f,mask,bv?7:0,host,NORMAL,0,bad);}
+        /* DAZ (бит 6) допустим с 25.09.2026 (маска 0xffff): случай BAD_MXCSR_DAZ больше не порча. */
+        for(unsigned bad=BAD_MXCSR16;bad<=BAD_MXCSR31;++bad)for(unsigned mask=0;mask<8;++mask)for(unsigned bv=0;bv<2;++bv)for(unsigned host=0;host<4;++host)run_case(&f,mask,bv?7:0,host,NORMAL,0,bad);}
     for(unsigned mode=LAST_EDGE;mode<MEMORY_MODES;++mode)for(unsigned mask=0;mask<8;++mask)for(unsigned host=0;host<4;++host)run_case(&f,mask,7,host,mode,0,GOOD);
     if(f.jit)check_kind(native_present(&f),"native compiled entry exists; helper allowed",EXECUTION);uint8_t actual[3];check(hb_memory_read(f.c->memory,CODE,actual,3)==HB_OK&&!memcmp(actual,f.code,3),"raw instruction bytes preserved");
 done:

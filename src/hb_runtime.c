@@ -14,6 +14,7 @@ static inline int runtime_gate_flag(enum hb_gate_id id, int default_value)
 }
 
 #include "hb_runtime.h"
+#include "hb_pair_rmw.h"
 #include <pthread.h>
 #include <mach/mach_time.h>
 #include "hb_probe.h"   /* приборы, у которых «не смотрел» и «не было» — РАЗНЫЕ ответы */
@@ -63,7 +64,7 @@ static unsigned long long g_selfcheck_done, g_selfcheck_skipped;
  * неё и вернёт потерю обратно, молча и без единого признака в журнале. */
 /* 30 (05.09.2026): у блоба постоянного кеша появился хвост с картой отказов (host_off/host_instr),
  * см. ripmap_trailer_append/parse. Блоб без хвоста этой версией не читается — пересобирается. */
-#define HB_RUNTIME_PERSISTENT_CACHE_VERSION 30u
+#define HB_RUNTIME_PERSISTENT_CACHE_VERSION 32u /* Pair pre-access/retirement policy. */
 #define HB_RUNTIME_PERSISTENT_CACHE_FLAG_DIRECT_MEM   0x01u
 #define HB_RUNTIME_PERSISTENT_CACHE_FLAG_DIRECT_STACK 0x02u
 #define HB_RUNTIME_PERSISTENT_CACHE_FLAG_DIRECT_SCALAR_SCAN 0x04u
@@ -461,6 +462,227 @@ static void guard_census_flush(hb_jit_runtime_t* rt, const char* why) {
 }
 
 static uint32_t jit_block_step_count(const hb_ir_block_t* block);
+static void arena_census_print(hb_jit_runtime_t* rt, const char* reason);
+
+/* Opus 26.09.2026 — ПРИЧИНЫ СМЕРТИ ТЕЛ В АРЕНЕ (перепись; только учёт).
+ *
+ * Перепись 26.09 (HK, быстрый режим 507) показала: к переполнению 128 МиБ живых записей в кеше
+ * 46 429, а занесений в арену 358 412. Чтобы решить, что должно ИСЧЕЗНУТЬ (уровень 4), надо знать,
+ * ПОЧЕМУ умирает тело. Причина ставится МЕСТОМ вызова, а не догадкой; счётчики потоковые — среда
+ * JIT своя у каждого потока, и перепись печатает счёт той же среды, что переполнилась. */
+enum {
+    HB_DEATH_RETRANS_SAME = 0,   /* тот же адрес переведён заново, отпечаток байтов тот же     */
+    HB_DEATH_RETRANS_DIFF,       /* тот же адрес, байты изменились                             */
+    HB_DEATH_RETRANS_UNTRACKED,  /* тот же адрес, отпечатка нет хотя бы с одной стороны        */
+    HB_DEATH_RANGE,              /* сброс по гостевому диапазону (hb_jit_invalidate_guest_range) */
+    HB_DEATH_SMC,                /* сверка отпечатка на входе не сошлась (smc_evict_entry)      */
+    HB_DEATH_EXEC_NOOWN,         /* EXEC: запись не владеет блоком                              */
+    HB_DEATH_EXEC_FUSED,         /* EXEC: запись — сплав                                        */
+    HB_DEATH_EXEC_NONATIVE,      /* EXEC: у записи нет кода                                     */
+    HB_DEATH_EXEC_MISMATCH,      /* EXEC: разобранная единица не совпала с записанной           */
+    HB_DEATH_RESET,              /* записи, снесённые block_cache_reset                         */
+    HB_DEATH_N
+};
+static const char* const hb_death_imya[HB_DEATH_N] = {
+    "retrans_same", "retrans_diff", "retrans_untracked", "range", "smc",
+    "exec_noown", "exec_fused", "exec_nonative", "exec_mismatch", "reset"
+};
+static __thread uint64_t t_death[HB_DEATH_N];
+static __thread uint64_t t_tramp_commits;
+static __thread uint64_t t_cache_resets;
+static __thread uint64_t t_zombie_created;   /* занесений ПЕРЕД живой записью того же адреса */
+static __thread uint64_t t_tomb_made, t_tomb_reused;
+
+/* Сброс по диапазону: как решено выселение (перепись; только учёт, кроме гейта точности). */
+enum {
+    HB_INVAL_EV_SMC_SPAN = 0,  /* у записи точный пролёт SMC, он пересёкся           */
+    HB_INVAL_EV_SPAN_HIT,      /* верхняя оценка; точный пролёт из IR ПЕРЕСЁКСЯ       */
+    HB_INVAL_EV_SPAN_MISS,     /* верхняя оценка; точный пролёт НЕ пересёкся (сосед)  */
+    HB_INVAL_EV_SPAN_UNKNOWN,  /* верхняя оценка; точного пролёта нет (сплав, чужой IR) */
+    HB_INVAL_EV_N
+};
+static __thread uint64_t t_inval_ev[HB_INVAL_EV_N];
+static __thread uint64_t t_inval_calls, t_inval_bytes;
+
+/* Вид объявления, приведшего к сбросу (номер события адаптера: 0 flush, 1 dirty, 2 map, 3 alloc,
+ * 4 protect, 5 free, 6 unmap, 7 read). 14 — полная чистка по переполнению кольца, 15 — неизвестно
+ * (старый вход без вида). Учёт по видам: объявлений, полных (на всё пространство), байт, выселено. */
+#define HB_INVAL_WHY_N 16u
+#define HB_INVAL_WHY_OVERFLOW 14u
+#define HB_INVAL_WHY_UNKNOWN 15u
+static __thread uint32_t t_inval_cur_why = HB_INVAL_WHY_UNKNOWN;
+static __thread uint64_t t_inval_w_calls[HB_INVAL_WHY_N], t_inval_w_full[HB_INVAL_WHY_N];
+static __thread uint64_t t_inval_w_bytes[HB_INVAL_WHY_N], t_inval_w_ev[HB_INVAL_WHY_N];
+static __thread uint64_t t_inval_w_ticks[HB_INVAL_WHY_N];   /* время перебора (mach-тики) */
+
+/* ═══ ГДЕ ЕСТЬ ПЕРЕВЕДЁННЫЙ КОД — уровень 4 для пустых сбросов (Opus 26.09.2026) ═══
+ *
+ * ЗАМЕРЕНО (HK, 507, основной поток): объявления выделения (812 шт., 9 ГБ), смены прав (666),
+ * сброса кеша команд (498) и освобождения (48) НЕ выселили ни одного блока, но каждое обошло
+ * все занятые ячейки кеша: 0,74 + 0,56 + 0,40 + 0,04 = 1,7 с перебора впустую за прогон.
+ *
+ * Уровень 3 — обходить быстрее. Уровень 4 — не обходить: держим множество участков по 64 КБ,
+ * в которых начинается хоть один переведённый блок (или лежит его пролёт SMC). Если окно сброса
+ * [start - HB_INVAL_MAX_BLOCK, end) не задевает ни одного участка, перебор не выселил бы
+ * ничего — по тому же правилу, что в самом переборе, — и его нет.
+ *
+ * Отметки только добавляются (выселение участок не снимает): лишняя отметка стоит лишнего
+ * перебора, пропущенной быть не может. Чистка — вместе со сбросом кеша среды. Гейт
+ * MACRUNNER_HB_INVAL_SKIP_EMPTY, умолчание 0 до замера. */
+#define HB_GRANULE_SHIFT 16u
+struct hb_code_granules {
+    uint64_t* slot;       /* номер участка + 1; 0 — пусто */
+    uint32_t cap;         /* степень двойки */
+    uint32_t n;
+};
+static __thread uint64_t t_inval_skipped[16];
+
+static int inval_skip_empty_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = hb_gate_flag( HB_GATE_HB_INVAL_SKIP_EMPTY, 0 );
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_INVAL_SKIP_EMPTY=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+
+static inline uint32_t granule_home(uint64_t g, uint32_t cap) {
+    return (uint32_t)((g * 0x9E3779B97F4A7C15ull) >> 32) & (cap - 1u);
+}
+
+static bool granules_insert_raw(struct hb_code_granules* cg, uint64_t g) {
+    uint32_t i = granule_home(g, cg->cap), k;
+    for (k = 0; k < cg->cap; k++, i = (i + 1u) & (cg->cap - 1u)) {
+        if (cg->slot[i] == g + 1u) return false;
+        if (!cg->slot[i]) { cg->slot[i] = g + 1u; cg->n++; return true; }
+    }
+    return false;
+}
+
+static void code_granules_mark(hb_jit_runtime_t* rt, uint64_t lo, uint64_t hi) {
+    struct hb_code_granules* cg;
+    uint64_t g, g_hi;
+    if (!rt || hi <= lo || !inval_skip_empty_enabled()) return;
+    cg = rt->code_granules;
+    if (!cg) {
+        cg = (struct hb_code_granules*)calloc(1, sizeof(*cg));
+        if (!cg) return;
+        cg->cap = 4096u;
+        cg->slot = (uint64_t*)calloc(cg->cap, sizeof(uint64_t));
+        if (!cg->slot) { free(cg); return; }
+        rt->code_granules = cg;
+    }
+    g_hi = (hi - 1u) >> HB_GRANULE_SHIFT;
+    for (g = lo >> HB_GRANULE_SHIFT; g <= g_hi; g++) {
+        if ((cg->n + 1u) * 2u > cg->cap) {
+            /* Рост вдвое с перекладкой. Не вышло — множество выбрасывается целиком, и сбросы
+             * снова перебирают всё: ошибаемся в сторону лишней работы, не пропуска. */
+            uint32_t oc = cg->cap, j;
+            uint64_t* os = cg->slot;
+            uint64_t* ns = (uint64_t*)calloc((size_t)oc * 2u, sizeof(uint64_t));
+            if (!ns) { free(os); free(cg); rt->code_granules = NULL; return; }
+            cg->slot = ns; cg->cap = oc * 2u; cg->n = 0;
+            for (j = 0; j < oc; j++) if (os[j]) (void)granules_insert_raw(cg, os[j] - 1u);
+            free(os);
+        }
+        (void)granules_insert_raw(cg, g);
+    }
+}
+
+/* Задевает ли [lo, hi] (включительно) хоть один отмеченный участок. Нет множества — «да». */
+static bool code_granules_hit(const struct hb_code_granules* cg, uint64_t lo, uint64_t hi) {
+    uint64_t g_lo, g_hi, g;
+    uint32_t i;
+    if (!cg) return true;
+    g_lo = lo >> HB_GRANULE_SHIFT;
+    g_hi = hi >> HB_GRANULE_SHIFT;
+    if (g_hi - g_lo < 4096u) {
+        for (g = g_lo; g <= g_hi; g++) {
+            uint32_t k, p = granule_home(g, cg->cap);
+            for (k = 0; k < cg->cap; k++, p = (p + 1u) & (cg->cap - 1u)) {
+                if (!cg->slot[p]) break;
+                if (cg->slot[p] == g + 1u) return true;
+            }
+        }
+        return false;
+    }
+    for (i = 0; i < cg->cap; i++)
+        if (cg->slot[i] && cg->slot[i] - 1u >= g_lo && cg->slot[i] - 1u <= g_hi) return true;
+    return false;
+}
+
+static void code_granules_forget(hb_jit_runtime_t* rt) {
+    if (!rt || !rt->code_granules) return;
+    memset(rt->code_granules->slot, 0, (size_t)rt->code_granules->cap * sizeof(uint64_t));
+    rt->code_granules->n = 0;
+}
+
+static void code_granules_destroy(hb_jit_runtime_t* rt) {
+    if (!rt || !rt->code_granules) return;
+    free(rt->code_granules->slot);
+    free(rt->code_granules);
+    rt->code_granules = NULL;
+}
+
+static void inval_why_print(const char* reason) {
+    static const char* const imya[HB_INVAL_WHY_N] = {
+        "flush", "dirty", "map", "alloc", "protect", "free", "unmap", "read",
+        "w8", "w9", "w10", "w11", "w12", "w13", "overflow", "unknown"
+    };
+    mach_timebase_info_data_t tb;
+    uint32_t k;
+    mach_timebase_info(&tb);
+    fprintf(stderr, "macrunner-hb-inval-why: reason=%s tid=%p", reason ? reason : "?",
+            (void*)pthread_self());
+    for (k = 0; k < HB_INVAL_WHY_N; k++) {
+        if (!t_inval_w_calls[k]) continue;
+        fprintf(stderr, " %s=%llu/full%llu/%lluB/ev%llu/skip%llu/%.1fms", imya[k],
+                (unsigned long long)t_inval_w_calls[k], (unsigned long long)t_inval_w_full[k],
+                (unsigned long long)t_inval_w_bytes[k], (unsigned long long)t_inval_w_ev[k],
+                (unsigned long long)t_inval_skipped[k],
+                (double)t_inval_w_ticks[k] * (double)tb.numer / (double)(tb.denom ? tb.denom : 1) / 1e6);
+    }
+    fprintf(stderr, "\n");
+    fflush(stderr);
+}
+static int inval_precise_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = hb_gate_flag( HB_GATE_HB_INVAL_PRECISE, 0 );
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_INVAL_PRECISE=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+
+/* Opus 26.09.2026 — НАДГРОБИЕ ВМЕСТО ДЫРЫ (гейт MACRUNNER_HB_CACHE_TOMBS, умолчание 0 до замера).
+ *
+ * Кеш блоков — линейное пробирование, а выселение обнуляло слот. Цепочка рвалась: поиск
+ * останавливался на дыре и промахивался, блок переводился ЗАНОВО и ложился в дыру, а прежняя
+ * запись оставалась valid, недостижимой и со своим кодом в арене («зомби»). Это и лишний
+ * перевод (работа, которой не должно быть), и место в арене, которое не вернуть: зомби живой.
+ *
+ * Надгробие — невалидный слот с guest_addr = HB_BLOCK_TOMB. Поиск идёт через него дальше;
+ * вставка занимает первое надгробие цепочки, но только ДОЙДЯ до пустого слота и убедившись,
+ * что адреса в цепочке нет. Чтение надгробий безвредно и без гейта: выключенный гейт их просто
+ * не ставит, и все невалидные слоты — прежние дыры с нулевым адресом. */
+#define HB_BLOCK_TOMB UINT64_MAX
+static int cache_tombs_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = hb_gate_flag( HB_GATE_HB_CACHE_TOMBS, 0 );
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_CACHE_TOMBS=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+
+/* Возврат мёртвого места арены — определения рядом с jit_commit_blob. */
+struct hb_arena_reclaim;
+static void arena_quarantine_body(hb_jit_runtime_t* rt, uint8_t* body, size_t native_size,
+                                  uint8_t* in_tramp);
+static void arena_reclaim_forget(hb_jit_runtime_t* rt);
 static void trace_jit_code_cache_full_once(hb_jit_runtime_t* rt,
                                            const char* reason,
                                            size_t needed);
@@ -1458,6 +1680,10 @@ static hb_ir_block_t* block_clone_for_cache(const hb_ir_block_t* block) {
      * on first use. Cached blocks are the ones the dispatcher actually sees, so getting this wrong
      * would be invisible in translation and wrong at run time. */
     copy->first_transfer_idx = block->first_transfer_idx;
+    copy->exec_unit_valid = block->exec_unit_valid;
+    copy->exec_unit_pc = block->exec_unit_pc;
+    copy->exec_unit_size = block->exec_unit_size;
+    copy->exec_unit_transfer = block->exec_unit_transfer;
     return copy;
 }
 
@@ -2215,6 +2441,8 @@ static void block_cache_reset(hb_block_cache_t* cache) {
     {
         uint64_t zhivyh = (uint64_t)cache->count;
         uint64_t bylo;
+        t_death[HB_DEATH_RESET] += zhivyh;   /* перепись арены: снесено сбросом */
+        t_cache_resets++;
         cache->reset_gen++;
         __atomic_add_fetch(&g_reset_events, 1, __ATOMIC_RELAXED);
         __atomic_add_fetch(&g_reset_entries, zhivyh, __ATOMIC_RELAXED);
@@ -2398,7 +2626,10 @@ static hb_block_cache_entry_t* block_cache_find(hb_block_cache_t* cache, uint64_
                 size_t j, base = block_cache_hash(addr);
                 for (j = 0; j < cache->size; j++) {
                     size_t probe = (base + j) & cache->size_mask;
-                    if (!cache->entries[probe].valid) break;
+                    if (!cache->entries[probe].valid) {
+                        if (cache->entries[probe].guest_addr == HB_BLOCK_TOMB) continue;
+                        break;
+                    }
                     if (cache->entries[probe].guest_addr == addr) {
                         truth = &cache->entries[probe];
                         break;
@@ -2430,7 +2661,10 @@ static hb_block_cache_entry_t* block_cache_find(hb_block_cache_t* cache, uint64_
     size_t idx = block_cache_hash(addr);
     for (size_t i = 0; i < cache->size; i++) {
         size_t probe = (idx + i) & cache->size_mask;
-        if (!cache->entries[probe].valid) break;
+        if (!cache->entries[probe].valid) {
+            if (cache->entries[probe].guest_addr == HB_BLOCK_TOMB) continue;  /* надгробие */
+            break;
+        }
         if (cache->entries[probe].guest_addr == addr) {
             if (cache->l1) {
                 hb_block_l1_slot_t* s = &cache->l1[l1_index(addr, cache->l1_mask)];
@@ -2624,9 +2858,35 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
                     (unsigned long long)addr);
         }
     }
+    size_t first_tomb = SIZE_MAX;
     for (size_t i = 0; i < cache->size; i++) {
         size_t probe = (idx + i) & cache->size_mask;
+        if (!cache->entries[probe].valid &&
+            cache->entries[probe].guest_addr == HB_BLOCK_TOMB) {
+            /* Надгробие: запомнить первое и идти дальше — адрес может стоять за ним. */
+            if (first_tomb == SIZE_MAX) first_tomb = probe;
+            continue;
+        }
         if (!cache->entries[probe].valid) {
+            /* Пустой слот — конец цепочки, адреса в ней нет. Занять первое надгробие,
+             * если оно было: цепочка короче, и дыры не появляется. */
+            if (first_tomb != SIZE_MAX) {
+                probe = first_tomb;
+                t_tomb_reused++;
+            }
+            /* Opus 26.09.2026 — перепись: нет ли ЗА этой дырой живой записи с тем же адресом.
+             * Выселение обнуляет слот (memset) и рвёт цепочку линейного пробирования: поиск
+             * останавливается на дыре, промахивается, блок переводится ЗАНОВО и ложится сюда,
+             * а прежняя запись остаётся valid, недостижимой и со своим кодом в арене — «зомби».
+             * Окно 64 слота: счёт — нижняя оценка. Только учёт. */
+            {
+                size_t zj;
+                for (zj = 1; zj <= 64; zj++) {
+                    const hb_block_cache_entry_t* z =
+                        &cache->entries[(probe + zj) & cache->size_mask];
+                    if (z->valid && z->guest_addr == addr) { t_zombie_created++; break; }
+                }
+            }
             cache->entries[probe].guest_addr = addr;
             cache->entries[probe].native_code = code;
             cache->entries[probe].native_size = size;
@@ -2668,6 +2928,12 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
             else
                 cache->used_overflow = true;  /* tracking full -> reset does the safe full memset */
             smc_track_entry(rt, &cache->entries[probe], block);
+            /* Участок, где начинается блок (и его пролёт SMC), — в множество кода. */
+            code_granules_mark(rt, addr, addr + 1u);
+            if (cache->entries[probe].smc_span_len)
+                code_granules_mark(rt, cache->entries[probe].smc_span_start,
+                                   cache->entries[probe].smc_span_start +
+                                   cache->entries[probe].smc_span_len);
             hb_contract_telemetry_record_translation(true);
             return &cache->entries[probe];
         }
@@ -2681,6 +2947,16 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
              * повторный выпуск ОДНОЙ И ТОЙ ЖЕ версии блока, то есть работу,
              * которой могло не быть вовсе. */
             uint64_t staryj_otpechatok = cache->entries[probe].smc_hash;
+            /* Opus 26.09.2026 — прежнее тело и его входной трамплин запоминаются ДО снятия
+             * сшивки: после неё мета обнулена, и проверить отзыв было бы нечем. */
+            uint8_t* staroe_telo = cache->entries[probe].native_code;
+            size_t staryj_razmer = cache->entries[probe].native_size;
+            uint8_t* staryj_tramplin = NULL;
+            {
+                const hb_block_chain_meta_t* sm =
+                    block_cache_chain_meta_const(cache, &cache->entries[probe]);
+                if (sm) staryj_tramplin = sm->in_trampoline;
+            }
             HB_PROBE_SAY(&pr_retranslate, "guest=0x%llx старое_тело=%p новое=%p\n",
                          (unsigned long long)addr,
                          (const void*)cache->entries[probe].native_code, (const void*)code);
@@ -2705,6 +2981,12 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
             cache->entries[probe].owns_block = owns_block || keep_existing_owner;
             cache->entries[probe].fused = fused;
             smc_track_entry(rt, &cache->entries[probe], block);
+            /* Участок, где начинается блок (и его пролёт SMC), — в множество кода. */
+            code_granules_mark(rt, addr, addr + 1u);
+            if (cache->entries[probe].smc_span_len)
+                code_granules_mark(rt, cache->entries[probe].smc_span_start,
+                                   cache->entries[probe].smc_span_start +
+                                   cache->entries[probe].smc_span_len);
             /* Отпечаток НОВОГО тела уже проставлен smc_track_entry. Ноль с любой из
              * сторон означает «блок не отслеживается» — такой случай в счёт не идёт
              * вовсе, иначе неотслеженные попали бы в «байты те же» и завысили долю. */
@@ -2713,6 +2995,17 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
                 __atomic_add_fetch(staryj_otpechatok == cache->entries[probe].smc_hash
                                        ? &g_retrans_same_bytes : &g_retrans_diff_bytes,
                                    1, __ATOMIC_RELAXED);
+            /* Перепись арены: причина смерти прежнего тела — безусловно, по отпечаткам. */
+            if (!staryj_otpechatok || !cache->entries[probe].smc_hash)
+                t_death[HB_DEATH_RETRANS_UNTRACKED]++;
+            else if (staryj_otpechatok == cache->entries[probe].smc_hash)
+                t_death[HB_DEATH_RETRANS_SAME]++;
+            else
+                t_death[HB_DEATH_RETRANS_DIFF]++;
+            /* Прежнее тело мертво: запись смотрит в новое. В карантин — если его никто
+             * больше не достигнет (проверка трамплина внутри). */
+            if (staroe_telo && staroe_telo != code)
+                arena_quarantine_body(rt, staroe_telo, staryj_razmer, staryj_tramplin);
             /* ★★★ 07.09.2026, лейн ПОВТОРНЫЙ-ВЫПУСК — ПРАВИЛЬНОСТЬ: ГАСИТЬ КЕШ КОСВЕННЫХ.
              *
              * Дефект назван лейном СЦЕПЛЕНИЕ и им же оставлен нетронутым: из ТРЁХ путей,
@@ -2877,8 +3170,12 @@ static int runtime_env_enabled_default_on(const char* name) {
  * (reports/сцепление/ГЕЙТ-x64-СНЯТ-05.09.2026.md).
  *
  * ВНИМАНИЕ вызывающим: MACRUNNER_HB_BLOCK_CHAIN относится ТОЛЬКО к i386. */
+/* Claude 26.09 (бит 1024, ОПЫТ): выключить сцепку x64 — проверка гипотезы о приостановке потока. */
+static bool g_chain_x64_disabled;
+void hb_runtime_set_chain_x64_disabled(bool on) { g_chain_x64_disabled = on; }
+
 static int runtime_block_chain_enabled_for(hb_arch_t arch) {
-    if (arch != HB_ARCH_X86) return 1;   /* x64 — безусловно, разбор выше */
+    if (arch != HB_ARCH_X86) return !g_chain_x64_disabled;   /* x64 — безусловно, разбор выше */
     {
         const char* v = hb_gate( HB_GATE_HB_BLOCK_CHAIN );
         if (v && *v) return *v != '0';
@@ -3695,6 +3992,7 @@ extern void     hb_jit_helper_store_sized(hb_context_t* ctx, uint64_t addr,
 extern void     hb_jit_helper_store_u128(hb_context_t* ctx, uint64_t addr,
                                          uint64_t lo, uint64_t hi);
 extern void     hb_jit_helper_xgetbv(hb_context_t* ctx);
+extern void     hb_jit_helper_keep_cf(hb_context_t* ctx);
 
 static void* helper_addr_for_cache_id(uint8_t id) {
     switch (id) {
@@ -3758,12 +4056,13 @@ static void* helper_addr_for_cache_id(uint8_t id) {
         case 53: return (void*)hb_jit_helper_store_sized;
         case 54: return (void*)hb_jit_helper_store_u128;
         case 55: return (void*)hb_jit_helper_xgetbv;
+        case 56: return (void*)hb_jit_helper_keep_cf;   /* Claude 25.09 */
         default: return NULL;
     }
 }
 
 static uint8_t helper_cache_id_for_addr(uint64_t addr) {
-    for (uint8_t id = 1; id <= 55; id++) {
+    for (uint8_t id = 1; id <= 56; id++) {
         if ((uintptr_t)helper_addr_for_cache_id(id) == (uintptr_t)addr) return id;
     }
     return 0;
@@ -3775,7 +4074,7 @@ unsigned hb_runtime_helper_id_for_addr(uint64_t addr) {
 
 void hb_runtime_fill_helper_table(void** table, unsigned slots) {
     if (!table) return;
-    for (unsigned id = 1; id <= 55u && id < slots; id++)
+    for (unsigned id = 1; id <= 56u && id < slots; id++)
         table[id] = helper_addr_for_cache_id((uint8_t)id);
 }
 
@@ -4810,10 +5109,44 @@ extern int      hb_smc_arm_page(void* host_addr);
 extern uint32_t hb_smc_page_generation(uint64_t host_addr);
 extern int      hb_smc_query_prot(uint64_t host_addr);
 
+/* Claude 25.09 — отпечаток SMC словами по 8 байт в четыре независимые дорожки.
+ *
+ * Прежний FNV-1a шёл по ОДНОМУ байту с цепочкой умножений: на охвате функции до 4 КБ это
+ * ~16 тыс. тактов на КАЖДЫЙ вход через диспетчер (профиль HK на экране языка: 74 % главного
+ * потока в smc_reverify_entry). Отпечаток живёт только в памяти (на диск не пишется), поэтому
+ * функцию можно менять без миграции.
+ *
+ * Гарантия не слабее прежней: шаг дорожки `rotl(s ^ w*K2, 31) * K1` обратим и по слову, и по
+ * состоянию (K1, K2 нечётные), дорожки сводятся xor-ом, финал fmix64 обратим. Значит изменение
+ * ЛЮБОГО одного 8-байтного слова (в том числе одного байта) меняет отпечаток всегда, а не
+ * «с вероятностью»; длина входит в затравку. Имя функции прежнее — вызывающие не меняются. */
+static inline uint64_t smc_rotl(uint64_t x, unsigned r) { return (x << r) | (x >> (64 - r)); }
+
 static uint64_t smc_fnv1a(const uint8_t* p, size_t n) {
-    uint64_t h = 1469598103934665603ULL;
-    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ULL; }
-    return h;
+    const uint64_t k1 = 0x9e3779b97f4a7c15ULL, k2 = 0xc2b2ae3d27d4eb4fULL;
+    uint64_t a = k1 ^ (uint64_t)n, b = k2, c = k1 * 3u, d = k2 * 5u, w0, w1, w2, w3, t = 0;
+    size_t i = 0;
+    for (; i + 32 <= n; i += 32) {
+        memcpy(&w0, p + i, 8); memcpy(&w1, p + i + 8, 8);
+        memcpy(&w2, p + i + 16, 8); memcpy(&w3, p + i + 24, 8);
+        a = smc_rotl(a ^ (w0 * k2), 31) * k1;
+        b = smc_rotl(b ^ (w1 * k2), 31) * k1;
+        c = smc_rotl(c ^ (w2 * k2), 31) * k1;
+        d = smc_rotl(d ^ (w3 * k2), 31) * k1;
+    }
+    for (; i + 8 <= n; i += 8) {
+        memcpy(&w0, p + i, 8);
+        a = smc_rotl(a ^ (w0 * k2), 31) * k1;
+    }
+    if (i < n) {
+        memcpy(&t, p + i, n - i);
+        b = smc_rotl(b ^ (t * k2), 31) * k1;
+    }
+    a ^= smc_rotl(b, 17) ^ smc_rotl(c, 29) ^ smc_rotl(d, 43);
+    a ^= a >> 33; a *= 0xff51afd7ed558ccdULL;
+    a ^= a >> 33; a *= 0xc4ceb9fe1a85ec53ULL;
+    a ^= a >> 33;
+    return a ? a : 1;   /* 0 у вызывающих значит «не прочитано» */
 }
 
 static uint64_t g_smc_tracked, g_smc_reverified, g_smc_evicted, g_smc_unreadable;
@@ -4906,6 +5239,9 @@ static void smc_track_entry(hb_jit_runtime_t* rt, hb_block_cache_entry_t* entry,
     entry->smc_span_len = 0;
     if (!rt || !rt->ctx || !rt->ctx->memory || !block)
         return;
+    /* EXEC callers supply a freshly decoded unit on every invocation. Reading
+     * or protecting guest bytes here would precede its permission observer. */
+    if (rt->ctx->exec_access) return;
     if (!block_guest_span(block, &start, &len)) return;
     /* ★ 2026-09-03 (kan-27): отпечаток по ВСЕЙ поднятой функции. Хронология kan-27: патчуемый `call` Storm SCode
      * лежит в блоке без своей записи кеша (проваливание внутри функции 0x64600cc), его байты не хешировались никогда,
@@ -5501,10 +5837,22 @@ void hb_jit_guest_pc_stats(uint64_t* calls, uint64_t* exact, uint64_t* approx,
  * интерпретатора. */
 
 static void block_cache_evict_entry(hb_jit_runtime_t* rt, hb_block_cache_t* cache,
-                                    hb_block_cache_entry_t* entry) {
+                                    hb_block_cache_entry_t* entry, int why) {
     size_t idx;
+    uint8_t* telo;
+    size_t razmer;
+    uint8_t* tramplin = NULL;
     if (!cache || !entry || !entry->valid) return;
     idx = block_cache_entry_index(cache, entry);
+    /* Opus 26.09.2026 — тело и входной трамплин запоминаются ДО снятия сшивки (после неё
+     * мета обнулена), причина смерти ставится местом вызова. */
+    telo = entry->native_code;
+    razmer = entry->native_size;
+    {
+        const hb_block_chain_meta_t* m = block_cache_chain_meta_const(cache, entry);
+        if (m) tramplin = m->in_trampoline;
+    }
+    if (why >= 0 && why < HB_DEATH_N) t_death[why]++;
     /* ПРИЧИНА ВЫСЕЛЕНИЯ: сброс по гостевому диапазону — самоизменяемый код и переход
      * страницы RW->RX. Это выселение по СМЕНЕ СОДЕРЖИМОГО, в отличие от повторного
      * перевода того же адреса выше. */
@@ -5515,9 +5863,15 @@ static void block_cache_evict_entry(hb_jit_runtime_t* rt, hb_block_cache_t* cach
     block_cache_release_owned_block(entry, NULL);
     ripmap_release(entry);
     memset(entry, 0, sizeof(*entry));
+    /* Надгробие вместо дыры — цепочка пробирования не рвётся (см. HB_BLOCK_TOMB). */
+    if (cache_tombs_enabled()) {
+        entry->guest_addr = HB_BLOCK_TOMB;
+        t_tomb_made++;
+    }
     if (cache->chain_meta && idx != SIZE_MAX)
         memset(&cache->chain_meta[idx], 0, sizeof(cache->chain_meta[idx]));
     if (cache->count) cache->count--;
+    if (telo) arena_quarantine_body(rt, telo, razmer, tramplin);
 }
 
 /* ★★★ MacRunner 2026-08-15, лейн ЛЕСТНИЦА, итерация 987 — СБРОС ТРАНСЛЯЦИЙ ПО ГОСТЕВОМУ
@@ -5592,17 +5946,87 @@ uint64_t hb_jit_invalidate_guest_range(hb_jit_runtime_t* rt, uint64_t start, uin
     }
     cache = rt->block_cache;
     if (!cache || !cache->entries) return 0;
-    for (i = 0; i < cache->size; i++) {
-        hb_block_cache_entry_t* e = &cache->entries[i];
-        uint64_t e_start, e_end;
-        if (!e->valid) continue;
-        e_start = e->smc_span_len ? e->smc_span_start : e->guest_addr;
-        e_end   = e->smc_span_len ? e_start + e->smc_span_len : e_start + 1;
-        if (e_end <= start || e_start >= end) continue;
-        block_cache_evict_entry(rt, cache, e);
-        dropped++;
+    t_inval_calls++;
+    uint64_t t_inval_t0 = mach_absolute_time();
+    {
+        uint32_t w = t_inval_cur_why < HB_INVAL_WHY_N ? t_inval_cur_why : HB_INVAL_WHY_UNKNOWN;
+        t_inval_w_calls[w]++;
+        if (len >= (1ull << 47)) t_inval_w_full[w]++;   /* объявлено «всё пространство» */
+        else { t_inval_w_bytes[w] += len; t_inval_bytes += len; }
+    }
+    /* ★ Claude, 25.09.2026 — УЗКИЙ СБРОС БЕЗ ПРОПУСКОВ.
+     *
+     * Раньше у записи без отпечатка SMC был известен лишь ПЕРВЫЙ байт (guest_addr), поэтому
+     * адаптер объявлял сброс ВСЕГО адресного пространства на каждое уведомление Wine — узкий
+     * диапазон мог пропустить блок, начатый левее и заходящий внутрь. Замер HK (быстрый режим):
+     * 600 сбросов за 75 с выбросили 301 799 готовых блоков — всё переводилось заново.
+     *
+     * Теперь для такой записи берётся ВЕРХНЯЯ ОЦЕНКА её байтов: блок не длиннее окна подъёма
+     * (4096 байт + хвост последней команды), поэтому [guest_addr, guest_addr + HB_INVAL_MAX_BLOCK)
+     * накрывает все его байты. Лишнее выселение возможно, пропуск — нет.
+     *
+     * И перебор идёт по ЗАНЯТЫМ ячейкам (used_slots), а не по всей таблице в 524 288 записей:
+     * при частых узких сбросах полный проход сам становился статьёй. */
+#define HB_INVAL_MAX_BLOCK 8192u
+    {
+        uint64_t lo = start > HB_INVAL_MAX_BLOCK ? start - HB_INVAL_MAX_BLOCK : 0;
+        size_t n = cache->used_overflow ? cache->size : cache->used_count;
+        /* Окно без переведённого кода — перебор не выселил бы ничего; его нет (см. участки). */
+        if (len < (1ull << 47) && end > start && inval_skip_empty_enabled() && rt->code_granules &&
+            !code_granules_hit(rt->code_granules, lo, end - 1u)) {
+            t_inval_skipped[t_inval_cur_why < 16u ? t_inval_cur_why : 15u]++;
+            n = 0;
+        }
+        for (i = 0; i < n; i++) {
+            hb_block_cache_entry_t* e = cache->used_overflow ? &cache->entries[i]
+                                                             : &cache->entries[cache->used_slots[i]];
+            uint64_t e_start, e_end;
+            if (!e->valid) continue;
+            if (e->smc_span_len) {
+                e_start = e->smc_span_start;
+                e_end = e_start + e->smc_span_len;
+                if (e_end <= start || e_start >= end) continue;
+                t_inval_ev[HB_INVAL_EV_SMC_SPAN]++;
+            } else {
+                e_start = e->guest_addr;
+                if (e_start < lo || e_start >= end) continue;
+                /* Opus 26.09.2026 — ТОЧНЫЙ ПРОЛЁТ ВМЕСТО ВЕРХНЕЙ ОЦЕНКИ (уровень 4 для сброса).
+                 *
+                 * Перепись 26.09: 191 114 из 209 499 смертей тел — этот сброс. Верхняя оценка
+                 * [guest_addr, +8 КиБ) выселяет и СОСЕДЕЙ: Mono кладёт методы подряд, и каждый
+                 * новый метод, объявленный Wine к сбросу, выселяет уже переведённые методы слева.
+                 * Их байты не менялись — выселение, повторный перевод и мёртвый код лишние.
+                 *
+                 * Точный пролёт берётся из IR записи (block_guest_span: байты всех исполняемых
+                 * команд блока) — ТОЛЬКО когда IR принадлежит записи (owns_block) и запись не
+                 * сплав: сплав покрывает байты нескольких блоков, а чужой IR мог уже умереть.
+                 * В остальных случаях — прежняя верхняя оценка. Счёт ведётся всегда; пропуск
+                 * выселения — под гейтом MACRUNNER_HB_INVAL_PRECISE (умолчание 0 до замера). */
+                {
+                    uint64_t bs = 0;
+                    size_t bl = 0;
+                    if (e->owns_block && !e->fused && e->block &&
+                        block_guest_span((const hb_ir_block_t*)e->block, &bs, &bl)) {
+                        if (bs + bl <= start || bs >= end) {
+                            t_inval_ev[HB_INVAL_EV_SPAN_MISS]++;
+                            if (inval_precise_enabled()) continue;
+                        } else {
+                            t_inval_ev[HB_INVAL_EV_SPAN_HIT]++;
+                        }
+                    } else {
+                        t_inval_ev[HB_INVAL_EV_SPAN_UNKNOWN]++;
+                    }
+                }
+            }
+            block_cache_evict_entry(rt, cache, e, HB_DEATH_RANGE);
+            dropped++;
+        }
     }
     __atomic_add_fetch(&g_inval_calls, 1, __ATOMIC_RELAXED);
+    t_inval_w_ev[t_inval_cur_why < HB_INVAL_WHY_N ? t_inval_cur_why : HB_INVAL_WHY_UNKNOWN] += dropped;
+    t_inval_w_ticks[t_inval_cur_why < HB_INVAL_WHY_N ? t_inval_cur_why : HB_INVAL_WHY_UNKNOWN] +=
+        mach_absolute_time() - t_inval_t0;
+    if ((t_inval_calls & 511u) == 0) inval_why_print("period512");
     if (dropped) {
         uint32_t i;
         __atomic_add_fetch(&g_inval_dropped, dropped, __ATOMIC_RELAXED);
@@ -5674,7 +6098,7 @@ uint64_t hb_jit_invalidate_guest_range(hb_jit_runtime_t* rt, uint64_t start, uin
  * устаревших блоках), объявление не применит. У FEX это закрыто снятием входящих связей из
  * чужого потока под замком; у нас — открытый пункт (см. reports/correctness-followups.md). */
 #define HB_INVAL_RING 256u
-typedef struct { uint64_t start; uint64_t len; } hb_inval_zapis_t;
+typedef struct { uint64_t start; uint64_t len; uint32_t why; } hb_inval_zapis_t;
 static hb_inval_zapis_t g_inval_ring[HB_INVAL_RING];
 static uint64_t g_inval_seq;               /* сколько объявлений сделано; читается acquire */
 static pthread_mutex_t g_inval_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -5686,15 +6110,18 @@ void hb_jit_inval_all_stats(uint64_t* calls, uint64_t* applied, uint64_t* overfl
     if (overflow_clears) *overflow_clears = __atomic_load_n(&g_inval_all_overflow, __ATOMIC_RELAXED);
 }
 
-uint64_t hb_jit_invalidate_guest_range_all(hb_jit_runtime_t* self, uint64_t start, uint64_t len) {
+uint64_t hb_jit_invalidate_guest_range_all_why(hb_jit_runtime_t* self, uint64_t start, uint64_t len,
+                                               uint32_t why) {
     uint64_t dropped = 0;
     if (!len) return 0;
+    if (why >= HB_INVAL_WHY_N) why = HB_INVAL_WHY_UNKNOWN;
     __atomic_add_fetch(&g_inval_all_calls, 1, __ATOMIC_RELAXED);
     pthread_mutex_lock(&g_inval_lock);
     {
         uint64_t seq = g_inval_seq;
         g_inval_ring[seq % HB_INVAL_RING].start = start;
         g_inval_ring[seq % HB_INVAL_RING].len = len;
+        g_inval_ring[seq % HB_INVAL_RING].why = why;
         __atomic_store_n(&g_inval_seq, seq + 1, __ATOMIC_RELEASE);
     }
     pthread_mutex_unlock(&g_inval_lock);
@@ -5702,9 +6129,15 @@ uint64_t hb_jit_invalidate_guest_range_all(hb_jit_runtime_t* self, uint64_t star
         /* Своя среда — сразу, и это же объявление ей уже не нужно. Порядок важен: сперва
          * кольцо, потом выселение, чтобы `inval_seen` не обогнал объявления, сделанные другими
          * между этими двумя шагами (они применятся обычным путём). */
+        t_inval_cur_why = why;
         dropped = hb_jit_invalidate_guest_range(self, start, len);
+        t_inval_cur_why = HB_INVAL_WHY_UNKNOWN;
     }
     return dropped;
+}
+
+uint64_t hb_jit_invalidate_guest_range_all(hb_jit_runtime_t* self, uint64_t start, uint64_t len) {
+    return hb_jit_invalidate_guest_range_all_why(self, start, len, HB_INVAL_WHY_UNKNOWN);
 }
 
 static void runtime_apply_pending_inval(hb_jit_runtime_t* rt) {
@@ -5717,7 +6150,9 @@ static void runtime_apply_pending_inval(hb_jit_runtime_t* rt) {
         /* отстали — кольцо перезаписано; чистим всё своё */
         __atomic_add_fetch(&g_inval_all_overflow, 1, __ATOMIC_RELAXED);
         rt->inval_seen = seq;
+        t_inval_cur_why = HB_INVAL_WHY_OVERFLOW;
         (void)hb_jit_invalidate_guest_range(rt, 0, ~0ull);
+        t_inval_cur_why = HB_INVAL_WHY_UNKNOWN;
         return;
     }
     /* Копия под замком: писатель мог бы перезаписать ячейку, пока мы её читаем. Событие редкое
@@ -5728,7 +6163,9 @@ static void runtime_apply_pending_inval(hb_jit_runtime_t* rt) {
         pthread_mutex_unlock(&g_inval_lock);
         __atomic_add_fetch(&g_inval_all_overflow, 1, __ATOMIC_RELAXED);
         rt->inval_seen = seq;
+        t_inval_cur_why = HB_INVAL_WHY_OVERFLOW;
         (void)hb_jit_invalidate_guest_range(rt, 0, ~0ull);
+        t_inval_cur_why = HB_INVAL_WHY_UNKNOWN;
         return;
     }
     n = seq - seen;
@@ -5736,9 +6173,11 @@ static void runtime_apply_pending_inval(hb_jit_runtime_t* rt) {
     pthread_mutex_unlock(&g_inval_lock);
     rt->inval_seen = seq;
     for (i = 0; i < n; i++) {
+        t_inval_cur_why = kopiya[i].why;
         (void)hb_jit_invalidate_guest_range(rt, kopiya[i].start, kopiya[i].len);
         __atomic_add_fetch(&g_inval_all_applied, 1, __ATOMIC_RELAXED);
     }
+    t_inval_cur_why = HB_INVAL_WHY_UNKNOWN;
 }
 
 /* Returns the entry to dispatch, or NULL when the cached translation no
@@ -5913,7 +6352,7 @@ static hb_block_cache_entry_t* smc_reverify_entry(hb_jit_runtime_t* rt,
                 (unsigned long long)entry->guest_addr, entry->smc_span_len,
                 (unsigned long long)entry->smc_hash, (unsigned long long)now,
                 (unsigned long long)g_smc_evicted, (unsigned long long)g_smc_reverified);
-    block_cache_evict_entry(rt, rt->block_cache, entry);
+    block_cache_evict_entry(rt, rt->block_cache, entry, HB_DEATH_SMC);
     if (evicted) *evicted = true;
     if (smc_time_gate && smc_t0) {
         static _Thread_local uint64_t такты, штук, период;
@@ -6220,6 +6659,13 @@ static unsigned persistent_cache_version(void) {
  * принимать на веру. Разные сочетания гейтов обязаны давать разные номера. */
 unsigned hb_runtime_persistent_cache_version(void) { return persistent_cache_version(); }
 
+/* Claude 25.09 (бит 256 быстрого режима): есть ли готовый перевод для входа pc. Адаптер тогда не
+ * копирует и не разбирает 4 КБ кода заново, а отдаёт пустую функцию: цикл исполнения сам идёт по
+ * кешу блоков и выходит на первом промахе. */
+bool hb_jit_runtime_has_block(hb_jit_runtime_t* rt, uint64_t pc) {
+    return rt && rt->block_cache && block_cache_find(rt->block_cache, pc) != NULL;
+}
+
 static hb_result_t persistent_cache_key_for_block(hb_jit_runtime_t* rt,
                                                   const hb_ir_block_t* block,
                                                   hb_cache_key_t* key) {
@@ -6277,13 +6723,349 @@ static hb_result_t persistent_cache_key_for_block(hb_jit_runtime_t* rt,
     return HB_OK;
 }
 
-static hb_result_t jit_commit_blob(hb_jit_runtime_t* rt, const uint8_t* code, size_t size,
-                                   uint8_t** out_dest) {
+/* Opus 26.09.2026 — счётчики для переписи арены (arena_census_print). Потоковые: среда JIT
+ * своя у каждого потока; обнуляются, когда арена перемотана (used == 0). Только учёт. */
+static __thread uint64_t t_arena_commit_n, t_arena_commit_bytes;
+static __thread int t_arena_half_said;
+static __thread uint64_t t_arena_fail_need;   /* размер, на котором защёлкнулось переполнение */
+static __thread uint64_t t_arena_flushes;     /* сбросов целиком в безопасной точке */
+
+/* ═══ ВОЗВРАТ МЁРТВОГО МЕСТА АРЕНЫ — УРОВЕНЬ 4 ДЛЯ ПЕРЕПОЛНЕНИЯ (Opus 26.09.2026) ═══
+ *
+ * ЧТО ИЗМЕРЕНО. HK, быстрый режим 507, полный диапазон: арена 128 МиБ заполнилась; живым кодом
+ * занято НЕ БОЛЕЕ 54 МБ, мёртвым НЕ МЕНЕЕ 72 МБ (54 %), записей в кеше 46 429 при 358 412
+ * занесениях. После переполнения code_cache_full защёлкнут навсегда, адаптер отдаёт гостю
+ * c000001d, и гость крутится в повторном разборе (стоп «бит 64»).
+ *
+ * Уровень 3 — «арена больше» или «сброс целиком по заполнению» (так делает FEX): статья дешевле
+ * или реже. Уровень 4 — мёртвое место перестаёт копиться: тело, которое больше никто не
+ * достигнет, возвращается в оборот, и арена держит ровно живой код.
+ *
+ * ПОЧЕМУ БЕЗОПАСНО — все пути в тело блока перечислены, и каждый закрыт:
+ *   1. поиск по кешу    — запись снята (valid=false) или смотрит уже в новое тело;
+ *   2. первый уровень   — хранит указатель на ЗАПИСЬ и сверяет её, а не код;
+ *   3. входной трамплин — литерал переведён на выход выселения; проверяется ЧТЕНИЕМ литерала,
+ *                         не переведён — тело НЕ отдаётся (место утекает, как и раньше);
+ *   4. щели сцепки      — ведут только в трамплины (patch_block_tail, slot2), не в тела;
+ *   5. кеш косвенных    — единственный сырой указатель на тело: слоты, смотрящие в
+ *                         возвращаемые куски, гасятся в безопасной точке ДО выдачи места;
+ *   6. стек хозяина     — отдача только в безопасной точке: вход в hb_jit_runtime_run,
+ *                         ВНЕШНИЙ на этом потоке (кадров выпущенного кода на стеке нет).
+ * Код арены исполняет только свой поток (среда JIT потоковая). Трамплины не возвращаются
+ * вовсе: на них смотрят заплаты чужих блоков.
+ *
+ * ГЕЙТ MACRUNNER_HB_ARENA_RECLAIM: 0 — как было; 1 — возврат, а если места нет и после него —
+ * сброс целиком; 2 — только сброс целиком (паритет с FEX, для сравнения рук). Умолчание 0. */
+typedef struct { uint64_t rx; uint64_t size; } hb_arena_chunk_t;
+
+#define HB_ARENA_CLASSES 257u              /* класс k — кусок k*16 байт, k = 1..256 (до 4 КиБ) */
+#define HB_ARENA_DRAIN_MIN (256u * 1024u)  /* отдавать пачкой: гашение слотов обходит их все */
+
+struct hb_arena_reclaim {
+    hb_arena_chunk_t* q; size_t q_n, q_cap; uint64_t q_bytes;            /* карантин */
+    uint64_t* f[HB_ARENA_CLASSES]; uint32_t f_n[HB_ARENA_CLASSES], f_cap[HB_ARENA_CLASSES];
+    hb_arena_chunk_t* big; size_t big_n, big_cap;                        /* > 4 КиБ */
+    uint64_t free_bytes;
+    uint64_t lo, hi;                                                     /* RX-границы арены */
+    uint64_t n_quar, b_quar, n_reuse, b_reuse, n_split, n_drain, n_ic, n_unsafe, n_foreign;
+};
+
+static int arena_reclaim_mode(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* v = hb_gate( HB_GATE_HB_ARENA_RECLAIM );
+        int m = (v && *v) ? atoi(v) : 0;
+        cached = (m == 1 || m == 2) ? m : 0;
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_ARENA_RECLAIM=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+
+static struct hb_arena_reclaim* arena_reclaim_get(hb_jit_runtime_t* rt) {
+    struct hb_arena_reclaim* ar;
+    if (!rt || !rt->jit_mem || !rt->jit_mem->executable) return NULL;
+    if (rt->arena_reclaim) return rt->arena_reclaim;
+    if (arena_reclaim_mode() != 1) return NULL;
+    ar = (struct hb_arena_reclaim*)calloc(1, sizeof(*ar));
+    if (!ar) return NULL;
+    ar->lo = (uint64_t)(uintptr_t)rt->jit_mem->executable;
+    ar->hi = ar->lo + rt->jit_mem->size;
+    rt->arena_reclaim = ar;
+    return ar;
+}
+
+static bool arena_chunk_push(hb_arena_chunk_t** v, size_t* n, size_t* cap,
+                             uint64_t rx, uint64_t size) {
+    if (*n >= *cap) {
+        size_t nc = *cap ? *cap * 2 : 1024;
+        hb_arena_chunk_t* nv = (hb_arena_chunk_t*)realloc(*v, nc * sizeof(**v));
+        if (!nv) return false;
+        *v = nv;
+        *cap = nc;
+    }
+    (*v)[*n].rx = rx;
+    (*v)[*n].size = size;
+    (*n)++;
+    return true;
+}
+
+/* Свободный кусок — в класс по размеру или в список крупных. Отказ памяти хозяина — утечка
+ * куска, не ошибка правильности. */
+static void arena_free_put(struct hb_arena_reclaim* ar, uint64_t rx, uint64_t size) {
+    if (!ar || !size) return;
+    if (size <= 4096u) {
+        uint32_t k = (uint32_t)(size >> 4);
+        if (ar->f_n[k] >= ar->f_cap[k]) {
+            uint32_t nc = ar->f_cap[k] ? ar->f_cap[k] * 2u : 256u;
+            uint64_t* nv = (uint64_t*)realloc(ar->f[k], (size_t)nc * sizeof(uint64_t));
+            if (!nv) return;
+            ar->f[k] = nv;
+            ar->f_cap[k] = nc;
+        }
+        ar->f[k][ar->f_n[k]++] = rx;
+    } else if (!arena_chunk_push(&ar->big, &ar->big_n, &ar->big_cap, rx, size)) {
+        return;
+    }
+    ar->free_bytes += size;
+}
+
+/* Есть ли кусок не меньше size — без изъятия (решение «снимать ли защёлку»). */
+static bool arena_free_can_fit(const struct hb_arena_reclaim* ar, uint64_t size) {
+    size_t i;
+    if (!ar || ar->free_bytes < size) return false;
+    if (size <= 4096u) {
+        uint32_t j;
+        for (j = (uint32_t)(size >> 4); j < HB_ARENA_CLASSES; j++)
+            if (ar->f_n[j]) return true;
+    }
+    for (i = 0; i < ar->big_n; i++)
+        if (ar->big[i].size >= size) return true;
+    return false;
+}
+
+/* Кусок не меньше size (кратно 16): точный класс, затем крупнее с расщеплением. Остаток от
+ * 64 байт возвращается в оборот; мельче — остаётся при выданном куске. */
+static bool arena_free_take(struct hb_arena_reclaim* ar, uint64_t size, uint64_t* out_rx) {
+    uint64_t rx = 0, got = 0;
+    if (!ar || !size || ar->free_bytes < size) return false;
+    if (size <= 4096u) {
+        uint32_t j;
+        for (j = (uint32_t)(size >> 4); j < HB_ARENA_CLASSES; j++) {
+            if (ar->f_n[j]) {
+                rx = ar->f[j][--ar->f_n[j]];
+                got = (uint64_t)j << 4;
+                break;
+            }
+        }
+    }
+    if (!got) {
+        size_t i;
+        for (i = 0; i < ar->big_n; i++) {
+            if (ar->big[i].size >= size) {
+                rx = ar->big[i].rx;
+                got = ar->big[i].size;
+                ar->big[i] = ar->big[--ar->big_n];
+                break;
+            }
+        }
+    }
+    if (!got) return false;
+    ar->free_bytes -= got;
+    if (got - size >= 64u) {
+        arena_free_put(ar, rx + size, got - size);
+        ar->n_split++;
+    }
+    *out_rx = rx;
+    return true;
+}
+
+static void arena_quarantine_body(hb_jit_runtime_t* rt, uint8_t* body, size_t native_size,
+                                  uint8_t* in_tramp) {
+    struct hb_arena_reclaim* ar;
+    uint64_t rx, size;
+    if (!body || !native_size) return;
+    ar = arena_reclaim_get(rt);
+    if (!ar) return;
+    rx = (uint64_t)(uintptr_t)body;
+    size = ((uint64_t)native_size + 15u) & ~15ull;
+    /* Только своё: тело внутри занятой части СВОЕЙ арены и выровнено так, как кладёт commit. */
+    if ((rx & 15u) || rx < ar->lo || rx + size > ar->lo + rt->jit_mem->used) {
+        ar->n_foreign++;
+        return;
+    }
+    /* Входной трамплин: чужие заплаты прыгают в него, а он — в тело по литералу. Тело можно
+     * отдать, только если литерал уже смотрит на выход выселения. */
+    if (in_tramp) {
+        uint64_t* slot = chain_trampoline_slot(in_tramp);
+        uint8_t* bail = chain_trampoline_bailout(in_tramp);
+        if (!slot || !bail ||
+            __atomic_load_n(slot, __ATOMIC_ACQUIRE) != (uint64_t)(uintptr_t)bail) {
+            ar->n_unsafe++;
+            return;
+        }
+    }
+    if (!arena_chunk_push(&ar->q, &ar->q_n, &ar->q_cap, rx, size)) return;
+    ar->q_bytes += size;
+    ar->n_quar++;
+    ar->b_quar += size;
+}
+
+/* Арена перемотана (или среда разрушается): все куски недействительны. */
+static void arena_reclaim_forget(hb_jit_runtime_t* rt) {
+    struct hb_arena_reclaim* ar = rt ? rt->arena_reclaim : NULL;
+    uint32_t k;
+    if (!ar) return;
+    ar->q_n = 0;
+    ar->q_bytes = 0;
+    for (k = 0; k < HB_ARENA_CLASSES; k++) ar->f_n[k] = 0;
+    ar->big_n = 0;
+    ar->free_bytes = 0;
+}
+
+static void arena_reclaim_destroy(hb_jit_runtime_t* rt) {
+    struct hb_arena_reclaim* ar = rt ? rt->arena_reclaim : NULL;
+    uint32_t k;
+    if (!ar) return;
+    free(ar->q);
+    for (k = 0; k < HB_ARENA_CLASSES; k++) free(ar->f[k]);
+    free(ar->big);
+    free(ar);
+    rt->arena_reclaim = NULL;
+}
+
+static int arena_chunk_cmp(const void* a, const void* b) {
+    uint64_t x = ((const hb_arena_chunk_t*)a)->rx, y = ((const hb_arena_chunk_t*)b)->rx;
+    return x < y ? -1 : (x > y ? 1 : 0);
+}
+
+/* Лежит ли нативный адрес внутри куска карантина (карантин отсортирован). */
+static int arena_ic_in_quarantine(uint64_t native, void* arg) {
+    const struct hb_arena_reclaim* ar = (const struct hb_arena_reclaim*)arg;
+    size_t lo = 0, hi = ar->q_n;
+    if (native < ar->lo || native >= ar->hi) return 0;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (ar->q[mid].rx <= native) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo > 0 && native < ar->q[lo - 1].rx + ar->q[lo - 1].size;
+}
+
+/* Кадры hb_jit_runtime_run на потоке — по адресу кадра. Кадр, брошенный siglongjmp'ом, всегда
+ * НИЖЕ живого (стек растёт вниз), поэтому снимается при следующем входе сравнением адресов.
+ * Переполнение списка — «не знаю», и тогда возврата нет, пока список не опустеет. */
+#define HB_RUN_FRAMES_MAX 16   /* = размер rt->run_frame */
+
+static int run_frames_enter(hb_jit_runtime_t* rt, uintptr_t fp) {
+    while (rt->run_frames > 0 && rt->run_frame[rt->run_frames - 1] <= fp) rt->run_frames--;
+    if (rt->run_frames == 0) rt->run_frames_lost = 0;
+    if (rt->run_frames >= HB_RUN_FRAMES_MAX) {
+        rt->run_frames_lost = 1;
+        return 0;
+    }
+    rt->run_frame[rt->run_frames++] = fp;
+    return rt->run_frames == 1 && !rt->run_frames_lost;
+}
+
+static void run_frames_leave(hb_jit_runtime_t* rt, uintptr_t fp) {
+    if (rt->run_frames > 0 && rt->run_frame[rt->run_frames - 1] == fp) rt->run_frames--;
+}
+
+static void arena_reclaim_report(hb_jit_runtime_t* rt, const char* why) {
+    const struct hb_arena_reclaim* ar = rt ? rt->arena_reclaim : NULL;
+    fprintf(stderr,
+            "macrunner-hb-arena-reclaim: why=%s used=%zu drains=%llu quarantined=%llu/%lluB "
+            "reused=%llu/%lluB splits=%llu free=%llu ic_cleared=%llu unsafe=%llu foreign=%llu "
+            "flushes=%llu\n",
+            why, rt && rt->jit_mem ? rt->jit_mem->used : (size_t)0,
+            ar ? (unsigned long long)ar->n_drain : 0ull,
+            ar ? (unsigned long long)ar->n_quar : 0ull, ar ? (unsigned long long)ar->b_quar : 0ull,
+            ar ? (unsigned long long)ar->n_reuse : 0ull, ar ? (unsigned long long)ar->b_reuse : 0ull,
+            ar ? (unsigned long long)ar->n_split : 0ull,
+            ar ? (unsigned long long)ar->free_bytes : 0ull,
+            ar ? (unsigned long long)ar->n_ic : 0ull,
+            ar ? (unsigned long long)ar->n_unsafe : 0ull,
+            ar ? (unsigned long long)ar->n_foreign : 0ull,
+            (unsigned long long)t_arena_flushes);
+    fflush(stderr);
+}
+
+/* Безопасная точка: вызывается ТОЛЬКО на внешнем входе в hb_jit_runtime_run. */
+static void arena_reclaim_safe_point(hb_jit_runtime_t* rt) {
+    int mode = arena_reclaim_mode();
+    struct hb_arena_reclaim* ar;
+    if (!mode || !rt || !rt->jit_mem) return;
+    ar = rt->arena_reclaim;
+    if (ar && ar->q_n &&
+        (ar->q_bytes >= HB_ARENA_DRAIN_MIN || rt->code_cache_full ||
+         rt->jit_mem->used >= rt->jit_mem->size - rt->jit_mem->size / 8)) {
+        uint64_t cleared;
+        size_t i;
+        qsort(ar->q, ar->q_n, sizeof(ar->q[0]), arena_chunk_cmp);
+        /* Сперва гасим всё, что смотрит в эти куски, и только потом выдаём их. */
+        cleared = hb_ic_slots_clear_matching(arena_ic_in_quarantine, ar);
+        if (rt->ctx && arena_ic_in_quarantine(rt->ctx->indirect_ic_native_code, ar)) {
+            rt->ctx->indirect_ic_native_code = 0;
+            rt->ctx->indirect_ic_guest_addr = 0;
+        }
+        for (i = 0; i < ar->q_n; i++) arena_free_put(ar, ar->q[i].rx, ar->q[i].size);
+        ar->q_n = 0;
+        ar->q_bytes = 0;
+        ar->n_drain++;
+        ar->n_ic += cleared;
+        if (ar->n_drain <= 8 || (ar->n_drain & 63u) == 0) arena_reclaim_report(rt, "drain");
+    }
+    if (rt->code_cache_full) {
+        if (ar && arena_free_can_fit(ar, t_arena_fail_need ? t_arena_fail_need : 4096u)) {
+            rt->code_cache_full = false;   /* место есть — защёлка снята, JIT продолжает */
+            return;
+        }
+        /* Места нет и после возврата — сброс целиком (у FEX так всегда). Безопасно ровно
+         * здесь: внешний вход, кадров выпущенного кода на потоке нет. */
+        t_arena_flushes++;
+        hb_jit_runtime_reset(rt, rt->ctx);
+        arena_reclaim_report(rt, "flush");
+    }
+}
+
+static hb_result_t jit_commit_blob_ex(hb_jit_runtime_t* rt, const uint8_t* code, size_t size,
+                                      uint8_t** out_dest, bool allow_recycle) {
     hb_result_t r;
     uint8_t* dest;
     if (!rt || !rt->jit_mem || !code || !size || !out_dest) return HB_ERR_INVALID_ARG;
+    if (rt->jit_mem->used == 0) { t_arena_commit_n = 0; t_arena_commit_bytes = 0; t_arena_half_said = 0; }
+    /* Возвращённое место — раньше вершины: вершина растёт, только когда подходящего мёртвого
+     * куска нет. Код позиционно-независим (так же ложится по любому адресу вершины). */
+    if (allow_recycle && rt->arena_reclaim) {
+        uint64_t need = ((uint64_t)size + 15u) & ~15ull, rx = 0;
+        if (arena_free_take(rt->arena_reclaim, need, &rx)) {
+            uint8_t* rw = hb_jit_rx_to_rw(rt->jit_mem, (uint8_t*)(uintptr_t)rx);
+            if (rw) {
+                r = hb_jit_buffer_make_writable(rt->jit_mem);
+                if (r != HB_OK) {
+                    arena_free_put(rt->arena_reclaim, rx, need);
+                    return r;
+                }
+                memcpy(rw, code, size);
+                /* commit чистит кеш команд только по вершине — прежнее содержимое куска
+                 * вычищаем сами, по обоим отображениям. */
+                block_cache_clear_icache(rt->jit_mem, (uint8_t*)(uintptr_t)rx, size);
+                r = hb_jit_buffer_commit(rt->jit_mem);
+                if (r != HB_OK) return r;
+                rt->arena_reclaim->n_reuse++;
+                rt->arena_reclaim->b_reuse += need;
+                t_arena_commit_n++;
+                t_arena_commit_bytes += need;
+                *out_dest = (uint8_t*)(uintptr_t)rx;
+                return HB_OK;
+            }
+        }
+    }
     if (rt->jit_mem->used + size > rt->jit_mem->size) {
+        if (!rt->code_cache_full_reports) arena_census_print(rt, "full");
         rt->code_cache_full = true;
+        t_arena_fail_need = ((uint64_t)size + 15u) & ~15ull;
         trace_jit_code_cache_full_once(rt, "jit-buffer-full", size);
         return HB_ERR_UNSUPPORTED_FEATURE;
     }
@@ -6293,11 +7075,22 @@ static hb_result_t jit_commit_blob(hb_jit_runtime_t* rt, const uint8_t* code, si
     memcpy(dest, code, size);
     rt->jit_mem->used += size;
     rt->jit_mem->used = (rt->jit_mem->used + 15) & ~15;
+    t_arena_commit_n++;
+    t_arena_commit_bytes += ((uint64_t)size + 15) & ~15ull;
     r = hb_jit_buffer_commit(rt->jit_mem);
     if (r != HB_OK) return r;
+    if (!t_arena_half_said && rt->jit_mem->used >= rt->jit_mem->size / 2) {
+        t_arena_half_said = 1;
+        arena_census_print(rt, "half");
+    }
     /* Наружу отдаём ИСПОЛНЯЕМЫЙ адрес: со splitwx это RX-половина. */
     *out_dest = hb_jit_rw_to_rx(rt->jit_mem, dest);
     return HB_OK;
+}
+
+static hb_result_t jit_commit_blob(hb_jit_runtime_t* rt, const uint8_t* code, size_t size,
+                                   uint8_t** out_dest) {
+    return jit_commit_blob_ex(rt, code, size, out_dest, true);
 }
 
 static int trace_jit_blocks_enabled(void) {
@@ -7149,6 +7942,9 @@ hb_jit_runtime_t* hb_jit_runtime_create(hb_context_t* ctx) {
     }
     rt->ctx = ctx;
     rt->persistent_cache_flags = macrunner_hb_runtime_persistent_cache_flags;
+    rt->scalar_access_enabled = ctx && ctx->scalar_access;
+    rt->pair_access_enabled = ctx && ctx->pair_access;
+    rt->exec_access_enabled = ctx && ctx->exec_access;
     size_env = hb_gate( HB_GATE_HB_JIT_BUFFER_SIZE );
     if (size_env && *size_env) {
         unsigned long long parsed = strtoull(size_env, NULL, 0);
@@ -7293,6 +8089,9 @@ void hb_jit_runtime_destroy(hb_jit_runtime_t* rt) {
                 (unsigned long long)g_smc_relift_suppressed);
     unchain_stats_report();
     hb_povtor_itog_print("rt-destroy");
+    if (rt->arena_reclaim) arena_reclaim_report(rt, "destroy");
+    arena_reclaim_destroy(rt);
+    code_granules_destroy(rt);
     hb_cache_close(rt->persistent_cache);
     hb_jit_buffer_destroy(rt->jit_mem);
     block_cache_destroy(rt->block_cache);
@@ -7319,6 +8118,13 @@ void hb_jit_runtime_reset_at(hb_jit_runtime_t* rt, hb_context_t* ctx, int mesto)
     t_reset_mesto = (mesto >= 0 && mesto < HB_POVTOR_M_N) ? mesto : HB_POVTOR_M_PROCHEE;
     rt->ctx = ctx;
     if (rt->jit_mem) hb_jit_buffer_reset(rt->jit_mem);
+    /* Арена перемотана: свободные куски и карантин указывают в место, которое вершина
+     * сейчас займёт заново, — забыть их ДО первого занесения. */
+    arena_reclaim_forget(rt);
+    code_granules_forget(rt);   /* кеш снесён — отметки кода тоже */
+    rt->scalar_access_enabled = ctx && ctx->scalar_access;
+    rt->pair_access_enabled = ctx && ctx->pair_access;
+    rt->exec_access_enabled = ctx && ctx->exec_access;
     if (rt->block_cache) block_cache_reset(rt->block_cache);
     /* Кеш очищен целиком — ждущие объявления инвалидации применять не к чему. */
     rt->inval_seen = __atomic_load_n(&g_inval_seq, __ATOMIC_ACQUIRE);
@@ -7374,18 +8180,31 @@ void hb_runtime_dump_path(void) {
     fflush(stderr);
 }
 
+/* Opus 26.09.2026 — счётчики поиска под гейтом MACRUNNER_HB_FINDBLOCK_STATS (умолчание 0).
+ * find_block зовётся на КАЖДОМ заходе диспетчера (118 млн за прогон HK); три __thread-счётчика
+ * давали три вызова _tlv_get_addr на заход — ~200 отсчётов профиля рабочего потока из 14 тыс.
+ * Флаг — обычная статическая переменная: без обращения к TLS, одна загрузка и переход. */
+static int g_findblock_stats = -1;
+
 static hb_ir_block_t* find_block(const hb_ir_cfg_t* cfg, uint64_t addr) {
     size_t n = cfg->block_count;
-    if (n > t_findblock_max_n) t_findblock_max_n = n;
-    for (size_t i = 0; i < n; i++) {
-        if (cfg->blocks[i]->guest_addr == addr) {
-            t_findblock_calls++;
-            t_findblock_iters += (uint64_t)i + 1;
-            return cfg->blocks[i];
+    if (__builtin_expect(g_findblock_stats < 0, 0))
+        g_findblock_stats = hb_gate_flag( HB_GATE_HB_FINDBLOCK_STATS, 0 );
+    if (__builtin_expect(g_findblock_stats, 0)) {
+        if (n > t_findblock_max_n) t_findblock_max_n = n;
+        for (size_t i = 0; i < n; i++) {
+            if (cfg->blocks[i]->guest_addr == addr) {
+                t_findblock_calls++;
+                t_findblock_iters += (uint64_t)i + 1;
+                return cfg->blocks[i];
+            }
         }
+        t_findblock_calls++;
+        t_findblock_iters += (uint64_t)n;
+        return NULL;
     }
-    t_findblock_calls++;
-    t_findblock_iters += (uint64_t)n;
+    for (size_t i = 0; i < n; i++)
+        if (cfg->blocks[i]->guest_addr == addr) return cfg->blocks[i];
     return NULL;
 }
 
@@ -8005,12 +8824,32 @@ static long chain_entry_offset(const hb_block_cache_entry_t* entry) {
     return -1;
 }
 
+/* Claude 26.09 (бит 512 быстрого режима) — НЕ СЦЕПЛЯТЬ В КОД ИЗ ЗАПИСЫВАЕМОЙ ПАМЯТИ.
+ *
+ * Выровненная прямая запись выпущенного кода x64 идёт мимо обработки SMC (карта прав есть только у
+ * x86). Пока скалярные MOV шли через интерпретатор, запись Mono в свой код (перепривязка места
+ * вызова; на amd64 Mono FlushInstructionCache не зовёт) проходила hb_memory_write и замечалась.
+ * С битом 64 она прямая — устаревший перевод замечает только сверка отпечатка на входе через
+ * диспетчер, а сцепка её обходит. Поэтому блоки с отпечатком SMC (код из записываемой памяти)
+ * не становятся целью сцепки и встроенного кеша косвенных переходов: вход в них — только через
+ * диспетчер со сверкой. */
+static bool g_chain_skip_smc_tracked;
+
+void hb_runtime_set_chain_skip_smc_tracked(bool on) {
+    __atomic_store_n(&g_chain_skip_smc_tracked, on, __ATOMIC_RELEASE);
+}
+
+static inline bool chain_target_refused_smc(const hb_block_cache_entry_t* entry) {
+    return entry && entry->smc_hash && __atomic_load_n(&g_chain_skip_smc_tracked, __ATOMIC_ACQUIRE);
+}
+
 static uint8_t* chain_trampoline_for(hb_jit_runtime_t* rt, hb_block_cache_entry_t* entry) {
     hb_block_chain_meta_t* meta;
     uint8_t zeros[HB_CHAIN_TRAMPOLINE_BYTES];
     uint8_t* dest = NULL;
 
     if (!rt || !rt->block_cache || !entry || !entry->native_code) return NULL;
+    if (chain_target_refused_smc(entry)) return NULL;
     meta = block_cache_chain_meta(rt->block_cache, entry, true);
     if (!meta) return NULL;
     if (meta->in_trampoline) return meta->in_trampoline;
@@ -8057,11 +8896,17 @@ static uint8_t* chain_trampoline_for(hb_jit_runtime_t* rt, hb_block_cache_entry_
         if (!chain_trampoline_build_at(built, predicted, entry->native_code + entry_off,
                                        entry->guest_addr))
             return NULL;
-        if (jit_commit_blob(rt, built, sizeof(built), &dest) != HB_OK || !dest) return NULL;
+        /* Opus 26.09.2026: ТОЛЬКО с вершины арены. Адрес трамплина предсказан как
+         * writable + used; возвращённый кусок из свободного списка лёг бы в другое место,
+         * и трамплин отвергался бы ниже, а место утекало. Трамплины и не возвращаются:
+         * на них смотрят заплаты чужих блоков. */
+        if (jit_commit_blob_ex(rt, built, sizeof(built), &dest, false) != HB_OK || !dest)
+            return NULL;
         if (dest != predicted) return NULL; /* layout was computed for another address — refuse to chain */
     }
     block_cache_clear_icache(rt->jit_mem, dest, HB_CHAIN_TRAMPOLINE_BYTES);
     meta->in_trampoline = dest;
+    t_tramp_commits++;
     return dest;
 }
 
@@ -8599,7 +9444,7 @@ static void update_indirect_ic(hb_context_t* ctx, hb_block_cache_entry_t* target
         }
     }
 
-    if (!enabled || !target || !target->valid || !target->native_code ||
+    if (!enabled || !target || !target->valid || !target->native_code || chain_target_refused_smc(target) ||
         !block_terminal_is_chainable(target->block) || !entry_has_chain_slot(target, NULL)) {
         if (slot) {
             /* Порядок гашения тот же, что в hb_ic_slots_clear_all: сперва натив. */
@@ -8899,6 +9744,27 @@ static hb_result_t set_jit_interp_fallback_result(hb_exec_result_t* out,
     out->faulted = true;
     out->fault_reason = reason;
     return HB_OK;
+}
+
+/* Opus 26.09.2026 — ПЕРЕПОЛНЕНИЕ ПОСРЕДИ ПРОГОНА: НЕ ФАЛЛБЭК, А УСТУПКА НА ГРАНИЦЕ БЛОКА.
+ *
+ * К этому месту исполненные блоки зафиксированы, а ctx стоит на начале блока, который не
+ * удалось перевести. Фаллбэк заставил бы адаптер восстановить вход прогона и ПЕРЕИГРАТЬ
+ * исполненное (двойные побочные эффекты), а при нуле шагов — отдавал бы гостю c000001d.
+ * Поэтому: шаги были — обычная уступка по пределу (адаптер продолжит с ctx->pc, а следующий
+ * вход — безопасная точка арены); шагов не было — честный фаллбэк, исполнять нечего. */
+static hb_result_t set_jit_cache_full_result(hb_exec_result_t* out, uint64_t steps,
+                                             uint64_t blocks_executed) {
+    if (steps) {
+        out->result = HB_ERR_STEP_LIMIT;
+        out->steps_executed = steps;
+        out->blocks_executed = blocks_executed;
+        out->faulted = false;
+        out->fault_reason = NULL;
+        return HB_OK;
+    }
+    return set_jit_interp_fallback_result(out, HB_ERR_UNSUPPORTED_FEATURE, steps, blocks_executed,
+                                          "JIT code cache full; interpreter fallback");
 }
 
 /* MacRunner 2026-08-10, лейн ЛЕСТНИЦА: назвать операцию, которую кодогенератор не переварил.
@@ -9367,6 +10233,7 @@ static void jit_aa_mono_4ee14b_transparency_probe(hb_jit_runtime_t* rt,
     } else {
         jit_signal = frame.signal ? frame.signal : -1;
         *ctx = pre_ctx;
+        hb_pair_rmw_end(ctx);
     }
     *jit_signal_slot(ctx) = frame.prev;
     frame.stale_cookie = 0;
@@ -9641,6 +10508,16 @@ int hb_jit_runtime_handle_signal_fault(uint64_t pc, uint64_t fault_addr, int sig
     if (!frame || !frame->rt || !frame->rt->jit_mem || !frame->entry ||
         !frame->entry->native_code || !frame->entry->native_size) {
         __atomic_add_fetch(&g_guard_claim_declined_frame, 1, __ATOMIC_RELAXED);
+        {
+            static int why = -1, said;
+            if (why < 0) { const char* v = getenv("MACRUNNER_HB_CLAIM_WHY"); why = v && *v && *v != '0'; }
+            if (why && said++ < 24) {
+                char b[160];
+                int n = snprintf(b, sizeof(b), "macrunner-hb-claim-why: frame pc=%#llx fault=%#llx sig=%d frame=%p\n",
+                                 (unsigned long long)pc, (unsigned long long)fault_addr, signal, (void*)frame);
+                if (n > 0) (void)!write(2, b, (size_t)n);
+            }
+        }
         return 0;
     }
 
@@ -9655,6 +10532,18 @@ int hb_jit_runtime_handle_signal_fault(uint64_t pc, uint64_t fault_addr, int sig
     if (!((uintptr_t)pc >= native_start && (uintptr_t)pc < native_end) &&
         !((uintptr_t)pc >= slab_start && (uintptr_t)pc < slab_end)) {
         __atomic_add_fetch(&g_guard_claim_declined_range, 1, __ATOMIC_RELAXED);
+        {   /* Claude 26.09: причина отказа (MACRUNNER_HB_CLAIM_WHY=1), первые 24 */
+            static int why = -1, said;
+            if (why < 0) { const char* v = getenv("MACRUNNER_HB_CLAIM_WHY"); why = v && *v && *v != '0'; }
+            if (why && said++ < 24) {
+                char b[256];
+                int n = snprintf(b, sizeof(b), "macrunner-hb-claim-why: range pc=%#llx fault=%#llx sig=%d "
+                                 "block=%#lx-%#lx slab=%#lx-%#lx\n", (unsigned long long)pc,
+                                 (unsigned long long)fault_addr, signal, (unsigned long)native_start,
+                                 (unsigned long)native_end, (unsigned long)slab_start, (unsigned long)slab_end);
+                if (n > 0) (void)!write(2, b, (size_t)n);
+            }
+        }
         return 0;
     }
 
@@ -10095,15 +10984,19 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
      * Приём «перенести гейт вверх по телу», которым мы чинили это дважды (см. коммент
      * в trace_jit_hot_block_tick от 10.08), здесь НЕ РАБОТАЕТ: пролог компилятор ставит
      * перед первой строкой тела, куда бы гейт ни переехал. Лечит только это. */
-    if (jit_aa_mono_simd_copy_gate_probe_enabled())
+    if (!ctx->exec_access && jit_aa_mono_simd_copy_gate_probe_enabled())
         jit_aa_probe_mono_simd_copy_gate(rt, cached, steps, blocks_executed);
-    if (jit_aa_mono_4ee14b_transparency_probe_enabled())
+    if (!ctx->exec_access && jit_aa_mono_4ee14b_transparency_probe_enabled())
         jit_aa_mono_4ee14b_transparency_probe(rt, cached, steps, blocks_executed);
-    if (jit_aa_force_mono_simd_copy_interp(rt, cached, out, steps, blocks_executed))
+    if (!ctx->exec_access && jit_aa_force_mono_simd_copy_interp(rt, cached, out, steps, blocks_executed))
         return HB_OK;
     if (jit_signal_quarantine_enabled() &&
         (rt->jit_signal_disable ||
          jit_signal_quarantine_contains(rt, cached->guest_addr))) {
+        if (ctx->exec_access)
+            return set_runtime_fault_result(out, ctx, HB_ERR_UNSUPPORTED_FEATURE,
+                                            steps, blocks_executed,
+                                            "EXEC unit native dispatch quarantined");
         ctx->pc = cached->guest_addr;
         tramp_snyat_svidetelya(ctx);
     sync_arch_pc_after_jit_block(ctx);
@@ -10155,7 +11048,7 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
     frame.native_word_valid = false;
     frame.active_guard_claim = false;
     frame.host_context_valid = false;
-    frame.aa_enabled = jit_aa_sigbus_probe_enabled();
+    frame.aa_enabled = !ctx->exec_access && jit_aa_sigbus_probe_enabled();
     if (frame.aa_enabled) {
         frame.aa_pre_rcx = ctx->regs.x64.rcx;
         frame.aa_pre_rdx = ctx->regs.x64.rdx;
@@ -10197,7 +11090,11 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
                 lean_dispatch_report("ход");
         }
         if (trace_null_pc_enabled_rt()) hb_trace_current_block_addr = cached->guest_addr;
-        exec(ctx);
+        if (ctx->exec_access)
+            ((void (*)(hb_context_t*, hb_exec_result_t*))(void*)cached->native_code)(ctx, out);
+        else
+            exec(ctx);
+        hb_pair_rmw_end(ctx);
         *jit_signal_slot(ctx) = frame.prev;
         frame.stale_cookie = 0;
         return HB_OK;
@@ -10207,12 +11104,23 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
      * individually because "does it ever happen at all" is the question, and a purely periodic
      * report cannot distinguish never from rarely; after that the period keeps a hot branch from
      * drowning the log in its own measurement. */
+    hb_pair_rmw_end(ctx); /* A signal escape bypassed the operation epilogue. */
     ++rt->guard_recover;
     if (rt->guard_recover <= 8 || (rt->guard_recover & 0xfffu) == 0)
         guard_census_flush(rt, "recover");
 
     *jit_signal_slot(ctx) = frame.prev;
     frame.stale_cookie = 0;
+    if (ctx->exec_access) {
+        /* The sequential wrapper keeps architectural state in ctx. Do not
+         * replay a possibly partially committed unit, or relabel a host engine
+         * fault as a guest permission fault. No snapshot rollback is valid. */
+        ctx->pc = stable_block->exec_unit_pc;
+        sync_arch_pc_after_jit_block(ctx);
+        return set_runtime_fault_result(out, ctx, HB_ERR_UNSUPPORTED_FEATURE,
+                                        steps, blocks_executed,
+                                        "EXEC unit native signal; no replay");
+    }
     if (frame.aa_enabled && frame.signal == SIGBUS) {
         frame.aa_dst_post_valid = jit_aa_capture_window(ctx->memory, frame.aa_pre_rcx, frame.aa_dst_post);
         frame.aa_src_post_valid = jit_aa_capture_window(ctx->memory, frame.aa_pre_rdx, frame.aa_src_post);
@@ -10760,6 +11668,104 @@ static void trace_jit_code_cache_full_once(hb_jit_runtime_t* rt,
             "needed=%zu entries=%zu capacity=%u\n",
             reason ? reason : "unknown", rt->jit_mem->used, rt->jit_mem->size,
             needed, rt->block_cache->count, (unsigned)rt->block_cache->size);
+    fflush(stderr);
+}
+
+/* Opus 26.09.2026 — ПЕРЕПИСЬ АРЕНЫ, ВТОРАЯ РЕДАКЦИЯ (только печать, поведение не меняется).
+ *
+ * Первая редакция обходила used_slots и насчитала 113 695 «живых» записей при count=46 429:
+ * used_slots хранит индекс слота при КАЖДОЙ новой вставке, и слот, выселенный и занятый снова,
+ * стоит в списке несколько раз. Здесь обход ВСЕЙ таблицы — каждая запись ровно один раз.
+ *
+ * Отдельно считаются ЗОМБИ: запись valid, но поиск по её адресу приходит не к ней (цепочку
+ * линейного пробирования порвала дыра выселения). Код зомби в арене занят, но недостижим.
+ * Печать дважды на арену (половина, переполнение) плюс причины смерти тел этого потока. */
+static const hb_block_cache_entry_t* block_cache_probe_pure(const hb_block_cache_t* cache,
+                                                            uint64_t addr) {
+    size_t idx = block_cache_hash(addr), i;
+    for (i = 0; i < cache->size; i++) {
+        const hb_block_cache_entry_t* e = &cache->entries[(idx + i) & cache->size_mask];
+        if (!e->valid) {
+            if (e->guest_addr == HB_BLOCK_TOMB) continue;
+            return NULL;
+        }
+        if (e->guest_addr == addr) return e;
+    }
+    return NULL;
+}
+
+static void arena_census_print(hb_jit_runtime_t* rt, const char* reason) {
+    hb_block_cache_t* cache;
+    uint64_t valid_n = 0, valid_bytes = 0, zombie_n = 0, zombie_bytes = 0, tramp_live = 0;
+    uint64_t max_sz = 0, used, tramp_bytes, dead, block_commits;
+    uint64_t hist[8] = {0};
+    const struct hb_arena_reclaim* ar;
+    uint64_t free_b, quar_b;
+    size_t k;
+    if (!rt || !rt->jit_mem || !rt->block_cache) return;
+    cache = rt->block_cache;
+    for (k = 0; k < cache->size; k++) {
+        const hb_block_cache_entry_t* e = &cache->entries[k];
+        const hb_block_chain_meta_t* m;
+        uint64_t sz;
+        int b;
+        if (!e->valid || !e->native_code) continue;
+        sz = ((uint64_t)e->native_size + 15) & ~15ull;
+        valid_n++;
+        valid_bytes += sz;
+        if (block_cache_probe_pure(cache, e->guest_addr) != e) {
+            zombie_n++;
+            zombie_bytes += sz;
+        }
+        if (sz > max_sz) max_sz = sz;
+        b = sz < 128 ? 0 : sz < 256 ? 1 : sz < 512 ? 2 : sz < 1024 ? 3 :
+            sz < 2048 ? 4 : sz < 4096 ? 5 : sz < 8192 ? 6 : 7;
+        hist[b]++;
+        m = block_cache_chain_meta_const(cache, e);
+        if (m && m->in_trampoline) tramp_live++;
+    }
+    ar = rt->arena_reclaim;
+    free_b = ar ? ar->free_bytes : 0;
+    quar_b = ar ? ar->q_bytes : 0;
+    used = rt->jit_mem->used;
+    tramp_bytes = t_tramp_commits * (uint64_t)HB_CHAIN_TRAMPOLINE_BYTES;
+    dead = used > valid_bytes + tramp_bytes + free_b + quar_b
+         ? used - valid_bytes - tramp_bytes - free_b - quar_b : 0;
+    block_commits = t_arena_commit_n > t_tramp_commits ? t_arena_commit_n - t_tramp_commits : 0;
+    fprintf(stderr,
+            "macrunner-hb-arena-census2: reason=%s used=%llu size=%llu valid_blocks=%llu "
+            "valid_bytes=%llu zombies=%llu zombie_bytes=%llu reachable_bytes=%llu "
+            "tramp_commits=%llu tramp_live=%llu tramp_bytes=%llu free=%llu quarantine=%llu "
+            "dead_bytes=%llu dead_pct=%.1f commits=%llu block_commits=%llu avg_commit=%.0f "
+            "max_live=%llu hist_lt128_256_512_1k_2k_4k_8k_ge8k=%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu "
+            "count=%zu resets=%llu zombie_created=%llu tombs_made=%llu tombs_reused=%llu\n",
+            reason ? reason : "?", (unsigned long long)used, (unsigned long long)rt->jit_mem->size,
+            (unsigned long long)valid_n, (unsigned long long)valid_bytes,
+            (unsigned long long)zombie_n, (unsigned long long)zombie_bytes,
+            (unsigned long long)(valid_bytes - zombie_bytes),
+            (unsigned long long)t_tramp_commits, (unsigned long long)tramp_live,
+            (unsigned long long)tramp_bytes, (unsigned long long)free_b, (unsigned long long)quar_b,
+            (unsigned long long)dead, used ? 100.0 * (double)dead / (double)used : 0.0,
+            (unsigned long long)t_arena_commit_n, (unsigned long long)block_commits,
+            t_arena_commit_n ? (double)t_arena_commit_bytes / (double)t_arena_commit_n : 0.0,
+            (unsigned long long)max_sz,
+            (unsigned long long)hist[0], (unsigned long long)hist[1], (unsigned long long)hist[2],
+            (unsigned long long)hist[3], (unsigned long long)hist[4], (unsigned long long)hist[5],
+            (unsigned long long)hist[6], (unsigned long long)hist[7],
+            cache->count, (unsigned long long)t_cache_resets,
+            (unsigned long long)t_zombie_created,
+            (unsigned long long)t_tomb_made, (unsigned long long)t_tomb_reused);
+    fprintf(stderr, "macrunner-hb-arena-deaths: reason=%s", reason ? reason : "?");
+    for (k = 0; k < HB_DEATH_N; k++)
+        fprintf(stderr, " %s=%llu", hb_death_imya[k], (unsigned long long)t_death[k]);
+    fprintf(stderr, " inval_calls=%llu inval_bytes=%llu inval_ev_smc=%llu inval_ev_hit=%llu "
+                    "inval_ev_miss=%llu inval_ev_unknown=%llu\n",
+            (unsigned long long)t_inval_calls, (unsigned long long)t_inval_bytes,
+            (unsigned long long)t_inval_ev[HB_INVAL_EV_SMC_SPAN],
+            (unsigned long long)t_inval_ev[HB_INVAL_EV_SPAN_HIT],
+            (unsigned long long)t_inval_ev[HB_INVAL_EV_SPAN_MISS],
+            (unsigned long long)t_inval_ev[HB_INVAL_EV_SPAN_UNKNOWN]);
+    inval_why_print(reason);
     fflush(stderr);
 }
 
@@ -11928,6 +12934,7 @@ static uint64_t promote_hot_threshold(void) {
 
 static void try_promote_hot_block_families(hb_jit_runtime_t* rt, hb_context_t* ctx,
                                            const hb_ir_block_t* block) {
+    if (ctx && (ctx->scalar_access || ctx->pair_access)) return; /* Access observation required. */
     if (!promote_families_enabled()) return;
     /* Одна попытка на блок: семь распознавателей с выделением буфера каждый — слишком
      * дорого, чтобы повторять их на каждом проходе. Шаблон блока не меняется. */
@@ -12160,9 +13167,7 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
                  * disables JIT (which it did while the exec buffer was 82% free). The
                  * genuine hard limit (exec buffer full) still latches at jit_commit_blob. */
                 trace_jit_code_cache_full_once(rt, "block-cache-full", 0);
-                return set_jit_interp_fallback_result(out, HB_ERR_UNSUPPORTED_FEATURE,
-                                                      steps, blocks_executed,
-                                                      "JIT code cache full; interpreter fallback");
+                return set_jit_cache_full_result(out, steps, blocks_executed);
             }
 
             hb_cache_key_t persistent_key;
@@ -12172,7 +13177,7 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
             size_t emitted_size = 0;
             hb_result_t r;
 
-            if (rt->persistent_cache &&
+        if (!ctx->scalar_access && !ctx->pair_access && rt->persistent_cache &&
                 persistent_cache_key_for_block(rt, block, &persistent_key) == HB_OK) {
                 hb_cache_entry_t* disk_entry = NULL;
                 have_persistent_key = true;
@@ -12265,9 +13270,7 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
                 if (r != HB_OK) {
                     hb_ir_block_destroy(compile_block);
                     hb_codegen_buffer_destroy(code_buf);
-                    return set_jit_interp_fallback_result(out, HB_ERR_UNSUPPORTED_FEATURE,
-                                                          steps, blocks_executed,
-                                                          "JIT code cache full; interpreter fallback");
+                    return set_jit_cache_full_result(out, steps, blocks_executed);
                 }
                 hb_contract_telemetry_record_compile();
                 hb_contract_telemetry_record_compile_pc((uint64_t)ctx->pc);
@@ -12357,9 +13360,7 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
             if (!cached) {
                 rt->code_cache_full = true;
                 trace_jit_code_cache_full_once(rt, "block-cache-put-failed", emitted_size);
-                return set_jit_interp_fallback_result(out, HB_ERR_UNSUPPORTED_FEATURE,
-                                                      steps, blocks_executed,
-                                                      "JIT code cache full; interpreter fallback");
+                return set_jit_cache_full_result(out, steps, blocks_executed);
             }
 
             if (!cached->fused) {
@@ -12444,6 +13445,14 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
                 out->steps_executed = steps;
                 out->blocks_executed = blocks_executed;
                 ctx->last_result = HB_OK;
+                return HB_OK;
+            }
+            if (ctx && ctx->last_result == HB_ERR_ACCESS_PENDING) {
+                out->result = HB_ERR_ACCESS_PENDING;
+                out->steps_executed = steps;
+                out->blocks_executed = blocks_executed;
+                out->faulted = false;
+                out->fault_reason = NULL;
                 return HB_OK;
             }
             set_helper_fault_result(out, ctx, steps, blocks_executed);
@@ -12655,7 +13664,139 @@ static unsigned macrunner_profil_ballast_n(void)
     return n;
 }
 
+/* A freshly decoded unit is the cache authority in EXEC mode. Comparing the
+ * complete IR value (including operands) is intentionally conservative: even
+ * padding or borrowed-comment pointer differences can only cause recompilation.
+ * No guest memory is read and no hash collision can reuse different semantics. */
+static bool exec_unit_cache_matches(const hb_ir_block_t* cached,
+                                    const hb_ir_block_t* fresh) {
+    return hb_ir_is_exec_unit(cached) && hb_ir_is_exec_unit(fresh) &&
+           cached->exec_unit_pc == fresh->exec_unit_pc &&
+           cached->exec_unit_size == fresh->exec_unit_size &&
+           cached->exec_unit_transfer == fresh->exec_unit_transfer &&
+           cached->instr_count == fresh->instr_count &&
+           (!fresh->instr_count || !memcmp(cached->instrs, fresh->instrs,
+                                           fresh->instr_count * sizeof(*fresh->instrs)));
+}
+
+/* Deliberately separate from both ordinary dispatch loops. No successor lookup,
+ * chain patch, trace promotion, persistent blob, guest-byte SMC probe, or replay
+ * is reachable here. A self-loop still represents exactly one attempted unit. */
+static hb_result_t hb_jit_runtime_run_exec_unit(hb_jit_runtime_t* rt,
+                                                const hb_ir_func_t* func,
+                                                hb_exec_result_t* out) {
+    hb_context_t* ctx = rt->ctx;
+    const hb_ir_block_t* block;
+    hb_block_cache_entry_t* cached;
+    hb_result_t r;
+    if (!out) return HB_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    if (!func || !func->cfg || !func->cfg->blocks || func->cfg->block_count != 1 ||
+        func->cfg->block_cap < 1 || !func->cfg->entry ||
+        func->cfg->blocks[0] != func->cfg->entry || func->truncated ||
+        func->has_unsupported || ctx->arch != HB_ARCH_X64 || ctx->mode != HB_MODE_64BIT ||
+        !hb_ir_is_exec_unit(func->cfg->entry) ||
+        func->guest_addr != func->cfg->entry->exec_unit_pc ||
+        func->guest_len != func->cfg->entry->exec_unit_size ||
+        ctx->pc != func->guest_addr || ctx->regs.x64.rip != func->guest_addr)
+        return set_runtime_fault_result(out, ctx, HB_ERR_INVALID_ARG, 0, 0,
+                                        "EXEC requires the current complete instruction unit");
+    block = func->cfg->entry;
+    ctx->last_result = HB_OK;
+    rt->cur_func_addr = func->guest_addr;
+    rt->cur_func_len = func->guest_len;
+    runtime_apply_pending_inval(rt);
+    cached = block_cache_find(rt->block_cache, ctx->pc);
+    if (cached && (!cached->owns_block || cached->fused || !cached->native_code ||
+                   !exec_unit_cache_matches(cached->block, block))) {
+        int why = !cached->owns_block ? HB_DEATH_EXEC_NOOWN
+                : cached->fused ? HB_DEATH_EXEC_FUSED
+                : !cached->native_code ? HB_DEATH_EXEC_NONATIVE
+                : HB_DEATH_EXEC_MISMATCH;
+        block_cache_evict_entry(rt, rt->block_cache, cached, why);
+        cached = NULL;
+    }
+    if (!cached) {
+        hb_ir_block_t* owned = block_clone_for_cache(block);
+        hb_codegen_buffer_t* code = hb_codegen_buffer_create(4096);
+        hb_arm64_codegen_t* cg = hb_arm64_codegen_create(ctx);
+        uint8_t* dest = NULL;
+        if (!owned || !code || !cg) {
+            if (owned) hb_ir_block_destroy(owned);
+            if (code) hb_codegen_buffer_destroy(code);
+            if (cg) hb_arm64_codegen_destroy(cg);
+            return set_runtime_fault_result(out, ctx, HB_ERR_OUT_OF_MEMORY, 0, 0,
+                                            "EXEC unit allocation failed");
+        }
+        r = hb_arm64_codegen_block_with_cfg(cg, owned, func->cfg, code);
+        hb_arm64_codegen_destroy(cg);
+        if (r == HB_OK && hb_codegen_should_fail_now()) r = HB_ERR_UNSUPPORTED_OPCODE;
+        if (r == HB_OK) r = jit_commit_blob(rt, code->code, code->size, &dest);
+        if (r == HB_OK) {
+            cached = block_cache_put(rt, rt->block_cache, ctx->pc, dest, code->size,
+                                     jit_block_step_count(owned), owned, false, true);
+            if (!cached) r = HB_ERR_OUT_OF_MEMORY;
+        }
+        hb_codegen_buffer_destroy(code);
+        if (r != HB_OK) {
+            hb_ir_block_destroy(owned);
+            /* Opus 26.09.2026 — переполнение арены — не отказ гостя. Единица ещё не
+             * исполнялась (ноль шагов), поэтому честный путь — интерпретатор (адаптер
+             * узнаёт эту причину), а не c000001d, из которого гость не выходит. */
+            if (rt->code_cache_full)
+                return set_jit_interp_fallback_result(out, HB_ERR_UNSUPPORTED_FEATURE, 0, 0,
+                                                      "JIT code cache full; interpreter fallback");
+            return set_runtime_fault_result(out, ctx, r, 0, 0,
+                                            "EXEC unit compilation or cache insertion failed");
+        }
+    }
+    /* Private wrapper ABI returns the complete interpreter result. In
+     * particular pending has no retired block, while a zero-IR NOP has one. */
+    r = run_jit_block_with_signal_guard(rt, func, cached, cached->block, out, 0, 0);
+    if (r != HB_OK && out->result == HB_OK)
+        return set_runtime_fault_result(out, ctx, r, 0, 0, "EXEC unit dispatch failed");
+    return r;
+}
+
+static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_func_t* func,
+                                           hb_exec_result_t* out);
+
+/* Opus 26.09.2026 — ВНЕШНИЙ ВХОД В ДИСПЕТЧЕР = БЕЗОПАСНАЯ ТОЧКА АРЕНЫ.
+ * Здесь кадров выпущенного кода на стеке этого потока нет (вложенный вход — не внешний), и
+ * мёртвое место можно отдать, а при безвыходном переполнении — сбросить арену целиком.
+ * Без гейта MACRUNNER_HB_ARENA_RECLAIM цена — одна загрузка кешированного режима. */
 hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, hb_exec_result_t* out) {
+    hb_result_t r;
+    uintptr_t fp;
+    int outer;
+    /* Режим FPCR хоста = MXCSR гостя на входе в выпущенный код (см. hb_host_fpcr_apply_mxcsr). */
+    if (rt && rt->ctx) hb_host_fpcr_apply_mxcsr(rt->ctx->mxcsr);
+    if (!rt || !arena_reclaim_mode()) return hb_jit_runtime_run_body(rt, func, out);
+    fp = (uintptr_t)__builtin_frame_address(0);
+    outer = run_frames_enter(rt, fp);
+    if (outer) arena_reclaim_safe_point(rt);
+    r = hb_jit_runtime_run_body(rt, func, out);
+    run_frames_leave(rt, fp);
+    return r;
+}
+
+static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_func_t* func,
+                                           hb_exec_result_t* out) {
+    /* Opus 26.09.2026 — АДРЕСА ПОТОКОВЫХ СЧЁТЧИКОВ БЕРУТСЯ ОДИН РАЗ НА ВХОД. На macOS каждое
+     * обращение к __thread в dylib — вызов _tlv_get_addr; профиль HK 26.09: ~200 отсчётов из 17 тыс.
+     * рабочего потока в этом теле при 118 млн заходов. Смысл счётчиков тот же. */
+    uint64_t* const tls_runexit = t_runexit;
+    uint64_t* const tls_chain_decline = t_chain_decline;
+    uint64_t* const tls_last_run_entry = &t_last_run_entry;
+    uint64_t* const tls_last_run_delta = &t_last_run_delta;
+    if (rt && rt->ctx) hb_pair_rmw_end(rt->ctx);
+    if (rt && rt->ctx &&
+        (rt->scalar_access_enabled != (rt->ctx->scalar_access != NULL) ||
+         rt->pair_access_enabled != (rt->ctx->pair_access != NULL) ||
+         rt->exec_access_enabled != (rt->ctx->exec_access != NULL)))
+        hb_jit_runtime_reset(rt, rt->ctx);
+    if (rt && rt->ctx && rt->ctx->exec_access)
+        return hb_jit_runtime_run_exec_unit(rt, func, out);
     { unsigned _b = macrunner_profil_ballast_n(); if (_b) macrunner_profil_ballast(_b); }
     /* ★ 07.09.2026, лейн ПОВТОР-3 — ЗАПИСЬ. Ставится ВЫШЕ ветки на legacy, потому
      * что ряд входов обязан быть непрерывным: разрыв в нём читается повтором как
@@ -12842,7 +13983,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
             out->result = HB_OK;
             out->steps_executed = steps;
             out->blocks_executed = blocks_executed;
-            t_runexit[RUNEXIT_NO_BLOCK]++;
+            tls_runexit[RUNEXIT_NO_BLOCK]++;
             hb_xborder_note(rt, ctx->pc, 0);   /* к ХОСТУ или в гостевой код — см. hb_xborder_note */
             hb_record_exit(ctx, ctx->pc, 0);   /* ★ ПОВТОР-3 — запись выхода наружу */
             /* ★ 04.09.2026 — ВЫХОД НА ПЕРЕХОДНИК ИМПОРТА: по цепочке или нет.
@@ -12859,8 +14000,8 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                     fprintf(stderr, "macrunner-hb-chain-thunk-exit: n=%llu pc=0x%llx "
                             "последний_заход=0x%llx блоков_за_заход=%llu\n",
                             (unsigned long long)n, (unsigned long long)ctx->pc,
-                            (unsigned long long)t_last_run_entry,
-                            (unsigned long long)t_last_run_delta);
+                            (unsigned long long)(*tls_last_run_entry),
+                            (unsigned long long)(*tls_last_run_delta));
                     fflush(stderr);
                 }
             }
@@ -12911,7 +14052,8 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
             if (cached->block)
                 block = (hb_ir_block_t*)cached->block;
             trace_jit_cached_watch_block_once(rt, cached);
-            bool native_accounting = chain_accounting && entry_has_chain_slot(cached, NULL);
+        bool native_accounting = ctx->scalar_access || ctx->pair_access ||
+                                     (chain_accounting && entry_has_chain_slot(cached, NULL));
             uint64_t before_steps = native_accounting ? ctx->step_count : 0;
             uint64_t before_blocks = native_accounting ? ctx->block_count : 0;
             uint64_t before_rcx = ctx->regs.x64.rcx;
@@ -12986,10 +14128,10 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                 uint64_t block_delta = ctx->block_count - before_blocks;
                 uint64_t step_delta = ctx->step_count - before_steps;
                 /* Свидетель для вопроса «дошли ли до переходника по цепочке» — см.
-                 * t_last_run_entry. Пишется БЕЗУСЛОВНО, и при block_delta==0 тоже:
+                 * (*tls_last_run_entry). Пишется БЕЗУСЛОВНО, и при block_delta==0 тоже:
                  * иначе «один блок» и «не считалось» слились бы в одно значение. */
-                t_last_run_entry = cached->guest_addr;
-                t_last_run_delta = block_delta ? block_delta : 1;
+                (*tls_last_run_entry) = cached->guest_addr;
+                (*tls_last_run_delta) = block_delta ? block_delta : 1;
                 if (block_delta) {
                     run_block_delta = block_delta;
                     blocks_executed += block_delta;
@@ -13059,9 +14201,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                  * disables JIT (which it did while the exec buffer was 82% free). The
                  * genuine hard limit (exec buffer full) still latches at jit_commit_blob. */
                 trace_jit_code_cache_full_once(rt, "block-cache-full", 0);
-                return set_jit_interp_fallback_result(out, HB_ERR_UNSUPPORTED_FEATURE,
-                                                      steps, blocks_executed,
-                                                      "JIT code cache full; interpreter fallback");
+                return set_jit_cache_full_result(out, steps, blocks_executed);
             }
 
             hb_cache_key_t persistent_key;
@@ -13071,7 +14211,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
             size_t emitted_size = 0;
             hb_result_t r;
 
-            if (rt->persistent_cache &&
+            if (!ctx->scalar_access && !ctx->pair_access && rt->persistent_cache &&
                 persistent_cache_key_for_block(rt, block, &persistent_key) == HB_OK) {
                 hb_cache_entry_t* disk_entry = NULL;
                 have_persistent_key = true;
@@ -13158,9 +14298,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                 if (r != HB_OK) {
                     hb_ir_block_destroy(compile_block);
                     hb_codegen_buffer_destroy(code_buf);
-                    return set_jit_interp_fallback_result(out, HB_ERR_UNSUPPORTED_FEATURE,
-                                                          steps, blocks_executed,
-                                                          "JIT code cache full; interpreter fallback");
+                    return set_jit_cache_full_result(out, steps, blocks_executed);
                 }
                 hb_contract_telemetry_record_compile();
                 hb_contract_telemetry_record_compile_pc((uint64_t)ctx->pc);
@@ -13250,9 +14388,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
             if (!cached) {
                 rt->code_cache_full = true;
                 trace_jit_code_cache_full_once(rt, "block-cache-put-failed", emitted_size);
-                return set_jit_interp_fallback_result(out, HB_ERR_UNSUPPORTED_FEATURE,
-                                                      steps, blocks_executed,
-                                                      "JIT code cache full; interpreter fallback");
+                return set_jit_cache_full_result(out, steps, blocks_executed);
             }
 
             if (!cached->fused) {
@@ -13283,7 +14419,8 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
             trace_jit_cached_watch_block_once(rt, cached);
 
             /* Execute */
-            bool native_accounting = chain_accounting && entry_has_chain_slot(cached, NULL);
+        bool native_accounting = ctx->scalar_access || ctx->pair_access ||
+                                     (chain_accounting && entry_has_chain_slot(cached, NULL));
             uint64_t before_steps = native_accounting ? ctx->step_count : 0;
             uint64_t before_blocks = native_accounting ? ctx->block_count : 0;
             uint64_t before_rcx = ctx->regs.x64.rcx;
@@ -13346,10 +14483,10 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                 uint64_t block_delta = ctx->block_count - before_blocks;
                 uint64_t step_delta = ctx->step_count - before_steps;
                 /* Свидетель для вопроса «дошли ли до переходника по цепочке» — см.
-                 * t_last_run_entry. Пишется БЕЗУСЛОВНО, и при block_delta==0 тоже:
+                 * (*tls_last_run_entry). Пишется БЕЗУСЛОВНО, и при block_delta==0 тоже:
                  * иначе «один блок» и «не считалось» слились бы в одно значение. */
-                t_last_run_entry = cached->guest_addr;
-                t_last_run_delta = block_delta ? block_delta : 1;
+                (*tls_last_run_entry) = cached->guest_addr;
+                (*tls_last_run_delta) = block_delta ? block_delta : 1;
                 if (block_delta) {
                     run_block_delta = block_delta;
                     blocks_executed += block_delta;
@@ -13397,7 +14534,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                     fprintf(stderr, "macrunner-hb-chain-otkaz-posle-cepochki: n=%llu "
                             "rezultat=%d vhod=0x%llx blokov=%llu pc=0x%llx\n",
                             (unsigned long long)n, (int)ctx->last_result,
-                            (unsigned long long)t_last_run_entry,
+                            (unsigned long long)(*tls_last_run_entry),
                             (unsigned long long)run_block_delta,
                             (unsigned long long)ctx->pc);
                     fflush(stderr);
@@ -13442,6 +14579,14 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                 ctx->last_result = HB_OK;
                 return HB_OK;
             }
+            if (ctx && ctx->last_result == HB_ERR_ACCESS_PENDING) {
+                out->result = HB_ERR_ACCESS_PENDING;
+                out->steps_executed = steps;
+                out->blocks_executed = blocks_executed;
+                out->faulted = false;
+                out->fault_reason = NULL;
+                return HB_OK;
+            }
             set_helper_fault_result(out, ctx, steps, blocks_executed);
             return HB_OK;
         }
@@ -13479,7 +14624,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                     continue;
                 }
             }
-            t_runexit[RUNEXIT_RET]++;
+            tls_runexit[RUNEXIT_RET]++;
             out->result = HB_OK;
             out->steps_executed = steps;
             out->blocks_executed = blocks_executed;
@@ -13530,7 +14675,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
                 out->result = HB_OK;
                 out->steps_executed = steps;
                 out->blocks_executed = blocks_executed;
-                t_runexit[RUNEXIT_EXT_XFER]++;
+                tls_runexit[RUNEXIT_EXT_XFER]++;
                 hb_xborder_note(rt, ctx->pc, 1);   /* к ХОСТУ или в гостевой код */
                 hb_record_exit(ctx, ctx->pc, 1);   /* ★ ПОВТОР-3 — запись выхода наружу */
                 return HB_OK; /* External branch/call/return boundary */
@@ -13540,7 +14685,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
              * провала: если единица увела pc куда-то ещё, «цель не найдена» — по-прежнему
              * отказ, и глушить его нельзя. */
             if (seq_end && ctx->pc == seq_next) {
-                t_runexit[RUNEXIT_SEQ_END]++;
+                tls_runexit[RUNEXIT_SEQ_END]++;
                 out->result = HB_OK;
                 out->steps_executed = steps;
                 out->blocks_executed = blocks_executed;
@@ -13550,7 +14695,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
             out->steps_executed = steps;
             out->blocks_executed = blocks_executed;
             out->faulted = true;
-            t_runexit[RUNEXIT_NOT_FOUND]++;
+            tls_runexit[RUNEXIT_NOT_FOUND]++;
             out->fault_reason = "branch target block not found";
             return HB_OK;
         }
@@ -13558,9 +14703,9 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
             terminal->op == HB_IR_CALL || terminal->op == HB_IR_LOOP ||
             terminal->op == HB_IR_JRCXZ) {
             if (chain_accounting) {
-                if (!chain_patch_enabled) t_chain_decline[CHAIN_SITE_PATCH_OFF]++;
-                else if (!cached || !next_cached) t_chain_decline[CHAIN_SITE_NO_ENTRY]++;
-                else t_chain_decline[CHAIN_SITE_CALLED]++;
+                if (!chain_patch_enabled) tls_chain_decline[CHAIN_SITE_PATCH_OFF]++;
+                else if (!cached || !next_cached) tls_chain_decline[CHAIN_SITE_NO_ENTRY]++;
+                else tls_chain_decline[CHAIN_SITE_CALLED]++;
             }
             if (chain_patch_enabled && cached && next_cached)
                 (void)patch_block_tail(rt, cached, next_cached, func);
@@ -13600,6 +14745,7 @@ hb_result_t hb_runtime_run(hb_context_t* ctx, const hb_ir_func_t* func, hb_backe
             fflush(stderr);
         }
     }
+    if (ctx) hb_host_fpcr_apply_mxcsr(ctx->mxcsr);
     if (!ctx || !func || !out) return HB_ERR_INVALID_ARG;
 
     memset(out, 0, sizeof(hb_exec_result_t));

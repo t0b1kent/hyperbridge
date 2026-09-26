@@ -11,6 +11,13 @@
 #define HB_GUEST32_SIZE 0x100000000ULL
 #define HB_MEMORY_HOT_CACHE_SLOTS 16
 
+/* Provider performs one atomic RMW on the actual shared backing memory.
+ * Pairs are low/high words. HB_OK publishes both outputs; any error must
+ * preserve them. Even a comparison mismatch requires writable memory. */
+typedef hb_result_t (*hb_memory_atomic_cmpxchg128_fn)(
+    void* user, hb_gva_t addr, const uint64_t expected[2],
+    const uint64_t desired[2], uint64_t observed[2], bool* exchanged);
+
 /* MacRunner 2026-07-31 — diagnostic hand-off: the guest block address currently dispatching, written by the
  * runtime ONLY when MACRUNNER_HB_TRACE_NULL_PC is set. hb_memory.c has no ctx, and a quarter of all region
  * lookups resolve to NULL, so the open question is which guest code issues them. Gated because on Darwin a
@@ -127,6 +134,14 @@ typedef struct hb_memory {
      * more of the address space region-free, so a cached gap stays true. Keeping them apart means an add no
      * longer wipes every thread's positive cache, and the two counters do not share write traffic. */
     uint64_t     add_gen;
+    /* Appended for ABI stability. Register before publishing to other threads;
+     * this provider has a separate user pointer from read/write/grow handlers. */
+    hb_memory_atomic_cmpxchg128_fn atomic_cmpxchg128;
+    void* atomic_cmpxchg128_user;
+    /* Claude, 25.09.2026 — дописано в конец. Запись в тождественную неисполняемую область идёт
+     * через special_write встраивающего (у адаптера — прямая запись под страховкой Wine), а не
+     * через mach_vm_write на каждое обращение. Выключено по умолчанию. */
+    bool identity_writes_special;
 } hb_memory_t;
 
 hb_memory_t* hb_memory_create(size_t max_size);
@@ -172,11 +187,27 @@ void hb_memory_perm_map_set(hb_memory_t* mem, hb_gva_t base, size_t size, hb_per
  * Нужен, чтобы `JIT helper fault` называл адрес, а не только причину: block_pc на HK лежит
  * в коде Mono и в каждом прогоне другой. valid=0 — отказов в этом потоке ещё не было. */
 void hb_memory_last_fault(uint64_t* addr, size_t* size, int* is_write, int* valid);
+void hb_memory_set_identity_writes_special(hb_memory_t* mem, bool on);
+/* Claude 26.09: свой обработчик SIGSEGV/SIGBUS перед обработчиком хозяина (Wine) — перехват
+ * отказов выпущенного кода ЭТОЙ копии ядра; прочие отказы передаются дальше. */
+void hb_memory_install_fault_handlers(void);
 void hb_memory_set_special_handlers(hb_memory_t* mem,
                                     hb_result_t (*read_fn)(void* user, hb_gva_t addr, void* out, size_t size),
                                     hb_result_t (*write_fn)(void* user, hb_gva_t addr, const void* in, size_t size),
                                     void* user);
 void hb_memory_set_grow_handler(hb_memory_t* mem, bool (*grow_fn)(void* user, hb_gva_t addr));
+
+void hb_memory_set_atomic_cmpxchg128_handler(hb_memory_t* mem,
+                                            hb_memory_atomic_cmpxchg128_fn callback,
+                                            void* user);
+bool hb_memory_has_atomic_cmpxchg128_handler(const hb_memory_t* mem);
+/* Reject malformed/alignment/wrapping requests before calling the provider.
+ * No provider returns HB_ERR_UNSUPPORTED_FEATURE. Configured errors propagate
+ * without retry through the ordinary read/write handlers. Error outputs are
+ * preserved even if a provider modifies its temporary outputs before failing. */
+hb_result_t hb_memory_atomic_cmpxchg128(hb_memory_t* mem, hb_gva_t addr,
+                                      const uint64_t expected[2], const uint64_t desired[2],
+                                      uint64_t observed[2], bool* exchanged);
 
 hb_result_t hb_memory_read_u8(hb_memory_t* mem, hb_gva_t addr, uint8_t* out);
 hb_result_t hb_memory_read_u16(hb_memory_t* mem, hb_gva_t addr, uint16_t* out);

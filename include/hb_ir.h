@@ -627,7 +627,10 @@ typedef enum {
     HB_IR_UNSUPPORTED,
     /* Standard x64 extended-state operations; src2 records REX.W. */
     HB_IR_XSAVE,
-    HB_IR_XRSTOR
+    HB_IR_XRSTOR,
+    /* Atomic architectural retirement of x64 LEAVE; dst carries BP width.
+     * Appended to preserve all existing serialized opcode values. */
+    HB_IR_LEAVE
 } hb_ir_op_t;
 
 typedef enum {
@@ -700,7 +703,26 @@ typedef struct hb_ir_instr {
                            * codegen must bracket the op with DMB ISH or it livelocks on ARM64. */
     uint64_t target;      /* branch target guest address */
     const char* comment;
+    /* Provenance, set only by ordinary scalar memory MOV in the x64 lifter.
+     * LOAD/STORE alone also describe SIMD and non-temporal instructions. */
+    bool scalar_memory_move;
 } hb_ir_instr_t;
+
+static inline bool hb_ir_scalar_memory_move(const hb_ir_instr_t* i) {
+    if (!i || !i->scalar_memory_move || !i->guest_len || i->is_locked ||
+        i->src1.type != HB_OP_MEM) return false;
+    hb_size_t size = i->src1.size;
+    if (size != HB_SIZE_8 && size != HB_SIZE_16 &&
+        size != HB_SIZE_32 && size != HB_SIZE_64) return false;
+    if (i->op == HB_IR_LOAD)
+        return i->dst.type == HB_OP_REG && i->dst.reg <= HB_REG_R15 &&
+               i->dst.size == size;
+    if (i->op == HB_IR_STORE)
+        return i->src2.size == size && (i->src2.type == HB_OP_IMM ||
+               (i->src2.type == HB_OP_REG && i->src2.reg <= HB_REG_R15));
+    return false;
+}
+
 
 /* Basic block */
 typedef struct hb_ir_block {
@@ -723,7 +745,40 @@ typedef struct hb_ir_block {
      * Blocks are created by hb_ir_block_create and only appended to during translation, so the
      * one place that must invalidate this is the append path. */
     int32_t first_transfer_idx;
+    /* Explicit single-instruction provenance, independent of the optional CFG
+     * ledger and of instr_count (which can be zero). Immutable after lifting. */
+    bool exec_unit_valid;
+    uint64_t exec_unit_pc;
+    uint8_t exec_unit_size;
+    bool exec_unit_transfer;
 } hb_ir_block_t;
+
+static inline bool hb_ir_exec_unit_transfer(hb_ir_op_t op) {
+    return op == HB_IR_JMP || op == HB_IR_Jcc || op == HB_IR_LOOP ||
+           op == HB_IR_JRCXZ || op == HB_IR_CALL || op == HB_IR_RET ||
+           op == HB_IR_FAR_BRANCH;
+}
+
+/* Reject untagged/merged/malformed units before an observer can consume access.
+ * This validates the lifter-owned representation, not arbitrary mutated IR. */
+static inline bool hb_ir_is_exec_unit(const hb_ir_block_t* block) {
+    if (!block || !block->exec_unit_valid || !block->exec_unit_size ||
+        block->exec_unit_size > 15 || block->guest_addr != block->exec_unit_pc ||
+        block->exec_unit_pc > UINT64_MAX - block->exec_unit_size ||
+        block->instr_count > block->instr_cap ||
+        (block->instr_count && !block->instrs)) return false;
+    bool transfer = false;
+    for (size_t i = 0; i < block->instr_count; i++) {
+        const hb_ir_instr_t* instr = &block->instrs[i];
+        if (instr->guest_addr != block->exec_unit_pc ||
+            instr->guest_len != block->exec_unit_size) return false;
+        if (hb_ir_exec_unit_transfer(instr->op)) {
+            if (i + 1 != block->instr_count) return false;
+            transfer = true;
+        }
+    }
+    return transfer == block->exec_unit_transfer;
+}
 
 /* Sentinels for hb_ir_block_t.first_transfer_idx. */
 #define HB_IR_TRANSFER_UNCOMPUTED (-2)

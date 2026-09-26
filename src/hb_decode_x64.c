@@ -5,6 +5,7 @@
 #include "hb_ir.h"
 #include <string.h>
 #include <stdlib.h>
+#include <setjmp.h>
 
 #define HB_X64_DEFAULT_MXCSR 0x1f80u
 #define HB_X87_DEFAULT_CONTROL_WORD 0x037fu
@@ -15,14 +16,39 @@ typedef struct {
     size_t pos;
     uint64_t addr;
     bool fault;
+    jmp_buf* probe_escape;
+    volatile size_t* probe_required;
+    size_t shared_required;
 } hb_dec_t;
 
 static inline bool can_read(hb_dec_t* d, size_t n) {
     return d->pos + n <= d->len;
 }
 
+/* can_read is a peek; require_bytes authorizes only a mandatory field.
+ * Escape before placeholder bytes could decide an opcode or operand. */
+static inline bool require_bytes(hb_dec_t* d, size_t n) {
+    if (d->probe_escape) {
+        if (d->pos > 15 || n > 15 - d->pos) longjmp(*d->probe_escape, 2);
+        if (!can_read(d, n)) {
+            *d->probe_required = d->pos + n;
+            longjmp(*d->probe_escape, 1);
+        }
+    }
+    return can_read(d, n);
+}
+
+/* The shared TSX helper has an optional dispatch peek. Preserve its predicate
+ * semantics: a failed peek alone does not request a fetch. Included helpers
+ * return DECODE_FAILED immediately for their mandatory shortages. */
+static inline bool shared_can_read(hb_dec_t* d, size_t n) {
+    bool ready = can_read(d, n);
+    if (d->probe_escape && !ready) d->shared_required = d->pos + n;
+    return ready;
+}
+
 static inline uint8_t read_u8(hb_dec_t* d) {
-    if (!can_read(d, 1)) {
+    if (!require_bytes(d, 1)) {
         d->fault = true;
         d->pos = d->len;
         return 0xCC;
@@ -31,23 +57,27 @@ static inline uint8_t read_u8(hb_dec_t* d) {
 }
 
 static inline int8_t read_s8(hb_dec_t* d) {
+    if (d->probe_escape) require_bytes(d, 1);
     return (int8_t)d->code[d->pos++];
 }
 
 static inline int16_t read_s16(hb_dec_t* d) {
+    if (d->probe_escape) require_bytes(d, 2);
     uint16_t lo = d->code[d->pos] | (d->code[d->pos+1] << 8u);
     d->pos += 2;
     return (int16_t)lo;
 }
 
 static inline int32_t read_s32(hb_dec_t* d) {
-    uint32_t lo = d->code[d->pos] | (d->code[d->pos+1] << 8u)
-                 | (d->code[d->pos+2] << 16u) | (d->code[d->pos+3] << 24u);
+    if (d->probe_escape) require_bytes(d, 4);
+    uint32_t lo = (uint32_t)d->code[d->pos] | ((uint32_t)d->code[d->pos+1] << 8u)
+                 | ((uint32_t)d->code[d->pos+2] << 16u) | ((uint32_t)d->code[d->pos+3] << 24u);
     d->pos += 4;
     return (int32_t)lo;
 }
 
 static inline uint64_t read_u64(hb_dec_t* d) {
+    if (d->probe_escape) require_bytes(d, 8);
     uint64_t a = d->code[d->pos] | ((uint64_t)d->code[d->pos+1] << 8u)
                | ((uint64_t)d->code[d->pos+2] << 16u) | ((uint64_t)d->code[d->pos+3] << 24u);
     d->pos += 4;
@@ -539,7 +569,7 @@ static hb_result_t parse_modrm(hb_dec_t* d, uint8_t modrm,
     int64_t disp = 0;
 
     if (rm == 4) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t sib = read_u8(d);
         out->has_sib = true;
         out->sib_scale = (sib >> 6) & 3;
@@ -563,10 +593,10 @@ static hb_result_t parse_modrm(hb_dec_t* d, uint8_t modrm,
     }
 
     if (mod == 1) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         disp = read_s8(d);
     } else if (mod == 2 || (rm == 5 && mod == 0) || (rm == 4 && out->sib_base == 5 && mod == 0)) {
-        if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
         disp = read_s32(d);
     }
 
@@ -599,8 +629,10 @@ static hb_result_t parse_modrm(hb_dec_t* d, uint8_t modrm,
     return HB_OK;
 }
 
+#define can_read shared_can_read
 #include "hb_decode_vsib_obshchee.inc"
 #include "hb_decode_tsx_obshchee.inc"
+#undef can_read
 
 
 static hb_result_t parse_modrm_ext(hb_dec_t* d, uint8_t modrm,
@@ -629,7 +661,7 @@ static hb_result_t parse_modrm_ext(hb_dec_t* d, uint8_t modrm,
     bool rex_x = out->rex_x > 0;
 
     if (rm == 4) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t sib = read_u8(d);
         out->has_sib = true;
         out->sib_scale = (sib >> 6) & 3;
@@ -654,10 +686,10 @@ static hb_result_t parse_modrm_ext(hb_dec_t* d, uint8_t modrm,
     }
 
     if (mod == 1) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         disp = read_s8(d);
     } else if (mod == 2 || (rm == 5 && mod == 0) || (rm == 4 && out->sib_base == 5 && mod == 0)) {
-        if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
         disp = read_s32(d);
     }
 
@@ -676,17 +708,17 @@ static hb_result_t set_acc_imm_op(hb_dec_t* d, hb_decoded_t* out,
     uint8_t sz = rex_w ? 8 : (operand16 ? 2 : 4);
     set_reg(out, 1, HB_REG_RAX, sz);
     if (operand16 && !rex_w) {
-        if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
         set_imm(out, 2, (int64_t)read_s16(d), sz);
     } else {
-        if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
         set_imm(out, 2, (int64_t)read_s32(d), sz);
     }
     return HB_OK;
 }
 
 static hb_result_t decode_x87_x64(hb_dec_t* d, uint8_t opcode, bool rex_b, bool operand16, hb_decoded_t* out) {
-    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
     uint8_t modrm = read_u8(d);
     uint8_t mod = (modrm >> 6) & 3u;
     uint8_t reg_op = (modrm >> 3) & 7u;
@@ -1005,7 +1037,7 @@ static int cond_from_cc(uint8_t cc) {
 }
 
 static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
-    if (d->pos >= d->len) return HB_ERR_DECODE_FAILED;
+    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
 
     uint64_t addr = d->addr;
 
@@ -1072,7 +1104,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     out->address32_prefix = address32;
     out->lock_prefix = lock_prefix;
 
-    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
     opcode = read_u8(d);
     uint8_t op_size = rex_w ? 8 : (operand16 ? 2 : 4);
 
@@ -1081,7 +1113,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         uint8_t evex_p0 = 0, evex_p2 = 0, evex_aaa = 0, evex_ll = 0;
         bool evex_z = false, evex_r2 = false, evex_b = false;
         if (opcode == 0xC5) {
-            if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, d->probe_escape ? 1 : 2)) return HB_ERR_DECODE_FAILED;
             uint8_t vex2 = read_u8(d);
             rex_r = ((~vex2 >> 7) & 1) != 0;
             vex_v = (uint8_t)((~vex2 >> 3) & 0x0f);
@@ -1089,8 +1121,10 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             vex_pp = vex2 & 3;
             vex_opcode = read_u8(d);
         } else if (opcode == 0xC4) {
-            if (!can_read(d, 3)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, d->probe_escape ? 1 : 3)) return HB_ERR_DECODE_FAILED;
             uint8_t vex2 = read_u8(d);
+            if (d->probe_escape && ((vex2 & 0x1f) < 1 || (vex2 & 0x1f) > 3))
+                return HB_ERR_UNSUPPORTED_OPCODE;
             uint8_t vex3 = read_u8(d);
             rex_r = ((~vex2 >> 7) & 1) != 0;
             rex_x = ((~vex2 >> 6) & 1) != 0;
@@ -1102,9 +1136,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             vex_pp = vex3 & 3;
             vex_opcode = read_u8(d);
         } else {
-            if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, d->probe_escape ? 1 : 4)) return HB_ERR_DECODE_FAILED;
             evex_p0 = read_u8(d);
+            if (d->probe_escape && ((evex_p0 & 8) || (evex_p0 & 7) == 0 ||
+                                    (evex_p0 & 7) == 4 || (evex_p0 & 7) == 7))
+                return HB_ERR_UNSUPPORTED_OPCODE;
             uint8_t evex_p1 = read_u8(d);
+            if (d->probe_escape && !(evex_p1 & 4)) return HB_ERR_UNSUPPORTED_OPCODE;
             evex_p2 = read_u8(d);
             rex_r = ((~evex_p0 >> 7) & 1) != 0;
             rex_x = ((~evex_p0 >> 6) & 1) != 0;
@@ -1157,7 +1195,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if (vex_map == 1 && (vex_pp == 2 || vex_pp == 3) &&
                     vex_opcode == 0x78) {
                     hb_result_t r2;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     {
                         uint8_t modrm2 = read_u8(d);
                         out->opcode = (vex_pp == 2) ? HB_INS_VCVTTSS2USI
@@ -1188,7 +1226,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 else if (vex_opcode == 0x15 && vex_pp == 1 && vex_w) { mapped = HB_INS_UNPCKHPD; out->evex_mask_lane = 8; }
                 else if (vex_opcode == 0x70 && (vex_pp == 1 || vex_pp == 2 || vex_pp == 3) && !vex_w) {
                     uint8_t mask_lane = vex_pp == 1 ? 4 : 2;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_pp == 1 ? HB_INS_PSHUFD :
                                   (vex_pp == 2 ? HB_INS_PSHUFHW : HB_INS_PSHUFLW);
@@ -1203,7 +1241,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     mark_vec_operand(out, 1, vec_size);
                     if (out->op2.is_reg) mark_vec_operand(out, 2, vec_size);
                     else if (out->op2.is_mem) out->op2.size = vec_size;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_imm(out, 3, read_u8(d), 1);
                     return HB_OK;
                 }
@@ -1338,7 +1376,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     } else {
                         return HB_ERR_UNSUPPORTED_OPCODE;
                     }
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if (((modrm >> 6) & 3u) == 3 && !allow_reg_src) return HB_ERR_UNSUPPORTED_OPCODE;
                     out->opcode = mapped;
@@ -1362,7 +1400,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     else if (vex_opcode == 0x59 && vex_w) { mapped = HB_INS_VPBROADCASTQ; lane = 8; }
                     else return HB_ERR_UNSUPPORTED_OPCODE;
                     if (!src_bytes) src_bytes = lane;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = mapped;
                     out->evex_mask_lane = lane;
@@ -1391,7 +1429,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
             }
             if (mapped) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 bool evex_broadcast = false;
                 uint8_t evex_broadcast_size = 0;
@@ -1524,7 +1562,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 mark_vec_operand(out, 3, operand_vec_size);
                 if (out->op3.is_mem) out->op3.size = scalar_evex ? scalar_lane : (evex_broadcast ? evex_broadcast_size : vec_size);
                 if (mapped == HB_INS_SHUFPS || mapped == HB_INS_SHUFPD) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_extra_imm8(out, read_u8(d));
                 }
                 return HB_OK;
@@ -1533,7 +1571,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 bool scalar = vex_pp == 2 || vex_pp == 3;
                 bool is_pd = vex_pp == 1 || vex_pp == 3;
                 uint8_t lane = is_pd ? 8 : 4;
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 switch (vex_pp) {
                     case 0: out->opcode = HB_INS_VCMPPS; break;
@@ -1567,7 +1605,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 else if (out->op3.is_mem) out->op3.size = evex_broadcast ? lane : (scalar ? lane : vec_size);
                 out->evex_broadcast = evex_broadcast;
                 out->evex_mask_lane = lane;
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_extra_imm8(out, read_u8(d));
                 return HB_OK;
             }
@@ -1586,7 +1624,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                  ((vex_pp == 1 || vex_pp == 2 || vex_pp == 3) && vex_opcode == 0xf7) ||
                  ((vex_pp == 2 || vex_pp == 3) && vex_opcode == 0xf5) ||
                  (vex_pp == 3 && vex_opcode == 0xf6))) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 uint8_t ext = (modrm >> 3) & 7;
                 uint8_t size = vex_w ? 8 : 4;
@@ -1651,13 +1689,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
             }
             if (vex_map == 3 && vex_pp == 3 && !vex_l && vex_opcode == 0xf0) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 uint8_t size = vex_w ? 8 : 4;
                 out->opcode = HB_INS_RORX;
                 hb_result_t r = parse_modrm(d, modrm, vex_w, rex_r, rex_x, rex_b, 4, out, 1, 2, false);
                 if (r != HB_OK) return r;
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 3, read_u8(d), 1);
                 out->op1.size = size;
                 out->op2.size = size;
@@ -1667,7 +1705,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if (vex_opcode == 0xc2) {
                     uint8_t lane = (vex_pp == 1 || vex_pp == 3) ? 8 : 4;
                     bool scalar = vex_pp == 2 || vex_pp == 3;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     switch (vex_pp) {
                         case 0: out->opcode = HB_INS_VCMPPS; break;
@@ -1687,12 +1725,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     mark_vec_operand(out, 2, 16);
                     if (out->op3.is_reg) mark_vec_operand(out, 3, scalar ? 16 : vec_size);
                     else if (out->op3.is_mem) out->op3.size = scalar ? lane : vec_size;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_extra_imm8(out, read_u8(d));
                     return HB_OK;
                 }
                 if (vex_opcode == 0x6e && vex_pp == 1) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = HB_INS_MOVD;
                     hb_result_t r = parse_modrm(d, modrm, vex_w, rex_r, rex_x, rex_b, 4, out, 1, 2, false);
@@ -1702,7 +1740,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if ((vex_opcode == 0x7e || vex_opcode == 0xd6) && vex_pp == 1) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t size = (vex_opcode == 0xd6 || vex_w) ? 8 : 4;
                     out->opcode = HB_INS_MOVD;
@@ -1715,7 +1753,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0x7e && vex_pp == 2) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = HB_INS_MOVD;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -1728,10 +1766,11 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 if ((vex_opcode == 0x50 && (vex_pp == 0 || vex_pp == 1)) ||
                     (vex_opcode == 0xd7 && vex_pp == 1)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0xd7 ? HB_INS_PMOVMSKB :
                                   (vex_pp == 1 ? HB_INS_MOVMSKPD : HB_INS_MOVMSKPS);
+                    if (d->probe_escape && (modrm >> 6) != 3) return HB_ERR_UNSUPPORTED_OPCODE;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 4, out, 1, 2, false);
                     if (r != HB_OK) return r;
@@ -1746,7 +1785,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0xae && vex_pp == 0) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t mod = (modrm >> 6) & 3;
                     uint8_t ext = (modrm >> 3) & 7;
@@ -1768,7 +1807,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_ERR_UNSUPPORTED_OPCODE;
                 }
                 if (vex_opcode == 0xf7 && vex_pp == 1 && !vex_l) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if ((modrm >> 6) != 3) return HB_ERR_UNSUPPORTED_OPCODE;
                     out->opcode = HB_INS_VMASKMOVDQU;
@@ -1781,12 +1820,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 if ((vex_opcode == 0xc4 || vex_opcode == 0xc5) && vex_pp == 1 && !vex_w && !vex_l) {
                     bool extract = vex_opcode == 0xc5;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = extract ? HB_INS_PEXTRW : HB_INS_PINSRW;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 4, out, 1, 2, false);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     if (extract) {
@@ -1804,7 +1843,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 if ((vex_opcode == 0x6f || vex_opcode == 0x7f) &&
                     (vex_pp == 1 || vex_pp == 2)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = HB_INS_SSE_MOV;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -1816,7 +1855,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if ((vex_opcode == 0x10 || vex_opcode == 0x11 ||
                      vex_opcode == 0x28 || vex_opcode == 0x29) &&
                     (vex_pp == 0 || vex_pp == 1)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = HB_INS_SSE_MOV;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -1828,7 +1867,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 if (((vex_opcode == 0x2b) && (vex_pp == 0 || vex_pp == 1)) ||
                     ((vex_opcode == 0xe7) && vex_pp == 1)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
                     out->opcode = HB_INS_SSE_MOV;
@@ -1839,7 +1878,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0xf0 && vex_pp == 3) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
                     out->opcode = HB_INS_SSE_MOV;
@@ -1851,7 +1890,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 if ((vex_opcode == 0x2e || vex_opcode == 0x2f) &&
                     (vex_pp == 0 || vex_pp == 1)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     bool is_pd = vex_pp == 1;
                     out->opcode = is_pd ? HB_INS_COMISD : HB_INS_COMISS;
@@ -1865,7 +1904,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0x70 && (vex_pp == 1 || vex_pp == 2 || vex_pp == 3)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if (vex_pp == 1) out->opcode = HB_INS_PSHUFD;
                     else if (vex_pp == 2) out->opcode = HB_INS_PSHUFHW;
@@ -1876,13 +1915,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     mark_vec_operand(out, 1, vec_size);
                     if (out->op2.is_reg) mark_vec_operand(out, 2, vec_size);
                     else if (out->op2.is_mem) out->op2.size = vec_size;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_imm(out, 3, read_u8(d), 1);
                     return HB_OK;
                 }
                 if ((vex_opcode == 0x12 && (vex_pp == 2 || vex_pp == 3)) ||
                     (vex_opcode == 0x16 && vex_pp == 2)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if (vex_opcode == 0x12 && vex_pp == 2) out->opcode = HB_INS_VMOVSLDUP;
                     else if (vex_opcode == 0x12) out->opcode = HB_INS_VMOVDDUP;
@@ -1898,7 +1937,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if ((vex_opcode == 0x5a && (vex_pp == 0 || vex_pp == 1)) ||
                     (vex_opcode == 0x5b && (vex_pp == 0 || vex_pp == 1 || vex_pp == 2)) ||
                     (vex_opcode == 0xe6 && (vex_pp == 1 || vex_pp == 2 || vex_pp == 3))) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t dst_size = vec_size;
                     uint8_t src_size = vec_size;
@@ -1945,7 +1984,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0x5a && (vex_pp == 2 || vex_pp == 3)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t lane = vex_pp == 3 ? 8 : 4;
                     out->opcode = vex_pp == 3 ? HB_INS_CVTSD2SS : HB_INS_CVTSS2SD;
@@ -1963,7 +2002,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0x2a && (vex_pp == 2 || vex_pp == 3)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_pp == 3 ? HB_INS_CVTSI2SD : HB_INS_CVTSI2SS;
                     hb_result_t r = parse_modrm(d, modrm, vex_w, rex_r, rex_x, rex_b,
@@ -1980,7 +2019,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 if ((vex_opcode == 0x2c || vex_opcode == 0x2d) &&
                     (vex_pp == 2 || vex_pp == 3)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     bool is_sd = vex_pp == 3;
                     bool truncate = vex_opcode == 0x2c;
@@ -1995,7 +2034,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if ((vex_opcode == 0x52 || vex_opcode == 0x53) && vex_pp == 2) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0x52 ? HB_INS_RSQRTSS : HB_INS_RCPSS;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2014,7 +2053,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if ((vex_opcode == 0x12 || vex_opcode == 0x13 ||
                      vex_opcode == 0x16 || vex_opcode == 0x17) &&
                     (vex_pp == 0 || vex_pp == 1) && !vex_l) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    /* Every ModRM completion of these reserved-vvvv stores
+                     * is rejected below: register forms at mod==3, memory
+                     * forms at store&&vex_v. Do not demand that unused byte. */
+                    if (d->probe_escape && (vex_opcode == 0x13 || vex_opcode == 0x17) && vex_v)
+                        return HB_ERR_UNSUPPORTED_OPCODE;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t mod = (modrm >> 6) & 3;
                     if (mod == 3) {
@@ -2058,7 +2102,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 if ((vex_opcode == 0x10 || vex_opcode == 0x11) &&
                     (vex_pp == 2 || vex_pp == 3)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t mod = (modrm >> 6) & 3;
                     uint8_t lane = vex_pp == 3 ? 8 : 4;
@@ -2094,7 +2138,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if ((vex_opcode == 0xc6) && (vex_pp == 0 || vex_pp == 1)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_pp == 1 ? HB_INS_SHUFPD : HB_INS_SHUFPS;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2108,12 +2152,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     mark_vec_operand(out, 2, vec_size);
                     if (out->op3.is_reg) mark_vec_operand(out, 3, vec_size);
                     else if (out->op3.is_mem) out->op3.size = vec_size;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_extra_imm8(out, read_u8(d));
                     return HB_OK;
                 }
                 if (vex_pp == 1 && (vex_opcode == 0x71 || vex_opcode == 0x72 || vex_opcode == 0x73)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t ext = (modrm >> 3) & 7;
                     if (vex_opcode == 0x71 && ext == 2) mapped = HB_INS_PSRLW;
@@ -2135,7 +2179,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     mark_vec_operand(out, 1, vec_size);
                     mark_vec_operand(out, 2, vec_size);
                     if (out->op2.is_mem) out->op2.size = vec_size;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_imm(out, 3, read_u8(d), 1);
                     return HB_OK;
                 }
@@ -2232,7 +2276,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                  * Источник ТОЛЬКО память: регистровая форма этих команд не
                  * существует. */
                 if ((vex_opcode == 0x1a || vex_opcode == 0x5a) && !vex_w && vex_l) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     hb_result_t r;
                     if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
@@ -2247,7 +2291,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if ((vex_opcode == 0x0e || vex_opcode == 0x0f) && !vex_w) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0x0f ? HB_INS_VTESTPD : HB_INS_VTESTPS;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2276,7 +2320,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     } else {
                         return HB_ERR_UNSUPPORTED_OPCODE;
                     }
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if (((modrm >> 6) & 3u) == 3 && !allow_reg_src) return HB_ERR_UNSUPPORTED_OPCODE;
                     out->opcode = mapped;
@@ -2291,7 +2335,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if (vex_opcode == 0x13 && !vex_w) {
                     uint8_t src_bytes = vex_l ? 16 : 8;
                     uint8_t dst_bytes = vex_l ? 32 : 16;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = HB_INS_VCVTPH2PS;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2307,7 +2351,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0x2a) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
                     out->opcode = HB_INS_SSE_MOV;
@@ -2318,7 +2362,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (!mapped && (vex_opcode == 0x0c || vex_opcode == 0x0d) && !vex_w) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0x0c ? HB_INS_VPERMILPS : HB_INS_VPERMILPD;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2339,7 +2383,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     bool scalar = fma3_opcode_is_scalar(vex_opcode);
                     uint8_t lane = vex_w ? 8 : 4;
                     uint8_t op_bytes = scalar ? 16 : vec_size;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = mapped;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2393,7 +2437,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if (!mapped && (vex_opcode == 0x2c || vex_opcode == 0x2d ||
                                 vex_opcode == 0x2e || vex_opcode == 0x2f ||
                                 vex_opcode == 0x8c || vex_opcode == 0x8e)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t mod = (modrm >> 6) & 3;
                     if (mod == 3) return HB_ERR_UNSUPPORTED_OPCODE;
@@ -2427,7 +2471,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (!mapped && (vex_opcode == 0x16 || vex_opcode == 0x36) && !vex_w && vex_l) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0x16 ? HB_INS_VPERMPS : HB_INS_VPERMD;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2453,7 +2497,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     } else {
                         mapped = vex_w ? HB_INS_VPSLLVQ : HB_INS_VPSLLVD;
                     }
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = mapped;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2472,7 +2516,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if (!mapped && (vex_opcode == 0x58 || vex_opcode == 0x59 ||
                                 vex_opcode == 0x5a || vex_opcode == 0x78 ||
                                 vex_opcode == 0x79)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     uint8_t mod = (modrm >> 6) & 3;
                     uint8_t lane = 0;
@@ -2505,13 +2549,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
             } else if (vex_map == 3 && vex_pp == 1) {
                 if ((vex_opcode == 0x04 || vex_opcode == 0x05) && !vex_w) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0x04 ? HB_INS_VPERMILPS : HB_INS_VPERMILPD;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 vec_size, out, 1, 2, false);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     mark_vec_operand(out, 1, vec_size);
                     if (out->op2.is_reg) mark_vec_operand(out, 2, vec_size);
@@ -2522,13 +2566,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 if (vex_opcode == 0x1d && !vex_w) {
                     uint8_t result_bytes = vex_l ? 16 : 8;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = HB_INS_VCVTPS2PH;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 vec_size, out, 1, 2, true);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     if (out->op1.is_reg) {
@@ -2543,7 +2587,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if (vex_opcode >= 0x08 && vex_opcode <= 0x0b && vex_pp == 1) {
                     bool scalar = vex_opcode == 0x0a || vex_opcode == 0x0b;
                     uint8_t lane = (vex_opcode == 0x09 || vex_opcode == 0x0b) ? 8 : 4;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     switch (vex_opcode) {
                         case 0x08: out->opcode = HB_INS_ROUNDPS; break;
@@ -2555,7 +2599,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 scalar ? lane : vec_size, out, 1, 2, false);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     if (scalar) {
@@ -2577,13 +2621,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 if ((vex_opcode == 0x40 || vex_opcode == 0x41) && vex_pp == 1 && !vex_w) {
                     bool fp64 = vex_opcode == 0x41;
                     if (fp64 && vex_l) return HB_ERR_UNSUPPORTED_OPCODE;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = fp64 ? HB_INS_DPPD : HB_INS_DPPS;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 fp64 ? 16 : vec_size, out, 1, 2, false);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     hb_decoded_t tmp = *out;
@@ -2597,12 +2641,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0x42 && vex_pp == 1 && !vex_w && !vex_l) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = HB_INS_VMPSADBW;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 16, out, 1, 2, false);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     hb_decoded_t tmp = *out;
@@ -2616,13 +2660,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if ((vex_opcode == 0x17 || vex_opcode == 0x21) && vex_pp == 1 && !vex_l) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0x17 ? HB_INS_EXTRACTPS : HB_INS_INSERTPS;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 4, out, 1, 2,
                                                 vex_opcode == 0x17);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     if (vex_opcode == 0x17) {
@@ -2650,7 +2694,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     if ((vex_opcode == 0x14 || vex_opcode == 0x15 || vex_opcode == 0x20) && vex_w) {
                         return HB_ERR_UNSUPPORTED_OPCODE;
                     }
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     if (extract) {
                         if (vex_opcode == 0x14) out->opcode = HB_INS_PEXTRB;
@@ -2659,7 +2703,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                         hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                     elem_size == 8 ? 8 : 4, out, 1, 2, true);
                         if (r != HB_OK) return r;
-                        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                         set_extra_imm8(out, read_u8(d));
                         mark_xmm_operand(out, 2);
                         if (out->op1.is_mem) out->op1.size = elem_size;
@@ -2669,7 +2713,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                         hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                     elem_size == 8 ? 8 : 4, out, 1, 2, false);
                         if (r != HB_OK) return r;
-                        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                         uint8_t imm = read_u8(d);
                         set_extra_imm8(out, imm);
                         hb_decoded_t tmp = *out;
@@ -2683,13 +2727,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if ((vex_opcode == 0xce || vex_opcode == 0xcf) && vex_pp == 1 && vex_w) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0xce ? HB_INS_VGF2P8AFFINEQB : HB_INS_VGF2P8AFFINEINVQB;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 vec_size, out, 1, 2, false);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     hb_decoded_t tmp = *out;
@@ -2703,7 +2747,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if (vex_opcode == 0x44) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = HB_INS_VPCLMULQDQ;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
@@ -2717,21 +2761,21 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     mark_vec_operand(out, 2, 16);
                     mark_vec_operand(out, 3, 16);
                     if (out->op3.is_mem) out->op3.size = 16;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     return HB_OK;
                 }
                 if ((vex_opcode == 0x00 && vex_w && vex_l) ||
                     (vex_opcode == 0x01 && vex_w && vex_l)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_opcode == 0x00 ? HB_INS_VPERMQ : HB_INS_VPERMPD;
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 32, out, 1, 2, false);
                     if (r != HB_OK) return r;
                     mark_vec_operands(out, 32);
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_imm(out, 3, imm, 1);
                     set_extra_imm8(out, imm);
@@ -2744,7 +2788,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     (vex_opcode == 0x38 && vex_l) ||
                     (vex_opcode == 0x39 && vex_l) ||
                     (vex_opcode == 0x46 && vex_l)) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     bool extract = vex_opcode == 0x19 || vex_opcode == 0x39;
                     uint8_t rm_size = (vex_opcode == 0x18 || vex_opcode == 0x38 || extract) ? 16 : vec_size;
@@ -2761,7 +2805,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 rm_size, out, 1, 2, extract);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm = read_u8(d);
                     set_extra_imm8(out, imm);
                     if (extract) {
@@ -2784,7 +2828,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     return HB_OK;
                 }
                 if ((vex_opcode == 0x4a || vex_opcode == 0x4b || vex_opcode == 0x4c) && !vex_w) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     switch (vex_opcode) {
                         case 0x4a: out->opcode = HB_INS_VBLENDVPS; break;
@@ -2803,14 +2847,14 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     mark_vec_operand(out, 2, vec_size);
                     if (out->op3.is_reg) mark_vec_operand(out, 3, vec_size);
                     else if (out->op3.is_mem) out->op3.size = vec_size;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_extra_imm8(out, read_u8(d));
                     return HB_OK;
                 }
                 mapped = sse41_0f3a_opcode(vex_opcode);
             }
             if (mapped) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 out->opcode = mapped;
                 hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, vec_size, out, 1, 2, false);
@@ -2842,7 +2886,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                         mapped == HB_INS_PBLENDW || mapped == HB_INS_PALIGNR ||
                         mapped == HB_INS_DPPS || mapped == HB_INS_DPPD ||
                         mapped == HB_INS_MPSADBW || mapped == HB_INS_PCLMULQDQ;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t imm_0f3a = read_u8(d);
                     if (vvvv_pervyj_istochnik) {
                         hb_decoded_t tmp = *out;
@@ -2891,14 +2935,14 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         out->opcode = HB_INS_VEC;
         if (vex_opcode == 0x77) return HB_OK;
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 16, out, 1, 2, false);
         if (r != HB_OK) return r;
         mark_xmm_operand(out, 1);
         mark_xmm_operand(out, 2);
         if (vex_opcode == 0xc2) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 3, read_u8(d), 1);
         }
         return HB_OK;
@@ -2907,7 +2951,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     /* Group: MOV */
     if (opcode == 0x88) {
         /* MOV r/m8, r8 */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_MOV;
         out->writes_flags = false;
@@ -2915,7 +2959,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     }
     if (opcode == 0x89) {
         /* MOV r/m16/32/64, r16/32/64 */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_MOV;
         out->writes_flags = false;
@@ -2923,7 +2967,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     }
     if (opcode == 0x8A) {
         /* MOV r8, r/m8 */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_MOV;
         out->writes_flags = false;
@@ -2931,7 +2975,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     }
     if (opcode == 0x8B) {
         /* MOV r16/32/64, r/m16/32/64 */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_MOV;
         out->writes_flags = false;
@@ -2940,7 +2984,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (opcode == 0x8C || opcode == 0x8E) {
         /* MOV r/m16,Sreg and MOV Sreg,r/m16.  REX.W promotes register
            operands to r64 in long mode; memory selector slots stay 16-bit. */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t seg = (modrm >> 3) & 7;
         hb_result_t r;
@@ -2968,7 +3012,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         return HB_OK;
     }
     if (opcode == 0x8F) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         if (((modrm >> 3) & 7) != 0) return HB_ERR_UNSUPPORTED_OPCODE;
         out->opcode = HB_INS_POP;
@@ -2977,7 +3021,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     }
     if (opcode == 0x8D) {
         /* LEA r32/64, m */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_LEA;
         out->writes_flags = false;
@@ -2988,10 +3032,10 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         uint8_t sz = (opcode == 0xA0 || opcode == 0xA2) ? 1 : op_size;
         uint64_t moffs;
         if (address32) {
-            if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
             moffs = (uint32_t)read_s32(d);
         } else {
-            if (!can_read(d, 8)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 8)) return HB_ERR_DECODE_FAILED;
             moffs = read_u64(d);
         }
         out->opcode = HB_INS_MOV;
@@ -3009,7 +3053,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         /* MOV r8, imm8 */
         uint8_t reg_offset = 0;
         int reg = reg8_idx(opcode & 7, out->has_rex, rex_b, &reg_offset);
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         int8_t imm = read_s8(d);
         out->opcode = HB_INS_MOV;
         out->writes_flags = false;
@@ -3023,15 +3067,15 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         out->opcode = HB_INS_MOV;
         out->writes_flags = false;
         if (rex_w) {
-            if (!can_read(d, 8)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 8)) return HB_ERR_DECODE_FAILED;
             set_reg(out, 1, reg, 8);
             set_imm(out, 2, (int64_t)read_u64(d), 8);
         } else if (operand16) {
-            if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
             set_reg(out, 1, reg, 2);
             set_imm(out, 2, (int64_t)read_s16(d), 2);
         } else {
-            if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
             set_reg(out, 1, reg, 4);
             set_imm(out, 2, (int64_t)read_s32(d), 4);
         }
@@ -3053,21 +3097,21 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     if (opcode == 0xC6) {
         /* MOV r/m8, imm8 */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         if (((modrm >> 3) & 7) != 0) return HB_ERR_UNSUPPORTED_OPCODE;
         out->opcode = HB_INS_MOV;
         out->writes_flags = false;
         hb_result_t r = parse_modrm_ext(d, modrm, false, rex_b, 1, out, 1);
         if (r != HB_OK) return r;
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         set_imm(out, 2, read_s8(d), 1);
         refresh_rip_targets(d, out);
         return HB_OK;
     }
     if (opcode == 0xC7) {
         /* MOV r/m16/32/64, imm16/32/64 */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         /* `C7 F8` (XBEGIN) сюда не доходит: его снимает общий разбор TSX выше. Прежняя
          * ветка `modrm == 0xf8` (итерация 943: ширина смещения под 66, семантика в
@@ -3081,13 +3125,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         hb_result_t r = parse_modrm_ext(d, modrm, rex_w, rex_b, sz, out, 1);
         if (r != HB_OK) return r;
         if (rex_w) {
-            if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, (int64_t)read_s32(d), sz); /* sign-extended 32->64 */
         } else if (operand16) {
-            if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, (int64_t)read_s16(d), sz);
         } else {
-            if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, (int64_t)read_s32(d), sz);
         }
         refresh_rip_targets(d, out);
@@ -3096,31 +3140,31 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: ADD */
     if (opcode == 0x00) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_ADD; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x01) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_ADD; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0x02) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_ADD; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, false);
     }
     if (opcode == 0x03) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_ADD; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, false);
     }
     if (opcode == 0x04) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_ADD; out->writes_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -3133,31 +3177,31 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: ADC */
     if (opcode == 0x10) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_ADC; out->writes_flags = true; out->reads_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x11) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_ADC; out->writes_flags = true; out->reads_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0x12) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_ADC; out->writes_flags = true; out->reads_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, false);
     }
     if (opcode == 0x13) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_ADC; out->writes_flags = true; out->reads_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, false);
     }
     if (opcode == 0x14) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_ADC; out->writes_flags = true; out->reads_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -3170,31 +3214,31 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: SUB */
     if (opcode == 0x28) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_SUB; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x29) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_SUB; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0x2A) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_SUB; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, false);
     }
     if (opcode == 0x2B) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_SUB; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, false);
     }
     if (opcode == 0x2C) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_SUB; out->writes_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -3207,31 +3251,31 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: SBB */
     if (opcode == 0x18) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_SBB; out->writes_flags = true; out->reads_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x19) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_SBB; out->writes_flags = true; out->reads_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0x1A) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_SBB; out->writes_flags = true; out->reads_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, false);
     }
     if (opcode == 0x1B) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_SBB; out->writes_flags = true; out->reads_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, false);
     }
     if (opcode == 0x1C) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_SBB; out->writes_flags = true; out->reads_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -3244,31 +3288,31 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: CMP */
     if (opcode == 0x38) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_CMP; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x39) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_CMP; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0x3A) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_CMP; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, false);
     }
     if (opcode == 0x3B) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_CMP; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, false);
     }
     if (opcode == 0x3C) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_CMP; out->writes_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -3314,16 +3358,16 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
          * `66 REX.W 68 imm` съедено 7 байт (непосредственное ЧЕТЫРЕ), `66 68 imm` — 4 (два). */
         if (rex_w) {
             out->stack_delta = -8;
-            if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 1, (int64_t)read_s32(d), 4);
             return HB_OK;
         }
         out->stack_delta = operand16 ? -2 : -8;
         if (operand16) {
-            if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 1, (int64_t)read_s16(d), 2);
         } else {
-            if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 1, (int64_t)read_s32(d), 4);
         }
         return HB_OK;
@@ -3331,13 +3375,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (opcode == 0x6A) {
         out->opcode = HB_INS_PUSH;
         out->stack_delta = -8;
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         set_imm(out, 1, (int64_t)read_s8(d), 1);
         return HB_OK;
     }
     if (opcode == 0x69 || opcode == 0x6B) {
         /* IMUL r32/64, r/m32/64, imm32/imm8 */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_IMUL;
         out->writes_flags = true;
@@ -3346,14 +3390,14 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (r != HB_OK) return r;
         if (opcode == 0x69) {
             if (out->op1.size == 2) {
-                if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 3, (int64_t)read_s16(d), out->op1.size);
             } else {
-                if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 3, (int64_t)read_s32(d), out->op1.size);
             }
         } else {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 3, (int64_t)read_s8(d), out->op1.size);
         }
         refresh_rip_targets(d, out);
@@ -3362,7 +3406,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (opcode == 0x63) {
         /* MOVSXD r64, r/m32. In long mode the source remains 32-bit even
            when REX.W promotes the destination to 64-bit. */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_MOVSXD;
         hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 4, out, 1, 2, false);
@@ -3433,6 +3477,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
          * печать выводит приёмник первым (movsb [rdi], [rsi]), а в массиве нулевой — [rsi]. */
         set_mem(out, 1, HB_REG_RDI, -1, 1, 0, sz);
         set_mem(out, 2, HB_REG_RSI, -1, 1, 0, sz);
+        out->op1.mem.segment = 0x26; /* MOVS destination is always ES. */
         /* Итерация 490: тот же префикс — в отдельное поле. Пока никто не читает,
          * поведение не меняется; переключение потребителей следующим шагом. */
         /* Итерация 507: строка ВОССТАНОВЛЕНА. При снятии зонда (506) она была срезана вместе
@@ -3500,6 +3545,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         /* итерация 896: у STOS порядок ОБРАТНЫЙ — mem[rdi], reg(al) */
         set_mem(out, 1, HB_REG_RDI, -1, 1, 0, sz);
         set_reg(out, 2, HB_REG_RAX, sz);
+        out->op1.mem.segment = 0x26; /* STOS ignores segment overrides. */
         /* Итерация 490: тот же префикс — в отдельное поле. Пока никто не читает,
          * поведение не меняется; переключение потребителей следующим шагом. */
         out->rep_prefix = prefix_f2 ? 0xf2 : prefix_f3 ? 0xf3 : 0;
@@ -3517,7 +3563,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (opcode == 0xEB) {
         out->opcode = HB_INS_JMP;
         out->is_branch = true;
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         int8_t rel = read_s8(d);
         out->branch_target = addr + d->pos + rel;
         return HB_OK;
@@ -3525,13 +3571,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (opcode == 0xE9) {
         out->opcode = HB_INS_JMP;
         out->is_branch = true;
-        if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
         int32_t rel = read_s32(d);
         out->branch_target = addr + d->pos + rel;
         return HB_OK;
     }
     if (opcode >= 0xE0 && opcode <= 0xE3) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         int8_t rel = read_s8(d);
         out->opcode = opcode == 0xE3 ? HB_INS_JRCXZ : HB_INS_LOOP;
         out->is_branch = true;
@@ -3547,7 +3593,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         uint8_t sz = (opcode == 0xE4 || opcode == 0xEC) ? 1 : (operand16 ? 2 : 4);
         set_reg(out, 1, HB_REG_RAX, sz);
         if (opcode == 0xE4 || opcode == 0xE5) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, read_u8(d), 1);
         } else {
             set_reg(out, 2, HB_REG_RDX, 2);
@@ -3558,7 +3604,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         out->opcode = HB_INS_OUT;
         uint8_t sz = (opcode == 0xE6 || opcode == 0xEE) ? 1 : (operand16 ? 2 : 4);
         if (opcode == 0xE6 || opcode == 0xE7) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 1, read_u8(d), 1);
         } else {
             set_reg(out, 1, HB_REG_RDX, 2);
@@ -3572,7 +3618,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         out->opcode = HB_INS_CALL;
         out->is_call = true;
         out->stack_delta = -8;
-        if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
         int32_t rel = read_s32(d);
         out->branch_target = addr + d->pos + rel;
         return HB_OK;
@@ -3591,7 +3637,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         out->opcode = HB_INS_RET;
         out->is_ret = true;
         out->stack_delta = operand16 ? 2 : 8;
-        if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
         uint16_t imm = (uint16_t)(read_u8(d) | (read_u8(d) << 8));
         out->ret_imm = imm;
         return HB_OK;
@@ -3601,7 +3647,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         out->is_ret = true;
         out->stack_delta = 16;
         if (opcode == 0xCA) {
-            if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
             out->ret_imm = (uint16_t)(read_u8(d) | (read_u8(d) << 8));
         }
         return HB_OK;
@@ -3609,7 +3655,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (opcode == 0xC8) {
         out->opcode = HB_INS_ENTER;
         out->stack_delta = -8;
-        if (!can_read(d, 3)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 3)) return HB_ERR_DECODE_FAILED;
         uint16_t alloc = (uint16_t)(read_u8(d) | (read_u8(d) << 8));
         uint8_t nesting = read_u8(d);
         set_imm(out, 1, alloc, 2);
@@ -3630,7 +3676,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         else if (opcode == 0xCF) out->opcode = HB_INS_IRET;
         else out->opcode = HB_INS_INT1;
         if (opcode == 0xCD) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 1, read_u8(d), 1);
         }
         out->is_branch = true;
@@ -3679,7 +3725,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         out->is_branch = true;
         out->is_conditional = true;
         out->cond = cond_from_cc(opcode & 0x0F);
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         int8_t rel = read_s8(d);
         out->branch_target = addr + d->pos + rel;
         out->reads_flags = true;
@@ -3707,7 +3753,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (opcode == 0x86 || opcode == 0x87) {
         /* XCHG r/m, r. LOCK is valid for memory operands and is consumed by
            the prefix scanner; execution stays atomic at the lifted op level. */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_XCHG;
         /* ★ ПРЕФИКС 0x66 У XCHG ИГНОРИРОВАЛСЯ: ширина была зашита четвёркой.
@@ -3723,7 +3769,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Two-byte opcode: 0x0F ... */
     if (opcode == 0x0F) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t op2 = read_u8(d);
         if (op2 == 0xA2) {
             out->opcode = HB_INS_CPUID;
@@ -3744,7 +3790,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return HB_OK;
         }
         if (op2 == 0x01) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (modrm == 0xD0) {
                 out->opcode = (operand16 || prefix_f2 || prefix_f3)
@@ -3801,7 +3847,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return parse_modrm_ext(d, modrm, false, rex_b, 8, out, 1);
         }
         if (op2 == 0x00) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             int g6ext = (modrm >> 3) & 7;
             bool g6reg = (modrm >> 6) == 3;
@@ -3843,13 +3889,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return parse_modrm_ext(d, modrm, false, rex_b, 2, out, 1);
         }
         if (op2 == 0x02 || op2 == 0x03) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_SYS;
             return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, 4, out, 1, 2, false);
         }
         if (op2 == 0xA6 || op2 == 0xA7) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_SYS;
             return parse_modrm_ext(d, modrm, false, rex_b, 1, out, 1);
@@ -3876,7 +3922,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return HB_OK;
         }
         if (op2 >= 0x18 && op2 <= 0x1E) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_NOP;
             return parse_modrm_ext(d, modrm, false, rex_b, 1, out, 1);
@@ -3905,7 +3951,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
          *   0F C4 PINSRW mm   0F C5 PEXTRW mm      0F D7 PMOVMSKB r32, mm
          */
         if ((op2 == 0x2A || op2 == 0x2C || op2 == 0x2D) && !prefix_f2 && !prefix_f3) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             bool v_plavayushchee = (op2 == 0x2A);
             uint8_t mem_size;
@@ -3934,7 +3980,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return HB_OK;
         }
         if ((operand16 || prefix_f2) && (op2 == 0x7C || op2 == 0x7D || op2 == 0xD0)) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0x7C)      out->opcode = operand16 ? HB_INS_HADDPD : HB_INS_HADDPS;
             else if (op2 == 0x7D) out->opcode = operand16 ? HB_INS_HSUBPD : HB_INS_HSUBPS;
@@ -3948,7 +3994,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return HB_OK;
         }
         if ((prefix_f2 && op2 == 0x12) || (prefix_f3 && (op2 == 0x12 || op2 == 0x16))) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             uint8_t mem_size;
             if (prefix_f2)             { out->opcode = HB_INS_MOVDDUP;  mem_size = 8;  }
@@ -3965,7 +4011,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if ((prefix_f3 || prefix_f2) && op2 == 0xD6) {
             /* MOVQ2DQ xmm, mm (F3) и MOVDQ2Q mm, xmm (F2) — только регистровая форма. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if ((modrm >> 6) != 3) return HB_ERR_UNSUPPORTED_OPCODE;
             out->opcode = prefix_f3 ? HB_INS_MOVQ2DQ : HB_INS_MOVDQ2Q;
@@ -3979,7 +4025,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (op2 == 0xF7 && !prefix_f2 && !prefix_f3) {
             /* MASKMOVQ mm, mm и MASKMOVDQU xmm, xmm: запись по маске байтов в [RDI].
              * Приёмник неявный, оба явных операнда — источники. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if ((modrm >> 6) != 3) return HB_ERR_UNSUPPORTED_OPCODE;
             out->opcode = operand16 ? HB_INS_MASKMOVDQU : HB_INS_MASKMOVQ;
@@ -3994,7 +4040,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (!operand16 && !prefix_f2 && !prefix_f3 && (op2 == 0xC4 || op2 == 0xC5)) {
             /* PINSRW mm, r32/m16, imm8 и PEXTRW r32, mm, imm8 — формы MMX.
              * Формы XMM (под 0x66) разбираются своим путём ниже. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             bool vstavka = (op2 == 0xC4);
             out->opcode = vstavka ? HB_INS_PINSRW : HB_INS_PEXTRW;
@@ -4004,13 +4050,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             if (r != HB_OK) return r;
             if (vstavka) mark_mm_operand_x64(out, 1);
             else if (out->op2.is_reg) mark_mm_operand_x64(out, 2);
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 3, read_u8(d), 1);
             return HB_OK;
         }
         if (!operand16 && !prefix_f2 && !prefix_f3 && op2 == 0xD7) {
             /* PMOVMSKB r32, mm — регистровая форма, приёмник обычный. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if ((modrm >> 6) != 3) return HB_ERR_UNSUPPORTED_OPCODE;
             out->opcode = HB_INS_PMOVMSKB;
@@ -4030,7 +4076,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             (op2 >= 0xD1 && op2 <= 0xD5) || (op2 >= 0xD7 && op2 <= 0xE5) ||
             (op2 >= 0xE8 && op2 <= 0xEF) || (op2 >= 0xF1 && op2 <= 0xF7) ||
             (op2 >= 0xF8 && op2 <= 0xFE))) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MMX;
             hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 8, out, 1, 2, false);
@@ -4038,13 +4084,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             /* MacRunner: 0xC2 removed here — no-prefix 0F C2 is CMPPS (SSE, not MMX);
              * it now falls through to the generic_0f_vec path below. */
             if (op2 == 0x70 || op2 == 0xC4 || op2 == 0xC5) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 3, read_u8(d), 1);
             }
             return HB_OK;
         }
         if (op2 == 0x20 || op2 == 0x22 || op2 == 0x21 || op2 == 0x23) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             uint8_t ctrl = (uint8_t)(((modrm >> 3) & 7) | (rex_r ? 8 : 0));
             out->opcode = (op2 == 0x20 || op2 == 0x22) ? HB_INS_MOV_CR : HB_INS_MOV_DR;
@@ -4081,10 +4127,10 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return HB_OK;
         }
         if (op2 == 0x38) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t op3 = read_u8(d);
             if (prefix_f2 && (op3 == 0xf0 || op3 == 0xf1)) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 out->opcode = HB_INS_CRC32;
                 out->writes_flags = false;
@@ -4118,7 +4164,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 return HB_OK;
             }
             if ((operand16 || prefix_f3) && op3 == 0xf6) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 out->opcode = prefix_f3 ? HB_INS_ADOX : HB_INS_ADCX;
                 out->writes_flags = true;
@@ -4131,7 +4177,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             bool movbe_redundant_f3_rex = prefix_f3 && has_rex && !prefix_f2;
             if (((!prefix_f2 && !prefix_f3) || movbe_redundant_f3_rex) &&
                 (op3 == 0xf0 || op3 == 0xf1)) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
                 uint8_t size = movbe_redundant_f3_rex ? (operand16 ? 2 : 4) :
@@ -4146,7 +4192,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 return HB_OK;
             }
             if (op3 == 0xf9) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
                 uint8_t size = rex_w ? 8 : 4;
@@ -4160,7 +4206,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 return HB_OK;
             }
             if (operand16 && op3 == 0xf8) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
                 out->opcode = HB_INS_MOVDIR64B;
@@ -4172,7 +4218,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 return HB_OK;
             }
             if (op3 >= 0xc8 && op3 <= 0xcd) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 switch (op3) {
                     case 0xc8: out->opcode = HB_INS_SHA1NEXTE; break;
@@ -4192,7 +4238,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 return HB_OK;
             }
             if (operand16 && op3 == 0x2a) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
                 out->opcode = HB_INS_MOVNTDQA;
@@ -4208,7 +4254,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                              ssse3_0f38_opcode(op3) : 0;
             if (!vec_opcode && operand16) vec_opcode = sse41_0f38_opcode(op3);
             if (vec_opcode) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 uint8_t modrm = read_u8(d);
                 out->opcode = vec_opcode;
                 out->writes_flags = false;
@@ -4235,7 +4281,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 return HB_OK;
             }
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_VEC;
             hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 16, out, 1, 2, false);
@@ -4245,15 +4291,17 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return HB_OK;
         }
         if (op2 == 0x3A) {
-            if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, d->probe_escape ? 1 : 2)) return HB_ERR_DECODE_FAILED;
             uint8_t op3 = read_u8(d);
+            if (d->probe_escape && !operand16 && op3 != 0x0f && op3 != 0xcc)
+                return HB_ERR_UNSUPPORTED_OPCODE;
             uint8_t modrm = read_u8(d);
             if (op3 == 0xcc) {
                 out->opcode = HB_INS_SHA1RNDS4;
                 out->writes_flags = false;
                 hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 16, out, 1, 2, false);
                 if (r != HB_OK) return r;
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_extra_imm8(out, read_u8(d));
                 mark_xmm_operand(out, 1);
                 mark_xmm_operand(out, 2);
@@ -4272,7 +4320,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 }
                 hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, mem_size, out, 1, 2, false);
                 if (r != HB_OK) return r;
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_extra_imm8(out, read_u8(d));
                 mark_xmm_operand(out, 1);
                 mark_xmm_operand(out, 2);
@@ -4284,7 +4332,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 out->opcode = op3 == 0x41 ? HB_INS_DPPD : HB_INS_DPPS;
                 hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, mem_size, out, 1, 2, false);
                 if (r != HB_OK) return r;
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_extra_imm8(out, read_u8(d));
                 mark_xmm_operand(out, 1);
                 mark_xmm_operand(out, 2);
@@ -4296,7 +4344,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 out->opcode = extract ? HB_INS_EXTRACTPS : HB_INS_INSERTPS;
                 hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 4, out, 1, 2, extract);
                 if (r != HB_OK) return r;
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_extra_imm8(out, read_u8(d));
                 if (extract) {
                     mark_xmm_operand(out, 2);
@@ -4322,7 +4370,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 elem_size == 8 ? 8 : 4, out, 1, 2, true);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_extra_imm8(out, read_u8(d));
                     mark_xmm_operand(out, 2);
                     if (out->op1.is_mem) out->op1.size = elem_size;
@@ -4332,7 +4380,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b,
                                                 elem_size == 8 ? 8 : 4, out, 1, 2, false);
                     if (r != HB_OK) return r;
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     set_extra_imm8(out, read_u8(d));
                     mark_xmm_operand(out, 1);
                     if (out->op2.is_mem) out->op2.size = elem_size;
@@ -4343,7 +4391,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 out->opcode = op3 == 0xce ? HB_INS_GF2P8AFFINEQB : HB_INS_GF2P8AFFINEINVQB;
                 hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 16, out, 1, 2, false);
                 if (r != HB_OK) return r;
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_extra_imm8(out, read_u8(d));
                 mark_xmm_operand(out, 1);
                 mark_xmm_operand(out, 2);
@@ -4370,7 +4418,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                                         mmx_form ? 8 : (vec_opcode ? vec_bytes : 16),
                                         out, 1, 2, false);
             if (r != HB_OK) return r;
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 3, read_u8(d), 1);
             if (mmx_form) {
                 mark_mm_operand_x64(out, 1);
@@ -4401,10 +4449,10 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              * перебор этого НЕ ловил: эталон разделяет ту же ошибку. */
             bool rel16 = operand16 && !rex_w;
             if (rel16) {
-                if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
                 rel = read_s16(d);
             } else {
-                if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
                 rel = read_s32(d);
             }
             out->branch_target = addr + d->pos + rel;
@@ -4412,7 +4460,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return HB_OK;
         }
         if (op2 >= 0x90 && op2 <= 0x9F) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_SETcc;
             out->cond = cond_from_cc(op2 & 0x0F);
@@ -4422,7 +4470,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             return HB_OK;
         }
         if (op2 >= 0x40 && op2 <= 0x4F) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_CMOVcc;
             out->cond = cond_from_cc(op2 & 0x0F);
@@ -4439,7 +4487,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xBA) {
             /* Group 8: BT/BTS/BTR/BTC r/m16/32/64, imm8. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             uint8_t ext = (modrm >> 3) & 7;
             if (ext == 4) out->opcode = HB_INS_BT;
@@ -4450,14 +4498,14 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             out->writes_flags = true;
             hb_result_t r = parse_modrm_ext(d, modrm, rex_w, rex_b, rex_w ? 8 : (operand16 ? 2 : 4), out, 1);
             if (r != HB_OK) return r;
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, read_u8(d), 1);
             refresh_rip_targets(d, out);
             return HB_OK;
         }
         if (op2 == 0xA3 || op2 == 0xAB || op2 == 0xB3 || op2 == 0xBB) {
             /* BT/BTS/BTR/BTC r/m16/32/64, r16/32/64. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0xA3) out->opcode = HB_INS_BT;
             else if (op2 == 0xAB) out->opcode = HB_INS_BTS;
@@ -4477,7 +4525,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              * трогает, поэтому на исполнение это не влияет; но описание
              * операнда должно быть верным, иначе доска шумит и прячет
              * настоящее. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_NOP;
             hb_result_t r = parse_modrm_ext(d, modrm, rex_w, rex_b,
@@ -4487,7 +4535,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0x0D || op2 == 0x18) {
             /* PREFETCH/PREFETCHW/PREFETCHT* r/m8 groups are cache hints; execute as NOP. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_NOP;
             hb_result_t r = parse_modrm_ext(d, modrm, rex_w, rex_b, 1, out, 1);
@@ -4519,7 +4567,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              * XSAVE/XRSTOR retain dedicated standard-image semantics.
              * XSAVEOPT is unadvertised and decodes to a typed illegal instruction;
              * 66 /6 CLWB and F3 /4 PTWRITE remain separate encodings. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             uint8_t mod = (modrm >> 6) & 3;
             uint8_t ext = (modrm >> 3) & 7;
@@ -4616,7 +4664,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xAF) {
             /* IMUL r16/32/64, r/m16/32/64 (итерация 908: 16-битная форма учитывалась мимо). */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_IMUL;
             out->writes_flags = true;
@@ -4627,7 +4675,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f2 && op2 == 0x2A) {
             /* CVTSI2SD xmm, r/m32 or r/m64 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_CVTSI2SD;
             out->writes_flags = false;
@@ -4638,7 +4686,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f3 && op2 == 0x2A) {
             /* CVTSI2SS xmm, r/m32 or r/m64 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_CVTSI2SS;
             out->writes_flags = false;
@@ -4649,7 +4697,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && op2 == 0x6E) {
             /* MOVD/MOVQ xmm, r/m32/r/m64. Win7 Calc uses MOVD before CVTDQ2PD. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MOVD;
             out->writes_flags = false;
@@ -4661,7 +4709,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && op2 == 0x7E) {
             /* MOVD/MOVQ r/m32/r/m64, xmm. Notepad++ uses REX.W MOVQ to pass qword packs. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MOVD;
             out->writes_flags = false;
@@ -4674,7 +4722,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (operand16 && op2 == 0xD6) {
             /* MOVQ xmm/m64, xmm. Same transfer family as MOVD/MOVQ 6E/7E, but
              * always stores/copies the low qword from the source XMM operand. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MOVD;
             out->writes_flags = false;
@@ -4688,7 +4736,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (prefix_f3 && op2 == 0x7E) {
             /* MOVQ xmm, xmm/m64. Completes the SSE qword transfer decode family
              * used by compiler-generated helper code around GDI toolbar probes. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MOVD;
             out->writes_flags = false;
@@ -4705,7 +4753,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              *   F2 0F E6    CVTPD2DQ xmm, xmm/m128
              *   66 0F E6    CVTTPD2DQ xmm, xmm/m128
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             size_t mem_size = 16;
             if (prefix_f3) {
@@ -4732,7 +4780,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              *   66 0F 5B    CVTPS2DQ xmm, xmm/m128
              *   F3 0F 5B    CVTTPS2DQ xmm, xmm/m128
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (prefix_f3) out->opcode = HB_INS_CVTTPS2DQ;
             else if (operand16) out->opcode = HB_INS_CVTPS2DQ;
@@ -4751,7 +4799,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              *   F3 0F 5A    CVTSS2SD xmm, xmm/m32
              *   F2 0F 5A    CVTSD2SS xmm, xmm/m64
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             size_t mem_size = 8;
             if (prefix_f2) out->opcode = HB_INS_CVTSD2SS;
@@ -4768,7 +4816,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f2 && op2 == 0x5E) {
             /* DIVSD xmm, xmm/m64 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_DIVSD;
             out->writes_flags = false;
@@ -4786,7 +4834,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              *   F3 0F 51    SQRTSS xmm, xmm/m32
              *   F2 0F 51    SQRTSD xmm, xmm/m64
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             size_t mem_size = 16;
             if (prefix_f2) { out->opcode = HB_INS_SQRTSD; mem_size = 8; }
@@ -4808,7 +4856,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              *   0F 53       RCPPS xmm, xmm/m128
              *   F3 0F 53    RCPSS xmm, xmm/m32
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             size_t mem_size = prefix_f3 ? 4 : 16;
             if (op2 == 0x52) out->opcode = prefix_f3 ? HB_INS_RSQRTSS : HB_INS_RSQRTPS;
@@ -4828,7 +4876,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              *   F3 0F 58/5C    ADDSS/SUBSS xmm, xmm/m32
              *   F2 0F 58/5C    ADDSD/SUBSD xmm, xmm/m64
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             size_t mem_size = 16;
             if (prefix_f2) {
@@ -4856,7 +4904,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              *   66 0F 59/5E    MULPD/DIVPD xmm, xmm/m128
              * Scalar F2/F3 forms are handled by the existing MULSD/DIVSD/MULSS/DIVSS paths.
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (operand16) out->opcode = (op2 == 0x59) ? HB_INS_MULPD : HB_INS_DIVPD;
             else out->opcode = (op2 == 0x59) ? HB_INS_MULPS : HB_INS_DIVPS;
@@ -4870,7 +4918,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f2 && op2 == 0x59) {
             /* MULSD xmm, xmm/m64 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MULSD;
             out->writes_flags = false;
@@ -4882,7 +4930,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f3 && (op2 == 0x5E || op2 == 0x59)) {
             /* DIVSS/MULSS xmm, xmm/m32 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = (op2 == 0x5E) ? HB_INS_DIVSS : HB_INS_MULSS;
             out->writes_flags = false;
@@ -4900,7 +4948,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              *   F3 0F 5D/5F    MINSS/MAXSS xmm, xmm/m32
              *   F2 0F 5D/5F    MINSD/MAXSD xmm, xmm/m64
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             size_t mem_size = 16;
             if (prefix_f2) { out->opcode = (op2 == 0x5D) ? HB_INS_MINSD : HB_INS_MAXSD; mem_size = 8; }
@@ -4918,7 +4966,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if ((op2 == 0x2E || op2 == 0x2F) && !prefix_f2 && !prefix_f3) {
             /* COMISS/UCOMISS and COMISD/UCOMISD. We model exception differences
              * conservatively and share ordered flag semantics for both pairs. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = operand16 ? HB_INS_COMISD : HB_INS_COMISS;
             out->writes_flags = true;
@@ -4932,7 +4980,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f2 && op2 == 0x2C) {
             /* CVTTSD2SI r32/r64, xmm/m64 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_CVTTSD2SI;
             out->writes_flags = false;
@@ -4944,7 +4992,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f3 && op2 == 0x2C) {
             /* CVTTSS2SI r32/r64, xmm/m32 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_CVTTSS2SI;
             out->writes_flags = false;
@@ -4957,7 +5005,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f2 && op2 == 0x2D) {
             /* CVTSD2SI r32/r64, xmm/m64 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_CVTSD2SI;
             out->writes_flags = false;
@@ -4969,7 +5017,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (prefix_f3 && op2 == 0x2D) {
             /* CVTSS2SI r32/r64, xmm/m32 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_CVTSS2SI;
             out->writes_flags = false;
@@ -4984,7 +5032,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             (operand16 && op2 >= 0x54 && op2 <= 0x57) ||
             (operand16 && (op2 == 0xDB || op2 == 0xDF || op2 == 0xEB || op2 == 0xEF))) {
             /* Packed XMM bitwise logical family: AND/ANDN/OR/XOR, PS/PD and integer forms. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0x54 || op2 == 0xDB) out->opcode = HB_INS_XMM_AND;
             else if (op2 == 0x55 || op2 == 0xDF) out->opcode = HB_INS_XMM_ANDN;
@@ -5000,7 +5048,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (operand16 && (op2 == 0x64 || op2 == 0x65 || op2 == 0x66 ||
                           op2 == 0x74 || op2 == 0x75 || op2 == 0x76)) {
             /* PCMPGTB/W/D and PCMPEQB/W/D xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0x64) out->opcode = HB_INS_PCMPGTB;
             else if (op2 == 0x65) out->opcode = HB_INS_PCMPGTW;
@@ -5017,7 +5065,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if ((op2 == 0x14 || op2 == 0x15) && !prefix_f2 && !prefix_f3) {
             /* UNPCKLPS/UNPCKLPD/UNPCKHPS/UNPCKHPD, xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0x14) out->opcode = operand16 ? HB_INS_UNPCKLPD : HB_INS_UNPCKLPS;
             else out->opcode = operand16 ? HB_INS_UNPCKHPD : HB_INS_UNPCKHPS;
@@ -5030,7 +5078,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && op2 == 0xD7) {
             /* PMOVMSKB r32, xmm: extract byte sign bits into a zero-extended mask. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_PMOVMSKB;
             out->writes_flags = false;
@@ -5043,10 +5091,11 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if ((!operand16 && !prefix_f2 && !prefix_f3 && op2 == 0x50) ||
             (operand16 && op2 == 0x50)) {
             /* MOVMSKPS/MOVMSKPD r32, xmm: extract packed FP sign bits. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = operand16 ? HB_INS_MOVMSKPD : HB_INS_MOVMSKPS;
             out->writes_flags = false;
+            if (d->probe_escape && (modrm >> 6) != 3) return HB_ERR_UNSUPPORTED_OPCODE;
             hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 4, out, 1, 2, false);
             if (r != HB_OK) return r;
             if (!out->op2.is_reg) return HB_ERR_UNSUPPORTED_OPCODE;
@@ -5074,7 +5123,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             /* MOVD mm,r/m32 (6E) | MOVQ mm,mm/m64 (6F) и обратные формы 7E/7F. */
             int store = (op2 == 0x7E || op2 == 0x7F);
             int movd  = (op2 == 0x6E || op2 == 0x7E);
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MMX_MOV;
             out->writes_flags = false;
@@ -5094,7 +5143,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             !(op2 >= 0x70 && op2 <= 0x73)) {
             /* `0x6C`/`0x6D` (PUNPCK?QDQ) сюда НЕ входят: в MMX их не существует, они появились
              * только в SSE2 — принимать их без префикса было бы ошибкой в другую сторону. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             switch (op2) {
                 /* Итерация 919, вторая партия (те же имена, что на x86-32 в 918). */
@@ -5178,7 +5227,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (!operand16 && !prefix_f2 && !prefix_f3 && op2 == 0x70) {
             /* PSHUFW mm, mm/m64, imm8 (0F 70 /r ib без префикса). Префиксные формы —
              * PSHUFD (66), PSHUFLW (F2), PSHUFHW (F3) — разбираются ниже, как и раньше. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_PSHUFW;
             out->writes_flags = false;
@@ -5186,19 +5235,19 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             if (r != HB_OK) return r;
             mark_mm_operand_x64(out, 1);
             if ((modrm >> 6) == 3) mark_mm_operand_x64(out, 2);
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 3, read_u8(d), 1);
             return HB_OK;
         }
         if (!operand16 && !prefix_f2 && !prefix_f3 &&
             (op2 == 0x71 || op2 == 0x72 || op2 == 0x73)) {
             /* Сдвиг на непосредственное: вид задаёт поле reg модрм (2=SRL, 4=SRA, 6=SLL). */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             uint8_t ext = (uint8_t)((modrm >> 3) & 7);
             if ((modrm >> 6) != 3) return HB_ERR_UNSUPPORTED_OPCODE;
             if (ext != 2 && ext != 4 && ext != 6) return HB_ERR_UNSUPPORTED_OPCODE;
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             out->opcode = ext == 2 ? HB_INS_MMX_SRL : ext == 4 ? HB_INS_MMX_SRA : HB_INS_MMX_SLL;
             out->ret_imm = op2 == 0x71 ? 2 : op2 == 0x72 ? 4 : 8;
             out->writes_flags = false;
@@ -5214,7 +5263,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                           (op2 >= 0x68 && op2 <= 0x6A) ||
                           op2 == 0x6C || op2 == 0x6D)) {
             /* SSE2 PUNPCK low/high integer unpack family, xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0x60) out->opcode = HB_INS_PUNPCKLBW;
             else if (op2 == 0x61) out->opcode = HB_INS_PUNPCKLWD;
@@ -5233,7 +5282,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && (op2 == 0x63 || op2 == 0x67 || op2 == 0x6B)) {
             /* SSE2 PACK signed/unsigned saturation family, xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0x63) out->opcode = HB_INS_PACKSSWB;
             else if (op2 == 0x67) out->opcode = HB_INS_PACKUSWB;
@@ -5247,7 +5296,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && (op2 == 0xD5 || op2 == 0xE5 || op2 == 0xE4 || op2 == 0xF5)) {
             /* SSE2 packed 16-bit multiply family, xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0xD5) out->opcode = HB_INS_PMULLW;
             else if (op2 == 0xE5) out->opcode = HB_INS_PMULHW;
@@ -5262,7 +5311,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && (op2 == 0xEC || op2 == 0xED || op2 == 0xDC || op2 == 0xDD)) {
             /* SSE2 packed saturating add family, xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0xEC) out->opcode = HB_INS_PADDSB;
             else if (op2 == 0xED) out->opcode = HB_INS_PADDSW;
@@ -5277,7 +5326,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && (op2 == 0xE0 || op2 == 0xE3)) {
             /* SSE2 packed rounded unsigned average family, xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = op2 == 0xE0 ? HB_INS_PAVGB : HB_INS_PAVGW;
             out->writes_flags = false;
@@ -5290,7 +5339,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if ((operand16 && op2 == 0x70) || (prefix_f2 && op2 == 0x70) ||
             (prefix_f3 && op2 == 0x70)) {
             /* PSHUFD/PSHUFLW/PSHUFHW xmm, xmm/m128, imm8. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (operand16) out->opcode = HB_INS_PSHUFD;
             else if (prefix_f2) out->opcode = HB_INS_PSHUFLW;
@@ -5300,13 +5349,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             if (r != HB_OK) return r;
             mark_xmm_operand(out, 1);
             mark_xmm_operand(out, 2);
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 3, read_u8(d), 1);
             return HB_OK;
         }
         if (op2 == 0xC6 && !prefix_f2 && !prefix_f3) {
             /* SHUFPS/SHUFPD xmm, xmm/m128, imm8. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = operand16 ? HB_INS_SHUFPD : HB_INS_SHUFPS;
             out->writes_flags = false;
@@ -5315,13 +5364,13 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             mark_xmm_operand(out, 1);
             mark_xmm_operand(out, 2);
             if (out->op2.is_mem) out->op2.size = 16;
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 3, read_u8(d), 1);
             return HB_OK;
         }
         if (operand16 && (op2 == 0x71 || op2 == 0x72 || op2 == 0x73)) {
             /* SSE2 XMM immediate shifts. 0F 71/72 use /2,/4,/6; 0F 73 also has byte shifts. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             uint8_t ext = (modrm >> 3) & 7;
             if (op2 == 0x71 && ext == 2) out->opcode = HB_INS_PSRLW;
@@ -5339,12 +5388,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             hb_result_t r = parse_modrm_ext(d, modrm, false, rex_b, 16, out, 1);
             if (r != HB_OK) return r;
             mark_xmm_operand(out, 1);
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, read_u8(d), 1);
             return HB_OK;
         }
         if (!operand16 && (op2 == 0x71 || op2 == 0x72 || op2 == 0x73)) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             uint8_t ext = (modrm >> 3) & 7;
             if (!((op2 == 0x71 && (ext == 2 || ext == 4 || ext == 6)) ||
@@ -5355,12 +5404,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             out->writes_flags = false;
             hb_result_t r = parse_modrm_ext(d, modrm, false, rex_b, 8, out, 1);
             if (r != HB_OK) return r;
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, read_u8(d), 1);
             return HB_OK;
         }
         if (op2 == 0xB2 || op2 == 0xB4 || op2 == 0xB5) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_SYS;
             out->writes_flags = false;
@@ -5368,7 +5417,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && (op2 == 0xF8 || op2 == 0xF9 || op2 == 0xFA || op2 == 0xFB)) {
             /* Packed integer subtract family: PSUBB/PSUBW/PSUBD/PSUBQ xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0xF8) out->opcode = HB_INS_PSUBB;
             else if (op2 == 0xF9) out->opcode = HB_INS_PSUBW;
@@ -5383,7 +5432,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (operand16 && (op2 == 0xFC || op2 == 0xFD || op2 == 0xFE || op2 == 0xD4)) {
             /* Packed integer add family: PADDB/PADDW/PADDD/PADDQ xmm, xmm/m128. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (op2 == 0xFC) out->opcode = HB_INS_PADDB;
             else if (op2 == 0xFD) out->opcode = HB_INS_PADDW;
@@ -5398,7 +5447,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xA4 || op2 == 0xA5 || op2 == 0xAC || op2 == 0xAD) {
             /* SHLD/SHRD r/m16/32/64, r16/32/64, imm8/CL. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = (op2 == 0xA4 || op2 == 0xA5) ? HB_INS_SHLD : HB_INS_SHRD;
             out->writes_flags = true;
@@ -5406,7 +5455,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                                         rex_w ? 8 : (operand16 ? 2 : 4), out, 1, 2, true);
             if (r != HB_OK) return r;
             if (op2 == 0xA4 || op2 == 0xAC) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 3, read_u8(d), 1);
             } else {
                 set_reg(out, 3, HB_REG_RCX, 1);
@@ -5415,7 +5464,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xBC) {
             /* BSF or F3-prefixed TZCNT r32/64, r/m32/64. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = prefix_f3 ? HB_INS_TZCNT : HB_INS_BSF;
             out->writes_flags = true;
@@ -5427,7 +5476,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xBD) {
             /* BSR or F3-prefixed LZCNT r32/64, r/m32/64. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = prefix_f3 ? HB_INS_LZCNT : HB_INS_BSR;
             out->writes_flags = true;
@@ -5453,7 +5502,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xB6 || op2 == 0xB7) {
             /* MOVZX r32/64, r/m8 or r/m16 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MOVZX;
             out->writes_flags = false;
@@ -5476,7 +5525,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xBE || op2 == 0xBF) {
             /* MOVSX r32/64, r/m8 or r/m16 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MOVSX;
             out->writes_flags = false;
@@ -5498,7 +5547,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             /* MOVLPS/MOVLPD and MOVHPS/MOVHPD memory forms move one qword lane.
              * Register 0F 12/16 aliases MOVHLPS/MOVLHPS.
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if ((modrm >> 6) == 3) {
                 if (operand16 || op2 == 0x13 || op2 == 0x17) return HB_ERR_UNSUPPORTED_OPCODE;
@@ -5532,7 +5581,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (!operand16 && !prefix_f2 && !prefix_f3 && (op2 == 0x6F || op2 == 0x7F)) {
             /* Unprefixed 0F 6F/7F are MMX MOVQ. The 66-prefixed forms below
              * stay in the SSE_MOV path for MOVDQA/MOVDQU. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_MMX;
             out->writes_flags = false;
@@ -5547,7 +5596,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              * MOVSS/MOVSD (F3/F2 0F 10/11) only transfers the low 4/8 bytes.
              * Register sources preserve the upper destination lanes; memory
              * sources zero them. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             bool scalar_move = (op2 == 0x10 || op2 == 0x11) && (prefix_f2 || prefix_f3);
             uint8_t move_size = scalar_move ? (prefix_f3 ? 4 : 8) : 16;
@@ -5592,7 +5641,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (op2 == 0x2B && (prefix_f2 || prefix_f3)) {
             /* MOVNTSS (F3 0F 2B) и MOVNTSD (F2 0F 2B) — скалярные записи мимо
              * кеша. Соседняя ветвь брала только беспрефиксные формы. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             {
                 uint8_t modrm = read_u8(d);
                 hb_result_t r;
@@ -5608,7 +5657,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xE7 && !operand16 && !prefix_f2 && !prefix_f3) {
             /* MOVNTQ m64, mm — форма MMX; под 0x66 это MOVNTDQ, она рядом. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             {
                 uint8_t modrm = read_u8(d);
                 if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
@@ -5628,7 +5677,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xC3 && !operand16 && !prefix_f2 && !prefix_f3) {
             /* MOVNTI m32/m64, r32/r64. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             {
                 uint8_t modrm = read_u8(d);
                 if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
@@ -5640,7 +5689,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         if (op2 == 0xF0 && prefix_f2) {
             /* LDDQU xmm, m128 — чтение без выравнивания. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             {
                 uint8_t modrm = read_u8(d);
                 hb_result_t r;
@@ -5661,7 +5710,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
              * STORE IR used by MOVUPS/MOVAPS/MOVDQA/MOVDQU; the cache hint is
              * not observable by guest state.  Register-destination ModRM forms
              * are invalid for this memory-store family. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if ((modrm >> 6) == 3) return HB_ERR_UNSUPPORTED_OPCODE;
             out->opcode = HB_INS_SSE_MOV;
@@ -5676,7 +5725,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             /* XADD r/m, r. LOCK is valid for memory operands and is consumed
              * as a prefix; the interpreter executes this as one atomic IR op.
              */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_XADD;
             out->writes_flags = true;
@@ -5690,7 +5739,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             /* CMPXCHG r/m8,r8 and r/m32/64,r32/64. LOCK is consumed as a prefix above;
                the interpreter is currently single-threaded at the guest block
                level, so atomicity is provided by staying inside this operation. */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_CMPXCHG;
             out->writes_flags = true;
@@ -5703,7 +5752,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (op2 == 0xC7) {
             /* CMPXCHG8B m64 / CMPXCHG16B m128 (REX.W) -- /1 memory form.
              * Register forms /6 and /7 are RDRAND / RDSEED (Patch H). */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             uint8_t c7_mod = (modrm >> 6) & 3;
             uint8_t c7_ext = (modrm >> 3) & 7;
@@ -5736,7 +5785,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (!operand16 && !prefix_f2 && !prefix_f3 && (op2 == 0x78 || op2 == 0x79)) {
             generic_0f_sys = true; /* VMREAD/VMWRITE */
         } else if (prefix_f3 && op2 == 0xB8) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = HB_INS_POPCNT;
             out->writes_flags = true;
@@ -5780,7 +5829,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         }
         int packed_0f = operand16 ? sse2_0f_packed_opcode(op2) : 0;
         if (packed_0f) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             out->opcode = packed_0f;
             out->writes_flags = false;
@@ -5793,7 +5842,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             else mark_vec_operands(out, 16);
             if (op2 == 0xC4 && out->op2.is_mem) out->op2.size = 2;
             if (op2 == 0xC4 || op2 == 0xC5) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 3, read_u8(d), 1);
                 refresh_rip_targets(d, out);
             }
@@ -5812,7 +5861,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             generic_0f_mmx = true;
         }
         if (generic_0f_sys || generic_0f_vec || generic_0f_mmx) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             uint8_t modrm = read_u8(d);
             if (generic_0f_sys) out->opcode = HB_INS_SYS;
             else if (generic_0f_mmx) out->opcode = HB_INS_MMX;
@@ -5835,10 +5884,10 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             if (r != HB_OK) return r;
             if (generic_0f_vec) mark_xmm_operands(out);
             if (generic_0f_imm8) {
-                if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 3, read_u8(d), 1);
                 if (generic_0f_imm8_second) {
-                    if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+                    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     (void)read_u8(d);
                 }
                 refresh_rip_targets(d, out);
@@ -5859,7 +5908,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
            Wine's x64 setjmp helper. HyperBridge currently does not execute x87
            arithmetic, so FLDCW is a no-op and FNSTCW stores the reset control
            word expected by code saving a fresh thread context. */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t mod = (modrm >> 6) & 3;
         uint8_t ext = (modrm >> 3) & 7;
@@ -5883,7 +5932,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (opcode == 0xDB) {
         /* x87 environment control.  x64 HyperBridge does not model x87 state,
            so clearing/resetting pending x87 exception state is a no-op. */
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         if (modrm == 0xE2) {
             out->opcode = HB_INS_X87_FNCLEX;
@@ -5898,7 +5947,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: 0x80/0x81/0x83 immediate group */
     if (opcode == 0x80 || opcode == 0x81 || opcode == 0x83) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t ext = (modrm >> 3) & 7;
         uint8_t sz = (opcode == 0x80) ? 1 : (rex_w ? 8 : (operand16 ? 2 : 4));
@@ -5918,18 +5967,18 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         if (r != HB_OK) return r;
 
         if (opcode == 0x80) {
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, read_s8(d), 1);
         } else if (opcode == 0x81) {
             if (operand16 && !rex_w) {
-                if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 2, (int64_t)read_s16(d), sz);
             } else {
-                if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 2, (int64_t)read_s32(d), sz);
             }
         } else { /* 0x83 */
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, (int64_t)read_s8(d), sz);
         }
         refresh_rip_targets(d, out);
@@ -5938,7 +5987,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: ROL/ROR/SHL/SHR/SAR by imm8 (C0/C1) */
     if (opcode == 0xC0 || opcode == 0xC1) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t ext = (modrm >> 3) & 7;
         if (ext == 0) out->opcode = HB_INS_ROL;
@@ -5954,7 +6003,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         uint8_t sz = (opcode == 0xC0) ? 1 : (rex_w ? 8 : (operand16 ? 2 : 4));
         hb_result_t r = parse_modrm_ext(d, modrm, rex_w, rex_b, sz, out, 1);
         if (r != HB_OK) return r;
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         set_imm(out, 2, read_u8(d) & (rex_w ? 0x3F : 0x1F), 1);
         refresh_rip_targets(d, out);
         return HB_OK;
@@ -5962,7 +6011,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: ROL/ROR/SHL/SHR/SAR by 1 (D0/D1) */
     if (opcode == 0xD0 || opcode == 0xD1) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t ext = (modrm >> 3) & 7;
         if (ext == 0) out->opcode = HB_INS_ROL;
@@ -5984,7 +6033,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: ROL/ROR/SHL/SHR/SAR by CL (D2/D3) */
     if (opcode == 0xD2 || opcode == 0xD3) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t ext = (modrm >> 3) & 7;
         if (ext == 0) out->opcode = HB_INS_ROL;
@@ -6006,7 +6055,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: TEST / NOT / NEG / MUL / IMUL / DIV / IDIV (F6/F7). */
     if (opcode == 0xF6) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t ext = (modrm >> 3) & 7;
         if (ext == 0 || ext == 1) {
@@ -6014,7 +6063,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             out->writes_flags = true;
             hb_result_t r = parse_modrm_ext(d, modrm, false, rex_b, 1, out, 1);
             if (r != HB_OK) return r;
-            if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, read_s8(d), 1);
             refresh_rip_targets(d, out);
             return HB_OK;
@@ -6032,7 +6081,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         return HB_OK;
     }
     if (opcode == 0xF7) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t ext = (modrm >> 3) & 7;
         uint8_t sz = rex_w ? 8 : (operand16 ? 2 : 4);
@@ -6042,10 +6091,10 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             hb_result_t r = parse_modrm_ext(d, modrm, rex_w, rex_b, sz, out, 1);
             if (r != HB_OK) return r;
             if (operand16 && !rex_w) {
-                if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 2, (int64_t)read_s16(d), out->op1.size);
             } else {
-                if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+                if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
                 set_imm(out, 2, (int64_t)read_s32(d), out->op1.size);
             }
             refresh_rip_targets(d, out);
@@ -6064,7 +6113,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: 0xFF */
     if (opcode == 0xFF) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t ext = (modrm >> 3) & 7;
         uint8_t incdec_size = rex_w ? 8 : (operand16 ? 2 : 4);
@@ -6125,7 +6174,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* Group: 0xFE byte INC/DEC */
     if (opcode == 0xFE) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         uint8_t ext = (modrm >> 3) & 7;
         if (ext == 0) {
@@ -6143,19 +6192,19 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* TEST (subset) */
     if (opcode == 0x84) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_TEST; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x85) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_TEST; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0xA8) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_TEST; out->writes_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -6166,10 +6215,10 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
         uint8_t sz = rex_w ? 8 : (operand16 ? 2 : 4);
         set_reg(out, 1, HB_REG_RAX, sz);
         if (sz == 2) {
-            if (!can_read(d, 2)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 2)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, (int64_t)read_s16(d), sz);
         } else {
-            if (!can_read(d, 4)) return HB_ERR_DECODE_FAILED;
+            if (!require_bytes(d, 4)) return HB_ERR_DECODE_FAILED;
             set_imm(out, 2, (int64_t)read_s32(d), sz);
         }
         return HB_OK;
@@ -6177,31 +6226,31 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* AND (subset) */
     if (opcode == 0x20) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_AND; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x21) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_AND; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0x22) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_AND; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, false);
     }
     if (opcode == 0x23) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_AND; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, false);
     }
     if (opcode == 0x24) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_AND; out->writes_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -6214,31 +6263,31 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* OR (subset) */
     if (opcode == 0x08) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_OR; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x09) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_OR; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0x0A) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_OR; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, false);
     }
     if (opcode == 0x0B) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_OR; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, false);
     }
     if (opcode == 0x0C) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_OR; out->writes_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -6251,31 +6300,31 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
     /* XOR (subset) */
     if (opcode == 0x30) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_XOR; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, true);
     }
     if (opcode == 0x31) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_XOR; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, true);
     }
     if (opcode == 0x32) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_XOR; out->writes_flags = true;
         return parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, 1, out, 1, 2, false);
     }
     if (opcode == 0x33) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         uint8_t modrm = read_u8(d);
         out->opcode = HB_INS_XOR; out->writes_flags = true;
         return parse_modrm(d, modrm, rex_w, rex_r, rex_x, rex_b, op_size, out, 1, 2, false);
     }
     if (opcode == 0x34) {
-        if (!can_read(d, 1)) return HB_ERR_DECODE_FAILED;
+        if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
         out->opcode = HB_INS_XOR; out->writes_flags = true;
         set_reg(out, 1, HB_REG_RAX, 1);
         set_imm(out, 2, read_s8(d), 1);
@@ -6290,26 +6339,23 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     return HB_ERR_UNSUPPORTED_OPCODE;
 }
 
-hb_result_t hb_decode_x64(const uint8_t* code, size_t len, uint64_t addr, hb_decoded_t* out) {
-    if (!code || !out || len == 0) return HB_ERR_INVALID_ARG;
-
-    hb_dec_t d = {
-        .code = code,
-        .len = len,
-        .pos = 0,
-        .addr = addr,
-        .fault = false
-    };
-    hb_result_t r = decode_one(&d, out);
-    if (d.fault && r == HB_OK) r = HB_ERR_DECODE_FAILED;
+static hb_result_t decode_x64_state(hb_dec_t* d, hb_decoded_t* out) {
+    const uint8_t* code = d->code;
+    hb_result_t r = decode_one(d, out);
+    if (d->probe_escape && r == HB_ERR_DECODE_FAILED && d->shared_required) {
+        if (d->shared_required > 15) longjmp(*d->probe_escape, 2);
+        *d->probe_required = d->shared_required;
+        longjmp(*d->probe_escape, 1);
+    }
+    if (d->fault && r == HB_OK) r = HB_ERR_DECODE_FAILED;
     if (r != HB_OK) {
-        out->len = (uint8_t)(d.pos > 0 ? d.pos : 1);
+        out->len = (uint8_t)(d->pos > 0 ? d->pos : 1);
         if (r == HB_ERR_UNSUPPORTED_OPCODE) out->opcode = HB_INS_UNSUPPORTED;
         memcpy(out->bytes, code, out->len > 15 ? 15 : out->len);
         return r;
     }
 
-    out->len = (uint8_t)d.pos;
+    out->len = (uint8_t)d->pos;
 
     /* УНАРНЫЕ ФОРМЫ VEX — ПОСЛЕПРОВЕРКА, а не заплата в каждой ветви.
      *
@@ -6347,6 +6393,124 @@ hb_result_t hb_decode_x64(const uint8_t* code, size_t len, uint64_t addr, hb_dec
         out->writes_flags = false;
     }
     memcpy(out->bytes, code, out->len > 15 ? 15 : out->len);
+    return HB_OK;
+}
+
+hb_result_t hb_decode_x64(const uint8_t* code, size_t len, uint64_t addr, hb_decoded_t* out) {
+    if (!code || !out || len == 0) return HB_ERR_INVALID_ARG;
+    hb_dec_t d = { .code = code, .len = len, .addr = addr };
+    return decode_x64_state(&d, out);
+}
+
+/* Probe-only early LOCK rejection. Legacy hb_zamok_zakonen still decides the
+ * old API's HB_OK/UNAVAILABLE_EXT result after full decoding. Here an already
+ * impossible opcode/destination must not demand an unused displacement or
+ * immediate. This does not claim hardware exception-priority equivalence. */
+static bool probe_terminal_prefix(const uint8_t* code, size_t len, hb_result_t* result) {
+    size_t pos = 0;
+    bool locked = false;
+    bool operand16 = false, prefix_f2 = false, prefix_f3 = false;
+    while (pos < len) {
+        uint8_t b = code[pos];
+        if (b == 0x66) operand16 = true;
+        if (b == 0xf2) prefix_f2 = true;
+        if (b == 0xf3) prefix_f3 = true;
+        if (b == 0xf0) locked = true;
+        else if (b != 0x26 && b != 0x2e && b != 0x36 && b != 0x3e &&
+                 b != 0x64 && b != 0x65 && b != 0x66 && b != 0x67 &&
+                 b != 0xf2 && b != 0xf3 && (b < 0x40 || b > 0x4f)) break;
+        pos++;
+    }
+    if (pos == len) return false;
+    uint8_t op = code[pos++];
+    if (!locked) {
+        if (op != 0x0f || pos == len) return false;
+        op = code[pos++];
+        /* These paths already finish as HB_OK/UNAVAILABLE_EXT in the legacy
+         * decoder. Their known prefix rejection precedes unused EA bytes. */
+        *result = HB_OK;
+        if (((op == 0x28 || op == 0x29) && (prefix_f2 || prefix_f3)) ||
+            ((op == 0x6f || op == 0x7f) && prefix_f2)) return true;
+        if (op == 0xae && pos < len && (code[pos] >> 6) != 3) {
+            uint8_t ext = (code[pos] >> 3) & 7;
+            if (ext == 4 && !prefix_f3 && (operand16 || prefix_f2)) return true;
+            if (ext == 5 && (operand16 || prefix_f2 || prefix_f3)) return true;
+            if (ext == 6 && !operand16) return true;
+        }
+        return false;
+    }
+    *result = HB_ERR_UNSUPPORTED_OPCODE;
+    bool extended = op == 0x0f;
+    if (extended) {
+        if (pos == len) return false;
+        op = code[pos++];
+        switch (op) {
+            case 0xab: case 0xb0: case 0xb1: case 0xb3: case 0xba:
+            case 0xbb: case 0xc0: case 0xc1: case 0xc7: break;
+            default: return true;
+        }
+    } else {
+        switch (op) {
+            case 0x00: case 0x01: case 0x08: case 0x09:
+            case 0x10: case 0x11: case 0x18: case 0x19:
+            case 0x20: case 0x21: case 0x28: case 0x29:
+            case 0x30: case 0x31: case 0x80: case 0x81: case 0x83:
+            case 0x86: case 0x87: case 0xf6: case 0xf7:
+            case 0xfe: case 0xff: break;
+            default: return true;
+        }
+    }
+    if (pos == len) return false;
+    uint8_t modrm = code[pos], ext = (modrm >> 3) & 7;
+    if ((modrm >> 6) == 3) return true;
+    if (extended) {
+        if (op == 0xba && ext < 5) return true;
+        if (op == 0xc7 && ext != 1) return true;
+    } else {
+        if ((op == 0x80 || op == 0x81 || op == 0x83) && ext == 7) return true;
+        if ((op == 0xf6 || op == 0xf7) && ext != 2 && ext != 3) return true;
+        if ((op == 0xfe || op == 0xff) && ext > 1) return true;
+    }
+    return false;
+}
+
+hb_result_t hb_decode_x64_probe(const uint8_t* code, size_t len, uint64_t addr,
+                                hb_decoded_t* out, hb_decode_probe_t* probe) {
+    if (!out || !probe || (!code && len)) return HB_ERR_INVALID_ARG;
+    if (!len) {
+        *probe = (hb_decode_probe_t){ HB_DECODE_NEED_MORE, HB_ERR_DECODE_FAILED, 1 };
+        return HB_OK;
+    }
+    hb_result_t terminal_result;
+    if (probe_terminal_prefix(code, len < 15 ? len : 15, &terminal_result)) {
+        *probe = (hb_decode_probe_t){ HB_DECODE_TERMINAL, terminal_result, 0 };
+        return HB_OK;
+    }
+    jmp_buf escape;
+    volatile size_t required = 0;
+    /* C requires setjmp in a permitted controlling expression. On escape read
+     * only volatile required; do not inspect the modified decoder or output. */
+    switch (setjmp(escape)) {
+        case 1:
+            *probe = (hb_decode_probe_t){ HB_DECODE_NEED_MORE, HB_ERR_DECODE_FAILED, required };
+            return HB_OK;
+        case 2:
+            *probe = (hb_decode_probe_t){ HB_DECODE_TERMINAL, HB_ERR_DECODE_FAILED, 0 };
+            return HB_OK;
+        default: break;
+    }
+    hb_dec_t d = { .code = code, .len = len < 15 ? len : 15, .addr = addr,
+                   .probe_escape = &escape, .probe_required = &required };
+    hb_decoded_t decoded;
+    hb_decode_probe_t result = { HB_DECODE_TERMINAL, HB_ERR_DECODE_FAILED, 0 };
+    result.decode_result = decode_x64_state(&d, &decoded);
+    if (result.decode_result == HB_OK) {
+        if (decoded.opcode != HB_INS_UNAVAILABLE_EXT && decoded.opcode != HB_INS_UNSUPPORTED) {
+            result.state = HB_DECODE_COMPLETE;
+            *out = decoded;
+        }
+    }
+    *probe = result;
     return HB_OK;
 }
 

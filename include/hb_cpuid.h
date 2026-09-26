@@ -17,6 +17,7 @@
  */
 
 #include "hb_context.h"
+#include "hb_memory.h"
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -56,7 +57,7 @@ static inline void hb_cpuid_query(const hb_context_t* ctx, uint32_t leaf, uint32
      * САМОГО ВЫСОКОГО базового листа (SDM, том 2A, CPUID). Мы отвечали нулями, и гость,
      * спросивший несуществующий лист, получал «признака нет» вместо штатного ответа.
      * Граница — 0x8000_0000: выше начинается диапазон РАСШИРЕННЫХ листов со своим
-     * максимумом, его мы не описываем и честно отвечаем нулями. Диапазон 0x4000_0000+
+     * максимумом, который ниже описывает RDTSCP. Диапазон 0x4000_0000+
      * отведён под гипервизор; мы себя гипервизором не объявляем, поэтому на железе без
      * гипервизора он ведёт себя как переполнение базового — так же поступаем и мы.
      * (Замер: гость спрашивал лист 0x70001000, то есть проверка попадает именно сюда.) */
@@ -86,7 +87,13 @@ static inline void hb_cpuid_query(const hb_context_t* ctx, uint32_t leaf, uint32
                   (1U << 27) |  /* OSXSAVE */
                   (1U << 28) |  /* AVX */
                   (1U << 29);   /* F16C */
-            edx = (1U << 8)  |  /* CX8 */
+            /* CX16 requires one atomic operation on the shared backing memory.
+             * An unconfigured context's split read/write fallback does not
+             * synchronize with native writers and cannot advertise this bit. */
+            if (ctx && hb_memory_has_atomic_cmpxchg128_handler(ctx->memory))
+                ecx |= (1U << 13);
+            edx = (1U << 4)  |  /* TSC: shared RDTSC/RDTSCP counter helper */
+                  (1U << 8)  |  /* CX8 */
                   (1U << 15) |  /* CMOV */
                   (1U << 24) |  /* FXSR */
                   (1U << 25) |  /* SSE */
@@ -103,6 +110,17 @@ static inline void hb_cpuid_query(const hb_context_t* ctx, uint32_t leaf, uint32
              * все UNSUPPORTED_OPCODE в режиме x86. Объявление снимаем ровно в 32 битах. */
             if (is32)
                 ecx &= ~((1U << 12) | (1U << 26) | (1U << 27) | (1U << 28) | (1U << 29));
+            break;
+
+        case 0x80000000U:
+            eax = 0x80000001U;
+            break;
+
+        case 0x80000001U:
+            /* Shared interpreter/JIT helper completes prior accesses before
+             * reading the counter. No invariant-TSC, NX, or long-mode claims
+             * are added by this narrowly scoped capability change. */
+            edx = (1U << 27); /* RDTSCP */
             break;
 
         case 13: /* 0x0D — состав и размер области XSAVE */

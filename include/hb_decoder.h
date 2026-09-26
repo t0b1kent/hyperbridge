@@ -354,6 +354,33 @@ hb_result_t hb_decode_at(hb_decoder_t* d, size_t offset, hb_decoded_t* out);
 /* x64 specific */
 hb_result_t hb_decode_x64(const uint8_t* code, size_t len, uint64_t addr, hb_decoded_t* out);
 
+/* Additive, bounded x64 instruction-fetch probe. This never reads beyond len
+ * or the architectural 15-byte limit. HB_OK describes the API call, not the
+ * instruction: inspect state first. A decoded UNAVAILABLE_EXT may be TERMINAL
+ * with decode_result == HB_OK, just as the legacy API represents that encoding.
+ * Early rejection need not reproduce the legacy result or decoded length.
+ * required_size is a total
+ * extent from code[0], and is nonzero only for NEED_MORE. The decoded output
+ * is published only for COMPLETE. Invalid arguments leave both outputs alone.
+ * A zero-length prefix is allowed, including code == NULL in that case.
+ * These states describe this supported decoder's completion requirements, not
+ * architectural #UD/#GP-versus-fetch exception priority or full ISA validity.
+ * This is not a guest-memory read, permission grant, or guard-consumption API. */
+typedef enum {
+    HB_DECODE_COMPLETE = 0,
+    HB_DECODE_NEED_MORE = 1,
+    HB_DECODE_TERMINAL = 2
+} hb_decode_probe_state_t;
+
+typedef struct {
+    hb_decode_probe_state_t state;
+    hb_result_t decode_result;
+    size_t required_size;
+} hb_decode_probe_t;
+
+hb_result_t hb_decode_x64_probe(const uint8_t* code, size_t len, uint64_t addr,
+                                hb_decoded_t* out, hb_decode_probe_t* probe);
+
 /* x86 specific */
 hb_result_t hb_decode_x86(const uint8_t* code, size_t len, uint64_t addr, hb_decoded_t* out);
 

@@ -236,6 +236,23 @@ typedef struct {
      * диспетчер: чужой кеш никто не трогает, поэтому исполнение в полёте безопасно по
      * построению. Дописано В КОНЕЦ: выпущенный код смещений структуры не использует. */
     uint64_t inval_seen;
+    bool scalar_access_enabled; /* Translation policy of this warm cache. */
+    bool pair_access_enabled;
+    /* EXEC mode compiles one explicit unit, observes before IR, and returns
+     * after that attempt. Changing this policy invalidates the warm cache. */
+    bool exec_access_enabled;
+    /* Opus 26.09.2026 — возврат мёртвого места арены (MACRUNNER_HB_ARENA_RECLAIM).
+     * Карантин и свободные куски; заводится лениво, NULL при выключенном гейте.
+     * Дописано В КОНЕЦ: выпущенный код смещений структуры не использует. */
+    struct hb_arena_reclaim* arena_reclaim;
+    /* Opus 26.09.2026 — участки по 64 КБ, где есть переведённый код (MACRUNNER_HB_INVAL_SKIP_EMPTY):
+     * сброс по диапазону без кода не перебирает кеш вовсе. NULL — гейт выключен или кода нет. */
+    struct hb_code_granules* code_granules;
+    /* Opus 26.09.2026 — кадры hb_jit_runtime_run на потоке этой среды (безопасная точка арены).
+     * Среда потоковая, поэтому поля здесь вместо __thread: без _tlv_get_addr на каждом входе. */
+    uintptr_t run_frame[16];
+    int run_frames;
+    int run_frames_lost;
 }hb_jit_runtime_t;
 
 hb_jit_runtime_t* hb_jit_runtime_create(hb_context_t* ctx);
@@ -386,6 +403,10 @@ uint64_t hb_jit_invalidate_guest_range(hb_jit_runtime_t* rt, uint64_t start, uin
  * среды применяют его к себе на ближайшем входе в hb_jit_runtime_run. Возвращает выселенное
  * из `self`. Граница: среда, не возвращающаяся в диспетчер (сцепленный цикл), не применит. */
 uint64_t hb_jit_invalidate_guest_range_all(hb_jit_runtime_t* self, uint64_t start, uint64_t len);
+/* Opus 26.09.2026 — то же, с ВИДОМ объявления (для учёта, откуда берутся выселения). `why` —
+ * номер события адаптера (flush/dirty/map/alloc/protect/free/unmap/read), 0..13; прочее — 15. */
+uint64_t hb_jit_invalidate_guest_range_all_why(hb_jit_runtime_t* self, uint64_t start, uint64_t len,
+                                               uint32_t why);
 /* Счётчики механизма: вызовов _all, применённых чужими средами диапазонов, полных чисток по
  * переполнению кольца. Все безусловные — ноль читается как настоящий ноль. */
 void hb_jit_inval_all_stats(uint64_t* calls, uint64_t* applied, uint64_t* overflow_clears);
@@ -434,5 +455,22 @@ unsigned hb_runtime_persistent_cache_version(void);
  * а не копией списка: копия разошлась бы молча, и блок поехал бы звать не того помощника. */
 unsigned hb_runtime_helper_id_for_addr(uint64_t addr);
 void hb_runtime_fill_helper_table(void** table, unsigned slots);
+
+/* Claude 25.09 (быстрый режим, бит 64): обычные скалярные MOV выпускаются в родной код, как уже
+ * выпускаются все прочие обращения к памяти. Отказ в выпущенном коде возвращается крючком ядра
+ * (карта pc → точная гостевая команда) и доисполняется интерпретатором, который сохраняет
+ * предварительный запрос Wine (сторожевые страницы). Ставить ДО первой компиляции. */
+void hb_codegen_set_scalar_native(bool on);
+void hb_codegen_set_scalar_native_range(uint64_t lo, uint64_t hi);
+/* Claude 25.09 (бит 128): указатель на поколение карты памяти адаптера; кеш записываемых областей
+ * для помощников записи. NULL — кеш выключен. */
+void hb_codegen_set_live_write_generation(const uint64_t* generation);
+bool hb_jit_runtime_has_block(hb_jit_runtime_t* rt, uint64_t pc);
+void hb_runtime_set_chain_skip_smc_tracked(bool on);
+void hb_runtime_set_chain_x64_disabled(bool on);
+void hb_codegen_set_no_idioms(bool on);
+void hb_codegen_set_scalar_native_loads_only(bool on);
+void hb_codegen_set_store_exec_via_memory_write(bool on);
+void hb_codegen_set_store_native_range(uint64_t lo, uint64_t hi);
 
 #endif

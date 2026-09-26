@@ -87,7 +87,7 @@ static void make_image(uint8_t image[IMAGE_BYTES],const image_state_t *s,uint32_
 {
     memset(image,0x6c,IMAGE_BYTES);
     put16(image,s->cw); put16(image+2,s->sw); image[4]=s->ftw;
-    put32(image+0x18,mxcsr); put32(image+0x1c,0xffbf);
+    put32(image+0x18,mxcsr); put32(image+0x1c,0xffff);
     for(unsigned i=0;i<8;++i) put_ext(image+0x20+16*i,s->logical[i]);
     for(unsigned i=0;i<16;++i) {
         put64(image+0xa0+16*i,xmm_bits(i,0)); put64(image+0xa8+16*i,xmm_bits(i,1));

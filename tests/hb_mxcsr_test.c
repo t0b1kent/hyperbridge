@@ -246,13 +246,14 @@ static void run_case(const address_case_t *address, unsigned op, uint32_t value,
 
 static void invalid_loads(hb_backend_t backend)
 {
-    static const uint32_t invalid[] = {0x40, 0x1fc0, 0x10000, 0x80000000u, 0xffffffffu};
+    /* DAZ (бит 6) объявлен с 25.09.2026 (маска 0xffff): 0x40 и 0x1fc0 допустимы. */
+    static const uint32_t invalid[] = {0x10000, 0x80000000u, 0xffffffffu};
     for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
         run_case_full(&addresses[0], LOAD_MXCSR, invalid[i], ACCESS_RW, backend, 1, 0);
         run_case_full(&addresses[0], LOAD_MXCSR, invalid[i], ACCESS_NONE, backend, 1, 0);
         run_case_full(&addresses[0], LOAD_MXCSR, invalid[i], ACCESS_MISSING, backend, 1, 0);
     }
-    run_case_full(&addresses[0], LOAD_MXCSR, 0x1fc0, ACCESS_RO, backend, 1, 0);
+    run_case_full(&addresses[0], LOAD_MXCSR, 0x10000, ACCESS_RO, backend, 1, 0);
     run_case_full(&addresses[0], LOAD_MXCSR, 0x80015fa1u, ACCESS_RW, backend, 1, 1);
 }
 
@@ -404,7 +405,8 @@ static void context_defaults(void)
 
 int main(void)
 {
-    static const uint32_t values[] = {0, 0x1f80, 0x1fbf, 0x3fa1, 0x5fa1, 0x7fa1, 0x9fa1, 0xffbf};
+    static const uint32_t values[] = {0, 0x1f80, 0x1fbf, 0x3fa1, 0x5fa1, 0x7fa1, 0x9fa1, 0xffbf,
+                                      0x1fc0, 0x9fc0, 0xffff};   /* DAZ: PhysX ставит 0x9fc0 */
     char *saved[sizeof(gates) / sizeof(gates[0])] = {0};
     size_t saved_count = 0;
     int environment_changed = 0, host_saved = 0;
@@ -446,7 +448,7 @@ int main(void)
         x86_instruction(selected, LOAD_MXCSR, 0, 0);
         x86_instruction(selected, LOAD_MXCSR, 0x5fa1, 0);
         x86_instruction(selected, STORE_MXCSR, 0, 0);
-        x86_instruction(selected, LOAD_MXCSR, 0x40, 1);
+        x86_instruction(selected, LOAD_MXCSR, 0x40, 0);   /* DAZ допустим */
         x86_instruction(selected, LOAD_MXCSR, 0x10000, 1);
         x86_instruction(selected, LOAD_MXCSR, 0x80000000u, 1);
     }

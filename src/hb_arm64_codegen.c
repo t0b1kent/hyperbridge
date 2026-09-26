@@ -22,6 +22,8 @@ static inline int hb_jit_gate_flag(enum hb_gate_id id, int default_value)
 #include "hb_runtime.h"
 #include "hb_memory.h"
 #include "hb_flags.h"
+#include "hb_atomic128.h"
+#include "hb_pair_rmw.h"
 #include "hb_cpuid.h"
 #include <stdlib.h>
 #include <string.h>
@@ -1158,6 +1160,14 @@ static inline hb_size_t macrunner_size_probe(hb_size_t s, const char* где) {
      * Поэтому НЕ вместо, а ВДОБАВОК: печать на ПЕРВОМ вызове и период 0xFFFF вместо 0xFFFFF.
      * Теперь отсутствие ЛЮБОЙ строки означает однозначно «места ни разу не достигнуты»,
      * а не «не дождались выхода» — это и различает total=0 от total>0 && odd=0. */
+    /* Opus 26.09.2026 — ЗОНД СНЯТ С ГОРЯЧЕГО ПУТИ (гейт MACRUNNER_HB_SIZE_PROBE, умолчание 0).
+     * Зонд был «временным, снять после замера»; ответ получен давно (98,9 млн вызовов, odd=0),
+     * а цена осталась: профиль HK 26.09 — ~2 % рабочего потока в нём (помощники умножения,
+     * деления и знакорасширения). Выключенный гейт — одна загрузка и переход. */
+    static int включён = -1;
+    if (__builtin_expect(включён < 0, 0))
+        включён = hb_gate_flag( HB_GATE_HB_SIZE_PROBE, 0 );
+    if (!включён) return s;
     static int зарегистрирован = 0;
     if (!зарегистрирован) { зарегистрирован = 1; atexit(macrunner_size_probe_dump); }
     macrunner_size_probe_total++;
@@ -1169,7 +1179,7 @@ static inline hb_size_t macrunner_size_probe(hb_size_t s, const char* где) {
         macrunner_size_probe_odd++;
     }
     macrunner_size_probe_note(где, s);
-    if ((macrunner_size_probe_total & 0xFFFFu) == 0u)
+    if ((macrunner_size_probe_total & 0xFFFFFFu) == 0u)   /* Claude 26.09: реже в 256 раз (журнал) */
         fprintf(stderr, "macrunner-size-probe total=%lu odd=%lu\n",
                 macrunner_size_probe_total, macrunner_size_probe_odd);
     /* Период таблицы РЕЖЕ счётчика: 4 194 304 против 65 536. На нагрузке 2590 (98,9 млн)
@@ -3092,6 +3102,13 @@ static bool jit_direct_mem_codegen_enabled(hb_codegen_buffer_t* buf) {
     return direct_mem_codegen_arch_enabled(buf) && jit_direct_mem_enabled();
 }
 
+/* Claude, 26.09.2026 — ДИАГНОСТИКА чёрного кадра HK (ДОЛГ HB-ЧЁРНЫЙ-КАДР): делим прямой путь
+ * памяти на четыре четверти, не теряя скорости остальных. Умолчание 0 = прежнее поведение. */
+static bool diag_no_xmm_dload(void)   { return hb_jit_gate_flag( HB_GATE_HB_DIAG_NO_XMM_DLOAD, 0) != 0; }
+static bool diag_no_xmm_dstore(void)  { return hb_jit_gate_flag( HB_GATE_HB_DIAG_NO_XMM_DSTORE, 0) != 0; }
+static bool diag_no_scalar_dload(void)  { return hb_jit_gate_flag( HB_GATE_HB_DIAG_NO_SCALAR_DLOAD, 0) != 0; }
+static bool diag_no_scalar_dstore(void) { return hb_jit_gate_flag( HB_GATE_HB_DIAG_NO_SCALAR_DSTORE, 0) != 0; }
+
 static int jit_native_mem_shape_level(void);
 static int jit_native_mem_side(void);
 static bool jit_native_mem_ir_qword_loads_enabled(void);
@@ -4512,6 +4529,7 @@ static void* hb_jit_live_host_ptr(hb_memory_t* mem, uint64_t addr, size_t bytes,
                       && op->mem.segment != 0) \
     X(ARH_VETO,    !direct_mem_codegen_arch_enabled(buf)) \
     X(SKALYAR_GEJT, !jit_direct_scalar_mem_enabled()) \
+    X(DIAG_ZAPIS,  diag_no_scalar_dstore()) \
     FORMA_PROVERKI(X) \
     X(FORMA_URON,  !jit_native_mem_shape_allows(op))
 
@@ -5294,6 +5312,7 @@ static bool direct_user_mem_store_raw_allowed(hb_codegen_buffer_t* buf,
     X(KUSER,        mem_operand_is_kuser_absolute(op)) \
     X(ARH_VETO,     !direct_mem_codegen_arch_enabled(buf)) \
     X(SKALYAR_GEJT, !jit_direct_scalar_mem_enabled()) \
+    X(DIAG_CHTENIE, diag_no_scalar_dload()) \
     FORMA_PROVERKI(X) \
     X(FORMA_URON,   !jit_native_mem_shape_allows(op))
 
@@ -5746,6 +5765,12 @@ void hb_lock_census_print(const char* povod) {
     unsigned long long stroka = 0, pomoshchnik = 0;
     unsigned s;
 
+    {   /* Claude 26.09: печать только по MACRUNNER_HB_LOCK_CENSUS=1 — иначе 15 тыс. строк забивали
+         * журнал до лимита раннера (8 МБ) и длинные прогоны HK обрывались. */
+        static int want = -1;
+        if (want < 0) { const char* v = getenv("MACRUNNER_HB_LOCK_CENSUS"); want = v && *v && *v != '0'; }
+        if (!want) return;
+    }
     hb_lock_census_collect(c, (unsigned)HB_LKC_N, &poteryano);
     for (s = 0; s < (unsigned)HB_LKC_N_INLINE; s++) stroka += c[s];
     for (s = (unsigned)HB_LKC_H_CMPXCHG; s <= (unsigned)HB_LKC_H_XADD; s++) pomoshchnik += c[s];
@@ -6379,6 +6404,36 @@ static uint32_t flags_clobber_mask(const hb_ir_instr_t* in) {
 }
 
 /* Мертвы ли флаги, которые пишет block->instrs[idx]. */
+/* Claude 25.09 — CF ПЕРЕД ВСТРОЕННОЙ ЗАПИСЬЮ INC/DEC.
+ *
+ * Интерпретатор (hb_flags.c, `hb_lazy_flags_note`, итерация 390) перед записью INC/DEC досчитывает
+ * CF из УХОДЯЩЕЙ отложенной записи: INC/DEC CF не меняют, а сама запись его не хранит. Встроенная
+ * запись выпускаемого кода (`emit_note_lazy_from_x20_x21_x22`) этого не делала: CF от `cmp` терялся,
+ * и следующий читатель CF видел устаревший ctx->flags.cf. Найдено на HK делением пополам:
+ * `cmp r10,r8; inc eax; cmovae ecx,r9d` в jit_info_table_add (Mono) давал left > right и
+ * g_assert jit-info.c:210. До бита 64 этот блок уходил в интерпретатор целиком (в нём MOV).
+ * Проба: tests/micro_diff.c, случай A. */
+void hb_jit_helper_keep_cf(hb_context_t* ctx) {
+    (void)hb_lazy_flags_materialize(ctx, HB_FLAG_BIT_CF);
+}
+
+static uint32_t flags_read_mask(const hb_ir_instr_t* in);
+static uint32_t flags_clobber_mask(const hb_ir_instr_t* in);
+
+/* Нужен ли досчёт CF перед INC/DEC номер i: да, если CF могут прочитать раньше, чем перетрут,
+ * или блок кончается (преемник может читать CF). */
+static bool incdec_needs_cf_keep(const hb_ir_block_t* block, size_t i, size_t limit) {
+    const hb_ir_instr_t* in = &block->instrs[i];
+    if (!in->preserve_cf || (in->op != HB_IR_ADD && in->op != HB_IR_SUB)) return false;
+    for (size_t j = i + 1; j < limit && j < block->instr_count; j++) {
+        const hb_ir_instr_t* n = &block->instrs[j];
+        if (flags_analysis_barrier(n)) return true;
+        if (flags_read_mask(n) & (uint32_t)HB_FLAG_BIT_CF) return true;
+        if (flags_clobber_mask(n) & (uint32_t)HB_FLAG_BIT_CF) return false;
+    }
+    return true;
+}
+
 static bool lazy_flags_dead_at(const hb_ir_block_t* block, size_t idx) {
     uint32_t pending;
     size_t j;
@@ -8038,7 +8093,7 @@ static bool emit_load_xmm_operand_to_pair(hb_codegen_buffer_t* buf, const hb_ir_
         emit_load_xmm_to_pair(buf, op->reg, lo, hi);
         return true;
     }
-    if (jit_direct_mem_codegen_enabled(buf) && direct_user_xmm_mem_allowed(buf, op)) {
+    if (jit_direct_mem_codegen_enabled(buf) && !diag_no_xmm_dload() && direct_user_xmm_mem_allowed(buf, op)) {
         emit_direct_mem_addr(buf, op);
         if (lo == 21) {
             emit_ldr_x(buf, hi, 21, 8);
@@ -8248,14 +8303,14 @@ static bool emit_native_xmm_mov(hb_codegen_buffer_t* buf, const hb_ir_instr_t* i
         emit_store_x20_x22_to_xmm(buf, instr->dst.reg);
         return true;
     }
-    if (is_xmm_reg_operand(&instr->dst) && jit_direct_mem_codegen_enabled(buf) &&
+    if (is_xmm_reg_operand(&instr->dst) && jit_direct_mem_codegen_enabled(buf) && !diag_no_xmm_dload() &&
         direct_user_xmm_mem_allowed(buf, &instr->src1)) {
         emit_direct_mem_addr(buf, &instr->src1);
         emit_direct_mem128_load_to_x20_x22(buf);
         emit_store_x20_x22_to_xmm(buf, instr->dst.reg);
         return true;
     }
-    if (jit_direct_mem_codegen_enabled(buf) && direct_user_xmm_mem_allowed(buf, &instr->dst) &&
+    if (jit_direct_mem_codegen_enabled(buf) && !diag_no_xmm_dstore() && direct_user_xmm_mem_allowed(buf, &instr->dst) &&
         is_xmm_reg_operand(&instr->src1)) {
         emit_load_xmm_to_x20_x22(buf, instr->src1.reg);
         /* emit_direct_mem_addr clobbers x22 for indexed / large-disp addresses (it loads the
@@ -8904,6 +8959,23 @@ void hb_ic_slots_clear_all(void) {
     __atomic_fetch_add(&g_ic_cleared, 1ull, __ATOMIC_RELAXED);
 }
 
+uint64_t hb_ic_slots_clear_matching(int (*inside)(uint64_t native, void* arg), void* arg) {
+    unsigned n = __atomic_load_n(&g_ic_slot_next, __ATOMIC_RELAXED);
+    unsigned i;
+    uint64_t k = 0;
+    if (!inside) return 0;
+    if (n > HB_IC_SLOT_MAX) n = HB_IC_SLOT_MAX;
+    for (i = 0; i < n; i++) {
+        uint64_t nat = __atomic_load_n(&g_ic_slots[i].native, __ATOMIC_RELAXED);
+        if (!nat || !inside(nat, arg)) continue;
+        __atomic_store_n(&g_ic_slots[i].native, 0ull, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_ic_slots[i].guest, 0ull, __ATOMIC_RELAXED);
+        k++;
+    }
+    if (k) __atomic_fetch_add(&g_ic_cleared, 1ull, __ATOMIC_RELAXED);
+    return k;
+}
+
 /* ★ ОРАКУЛ ПРИЁМКИ (см. объявление в hb_codegen.h). Линейный обход по ВЫДАННЫМ слотам —
  * это не горячий путь, его зовёт только повозка. */
 uint64_t hb_ic_slotov_zanyato(void) {
@@ -9138,6 +9210,8 @@ static bool emit_native_bit_scan(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
     return true;
 }
 
+static hb_result_t emit_interp_ir_helper(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr);
+
 static bool emit_native_bit_test(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
     hb_ir_operand_t target, bitop;
     hb_size_t size;
@@ -9157,6 +9231,17 @@ static bool emit_native_bit_test(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         return false;
     target.size = size;
     width = (size == HB_SIZE_64) ? 64 : (size == HB_SIZE_16) ? 16 : 32;
+
+    /* ZF is unchanged. The shared handler preserves a pending ZF before
+     * clearing its record; keep the existing native path when flags are ready.
+     * Reuse the serializable IR helper instead of adding a helper/cache ABI. */
+    emit_ldrb_w(buf, 20, 19, (uint32_t)(offsetof(hb_context_t, lazy_flags) +
+                                      offsetof(hb_lazy_flags_t, pending)));
+    emit_cmp_imm(buf, 20, 0);
+    size_t flags_ready = emit_bcond_deferred(buf, 0); /* EQ -> native path. */
+    emit_interp_ir_helper(buf, instr);
+    size_t pending_done = emit_b_deferred(buf);
+    patch_bcond(buf, flags_ready, 0, buf->size);
 
     if (!emit_load_gpr_sized_to_reg(buf, &target, 20))
         return false;
@@ -9178,8 +9263,10 @@ static bool emit_native_bit_test(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
     emit_clear_lazy_flags_pending(buf);
     emit_store_flag_bool_from_w(buf, 22, offsetof(hb_flags_t, cf));
 
-    if (instr->op == HB_IR_BT)
+    if (instr->op == HB_IR_BT) {
+        patch_b(buf, pending_done, buf->size);
         return true;
+    }
 
     emit_lslv(buf, 22, 23, 21);
     switch (instr->op) {
@@ -9197,6 +9284,7 @@ static bool emit_native_bit_test(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
             return false;
     }
     emit_store_x20_to_gpr_sized(buf, &target);
+    patch_b(buf, pending_done, buf->size);
     return true;
 }
 
@@ -11293,6 +11381,7 @@ static bool emit_adjacent_mem64_pair(hb_codegen_buffer_t* buf, const hb_ir_instr
 static bool emit_xmm_load_store_pair(hb_codegen_buffer_t* buf, const hb_ir_instr_t* load,
                                      const hb_ir_instr_t* store) {
     if (!jit_direct_mem_codegen_enabled(buf) || !load || !store) return false;
+    if (diag_no_xmm_dload() || diag_no_xmm_dstore()) return false;
     if (load->op != HB_IR_LOAD || store->op != HB_IR_STORE) return false;
     if (!is_xmm_reg_operand(&load->dst) || !is_xmm_reg_operand(&store->src2) ||
         load->dst.reg != store->src2.reg)
@@ -14195,7 +14284,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
              * (dm_stat), и вычисление его вхолостую исказило бы соседнюю сводку. */
             {
             const bool vzyal_xmm128 =
-                is_xmm_reg_operand(&instr->dst) && jit_direct_mem_codegen_enabled(buf) &&
+                is_xmm_reg_operand(&instr->dst) && jit_direct_mem_codegen_enabled(buf) && !diag_no_xmm_dload() &&
                 direct_user_xmm_mem_allowed(buf, &instr->src1);
             if (vzyal_xmm128) {
                 perepis_uchest(buf, 0, instr->src1.size, SH_NATIV_XMM);
@@ -14450,6 +14539,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
             emit_return_if_helper_failed(buf);
             return HB_OK;
         }
+
+        case HB_IR_LEAVE:
+            /* One helper owns the faultable read and subsequent SP/BP commit. */
+            return emit_interp_ir_helper(buf, instr);
 
         case HB_IR_POP: {
             /* Итерация 915: та же 16-битная форма — помощнику (см. PUSH выше). */
@@ -15868,8 +15961,21 @@ static void hb_jit_helper_store_watch(hb_context_t* ctx, uint64_t addr, uint64_t
                 (unsigned long long)(ctx ? ctx->last_helper_guest : 0), ctx ? ctx->regs.x86.eip : 0, ctx ? ctx->regs.x86.esp : 0,
                 ctx ? ctx->regs.x86.edi : 0, ctx ? ctx->regs.x86.esi : 0, ctx ? ctx->regs.x86.ecx : 0, ctx ? ctx->regs.x86.eax : 0);
 }
+/* Claude 26.09 (бит 8192, опыт): запись помощника в ИСПОЛНЯЕМУЮ область — через hb_memory_write,
+ * как у интерпретатора (переход W^X и подъём поколения исполняемого кода = SMC). */
+static bool g_store_exec_via_memory_write;
+void hb_codegen_set_store_exec_via_memory_write(bool on) { g_store_exec_via_memory_write = on; }
+
 void hb_jit_helper_store_sized(hb_context_t* ctx, uint64_t addr, uint64_t val, uint64_t size) {
     macrunner_hb_fallback_store_calls++;   /* см. разбор у счётчика */
+    if (g_store_exec_via_memory_write && ctx && ctx->memory) {
+        hb_region_t* r = hb_memory_find_region(ctx->memory, (hb_gva_t)addr);
+        if (r && (r->perm & HB_PERM_EXEC)) {
+            unsigned bytes = size == HB_SIZE_8 ? 1u : size == HB_SIZE_16 ? 2u : size == HB_SIZE_32 ? 4u : 8u;
+            ctx->last_result = hb_memory_write(ctx->memory, (hb_gva_t)addr, &val, bytes);
+            return;
+        }
+    }
     hb_jit_helper_store_watch(ctx, addr, val, size, "sized");
     if (macrunner_hb_codegendv_hit(addr)) fprintf(stderr, "macrunner-hb-dv-store_sized: addr=0x%llx size=%llu val=0x%llx\n", (unsigned long long)addr, (unsigned long long)size, (unsigned long long)val);
     if (!ctx) return;
@@ -16676,6 +16782,26 @@ static void hb_jit_trace_live_prot_probe(const char* op, uint64_t addr, size_t b
             heap_ok, kr);
 }
 
+/* Claude 25.09 — КЕШ ЗАПИСЫВАЕМЫХ ОБЛАСТЕЙ ПО ПОКОЛЕНИЮ КАРТЫ ПАМЯТИ (бит 128 быстрого режима).
+ *
+ * Каждая запись помощника (push/call/atomic) спрашивала `mach_vm_region`, потому что права страницы
+ * может сменить гость (VirtualProtect RW -> RX) мимо метаданных HB. Профиль HK после бита 64: 62 %
+ * главного потока в этом запросе. Смена прав гостем идёт через NtProtectVirtualMemory/Alloc/Free/Map,
+ * и адаптер поднимает поколение до И после каждого такого уведомления. Поэтому ответ «область
+ * записываема и без права исполнения» верен, пока поколение то же; поколение читается ДО запроса.
+ * Смены прав внутри Wine без уведомления (охрана записи — делает страницу строже) ловит обработчик
+ * Wine при отказе, как и раньше. Указатель на поколение ставит адаптер; без него кеш выключен. */
+static const uint64_t* volatile g_live_write_gen;
+
+void hb_codegen_set_live_write_generation(const uint64_t* generation) {
+    g_live_write_gen = generation;
+}
+
+#define HB_LIVE_WCACHE_SLOTS 8u
+struct hb_live_wslot { uint64_t start, end, gen; };
+static __thread struct hb_live_wslot t_live_wcache[HB_LIVE_WCACHE_SLOTS];
+static __thread unsigned t_live_wcache_next;
+
 static void* hb_jit_live_host_ptr(hb_memory_t* mem, uint64_t addr, size_t bytes, hb_perm_t perms) {
     mach_vm_address_t region = (mach_vm_address_t)addr;
     mach_vm_size_t region_size = 0;
@@ -16695,6 +16821,16 @@ static void* hb_jit_live_host_ptr(hb_memory_t* mem, uint64_t addr, size_t bytes,
      * would hand store helpers a raw pointer to the now-RX page and bypass
      * hb_memory_write's W^X transition plus executable-generation bump.  Every
      * write request must therefore re-read the current Mach protection. */
+    const uint64_t* wgen_ptr = (needed & VM_PROT_WRITE) ? g_live_write_gen : NULL;
+    uint64_t wgen = 0;
+    if (wgen_ptr) {
+        wgen = __atomic_load_n(wgen_ptr, __ATOMIC_ACQUIRE);
+        for (unsigned k = 0; k < HB_LIVE_WCACHE_SLOTS; k++) {
+            const struct hb_live_wslot* w = &t_live_wcache[k];
+            if (w->gen == wgen && addr >= w->start && addr + bytes <= w->end)
+                return (void*)(uintptr_t)addr;
+        }
+    }
     if (!(needed & VM_PROT_WRITE)) {
         void* cached = hb_jit_live_read_cache_lookup(addr, bytes, needed);
         if (cached) {
@@ -16751,6 +16887,12 @@ static void* hb_jit_live_host_ptr(hb_memory_t* mem, uint64_t addr, size_t bytes,
     if ((perms & HB_PERM_WRITE) && (info.protection & VM_PROT_EXECUTE)) { if (macrunner_hb_codegendv_hit(addr)) fprintf(stderr, "macrunner-hb-dv-live_host_ptr: addr=0x%llx perms=%d EXEC-write-guard -> NULL\n", (unsigned long long)addr, (int)perms); return NULL; }
     hb_jit_live_read_cache_store((uint64_t)region, (uint64_t)region_size, info.protection);
     if (macrunner_hb_codegendv_hit(addr)) fprintf(stderr, "macrunner-hb-dv-live_host_ptr: addr=0x%llx perms=%d mach_prot=0x%x -> IDENTITY host=%p\n", (unsigned long long)addr, (int)perms, (int)info.protection, (void*)(uintptr_t)addr);
+    if (wgen_ptr && wgen && (info.protection & VM_PROT_WRITE) && !(info.protection & VM_PROT_EXECUTE)) {
+        struct hb_live_wslot* w = &t_live_wcache[t_live_wcache_next++ & (HB_LIVE_WCACHE_SLOTS - 1)];
+        w->start = (uint64_t)region;
+        w->end = (uint64_t)region + (uint64_t)region_size;
+        w->gen = wgen;
+    }
     return (void*)(uintptr_t)addr;
 }
 
@@ -17053,10 +17195,11 @@ static hb_result_t hb_jit_atomic_cmpxchg_split_locked(hb_context_t* ctx,
     acc = hb_jit_trunc_to_size(hb_context_read_reg_value(ctx, HB_REG_RAX), size);
     src_val = hb_jit_trunc_to_size(src_val, size);
     equal = old == acc;
-    if (equal) {
-        r = hb_jit_atomic_write_mem_value(ctx, addr, size, src_val);
-        if (r != HB_OK) return r;
-    } else {
+    /* A failed comparison still performs a write access on x86. Do not
+     * publish the accumulator or flags if that access is denied. */
+    r = hb_jit_atomic_write_mem_value(ctx, addr, size, equal ? src_val : old);
+    if (r != HB_OK) return r;
+    if (!equal) {
         hb_context_write_reg_value_sized(ctx, HB_REG_RAX, old, size);
     }
     hb_lazy_flags_note(ctx, HB_LAZY_FLAGS_CMP, size, acc, old, acc - old, 0);
@@ -17271,8 +17414,7 @@ static hb_result_t hb_jit_atomic_cmpxchg8b(hb_context_t* ctx, const hb_ir_instr_
     old = acc;
     equal = __atomic_compare_exchange_n((uint64_t*)ptr, &old, src,
                                         false, HB_HELPER_ATOMIC_ORDER, HB_HELPER_ATOMIC_ORDER);
-    hb_lazy_flags_clear(ctx);
-    ctx->flags.zf = equal;
+    hb_pair_rmw_commit_zf(ctx, equal);
     if (!equal) {
         hb_context_write_reg_value_sized(ctx, HB_REG_RAX, (uint32_t)old, HB_SIZE_32);
         hb_context_write_reg_value_sized(ctx, HB_REG_RDX, (uint32_t)(old >> 32), HB_SIZE_32);
@@ -17294,25 +17436,33 @@ static hb_result_t hb_jit_atomic_cmpxchg8b_split_locked(hb_context_t* ctx,
         if (!ctx || !ctx->memory || instr->dst.type != HB_OP_MEM)
             return HB_ERR_UNSUPPORTED_FEATURE;
         addr = hb_jit_resolve_addr(ctx, &instr->dst);
-        if (addr & 0xf)
-            return HB_ERR_MEMORY_FAULT;
+        if (addr & 0xf) {
+            /* The helper-fault exit synchronizes RIP from ctx->pc. Publish
+             * this instruction only on rejection, after resolving its EA. */
+            ctx->pc = instr->guest_addr;
+            return hb_fault_general_protection(ctx, instr->guest_addr);
+        }
         r = hb_jit_helper_read_bytes_tso(ctx, addr, mem, sizeof(mem));
-        if (r != HB_OK) return r;
+        if (r != HB_OK) {
+            ctx->pc = instr->guest_addr;
+            return r;
+        }
 
         acc = hb_context_read_reg_value(ctx, HB_REG_RAX);
         src = hb_context_read_reg_value(ctx, HB_REG_RDX);
         equal = mem[0] == acc && mem[1] == src;
-        if (equal) {
-            desired[0] = hb_context_read_reg_value(ctx, HB_REG_RBX);
-            desired[1] = hb_context_read_reg_value(ctx, HB_REG_RCX);
-            r = hb_jit_helper_write_bytes_tso(ctx, addr, desired, sizeof(desired));
-            if (r != HB_OK) return r;
-        } else {
+        desired[0] = equal ? hb_context_read_reg_value(ctx, HB_REG_RBX) : mem[0];
+        desired[1] = equal ? hb_context_read_reg_value(ctx, HB_REG_RCX) : mem[1];
+        r = hb_jit_helper_write_bytes_tso(ctx, addr, desired, sizeof(desired));
+        if (r != HB_OK) {
+            ctx->pc = instr->guest_addr;
+            return r;
+        }
+        if (!equal) {
             hb_context_write_reg_value_sized(ctx, HB_REG_RAX, mem[0], HB_SIZE_64);
             hb_context_write_reg_value_sized(ctx, HB_REG_RDX, mem[1], HB_SIZE_64);
         }
-        hb_lazy_flags_clear(ctx);
-        ctx->flags.zf = equal;
+        hb_pair_rmw_commit_zf(ctx, equal);
         return HB_OK;
     }
     r = hb_jit_atomic_read_mem_value(ctx, &instr->dst, HB_SIZE_64, &addr, &old);
@@ -17323,15 +17473,13 @@ static hb_result_t hb_jit_atomic_cmpxchg8b_split_locked(hb_context_t* ctx,
     src = ((uint64_t)(uint32_t)hb_context_read_reg_value(ctx, HB_REG_RCX) << 32) |
           (uint32_t)hb_context_read_reg_value(ctx, HB_REG_RBX);
     equal = old == acc;
-    if (equal) {
-        r = hb_jit_atomic_write_mem_value(ctx, addr, HB_SIZE_64, src);
-        if (r != HB_OK) return r;
-    } else {
+    r = hb_jit_atomic_write_mem_value(ctx, addr, HB_SIZE_64, equal ? src : old);
+    if (r != HB_OK) return r;
+    if (!equal) {
         hb_context_write_reg_value_sized(ctx, HB_REG_RAX, (uint32_t)old, HB_SIZE_32);
         hb_context_write_reg_value_sized(ctx, HB_REG_RDX, (uint32_t)(old >> 32), HB_SIZE_32);
     }
-    hb_lazy_flags_clear(ctx);
-    ctx->flags.zf = equal;
+    hb_pair_rmw_commit_zf(ctx, equal);
     return HB_OK;
 }
 
@@ -17511,6 +17659,7 @@ void hb_jit_helper_exec_atomic_ir(hb_context_t* ctx, const hb_ir_instr_t* instr)
     hb_jit_helper_op_note(ctx, instr);
     hb_result_t r = HB_ERR_UNSUPPORTED_FEATURE;
     uint64_t trace_count = 0;
+    bool provider128;
 
     /* ═══ ПЕРЕПИСЬ, вторая половина: семья ПОМОЩНИКА ═══
      *
@@ -17553,8 +17702,26 @@ void hb_jit_helper_exec_atomic_ir(hb_context_t* ctx, const hb_ir_instr_t* instr)
         }
     }
 
+    if (hb_ir_pair_rmw(instr)) {
+        r = hb_pair_rmw_begin(ctx, instr, hb_jit_resolve_addr(ctx, &instr->dst));
+        if (r != HB_OK) goto pair_done;
+    }
+    provider128 = instr->op == HB_IR_CMPXCHG8B && instr->dst.size == HB_SIZE_128 &&
+                  hb_memory_has_atomic_cmpxchg128_handler(ctx->memory);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
-    switch (instr->op) {
+    if (provider128) {
+        if (ctx->mode != HB_MODE_64BIT || instr->dst.type != HB_OP_MEM) {
+            r = HB_ERR_INVALID_ARG;
+        } else {
+            uint64_t addr = hb_jit_resolve_addr(ctx, &instr->dst);
+            if (addr & 15u)
+                r = hb_fault_general_protection(ctx, instr->guest_addr);
+            else
+                r = hb_atomic128_exec_provider(ctx, addr);
+        }
+        /* Resolve RIP-relative EA first. Only fault exits replace block PC. */
+        if (r != HB_OK) ctx->pc = instr->guest_addr;
+    } else switch (instr->op) {
         case HB_IR_CMPXCHG:   r = hb_jit_atomic_cmpxchg(ctx, instr); break;
         case HB_IR_CMPXCHG8B: r = hb_jit_atomic_cmpxchg8b(ctx, instr); break;
         case HB_IR_XCHG:      r = hb_jit_atomic_xchg(ctx, instr); break;
@@ -17569,7 +17736,7 @@ void hb_jit_helper_exec_atomic_ir(hb_context_t* ctx, const hb_ir_instr_t* instr)
             break;
     }
 
-    if (r == HB_ERR_UNSUPPORTED_FEATURE) {
+    if (r == HB_ERR_UNSUPPORTED_FEATURE && !provider128) {
         if (hb_lock_rmw_inline_family(instr)) ctx->lock_census[HB_LKC_H_SPLIT]++;
         hb_jit_split_lock_acquire();
         switch (instr->op) {
@@ -17607,6 +17774,18 @@ void hb_jit_helper_exec_atomic_ir(hb_context_t* ctx, const hb_ir_instr_t* instr)
                 (int)r,
                 (unsigned long long)ctx->pc,
                 (unsigned long long)instr->guest_addr);
+    }
+pair_done:
+    if (hb_ir_pair_rmw(instr)) hb_pair_rmw_end(ctx);
+    if (r != HB_OK && instr->guest_len &&
+        (instr->op == HB_IR_CMPXCHG || instr->op == HB_IR_CMPXCHG8B || instr->op == HB_IR_XADD ||
+         instr->op == HB_IR_XCHG || instr->op == HB_IR_BTS ||
+         instr->op == HB_IR_BTR || instr->op == HB_IR_BTC)) {
+        /* Publish a restart point only after all EA-dependent work. The
+         * scalar exchange and bit-modify paths retain state on failure. */
+        ctx->pc = instr->guest_addr;
+        if (ctx->mode == HB_MODE_32BIT) ctx->regs.x86.eip = (uint32_t)ctx->pc;
+        else ctx->regs.x64.rip = ctx->pc;
     }
     ctx->last_result = r;
 }
@@ -17973,6 +18152,18 @@ void hb_jit_helper_exec_interp_ir(hb_context_t* ctx, const hb_ir_instr_t* instr)
         return;
     }
     ctx->last_result = hb_interpreter_exec_one_for_jit(ctx, instr);
+    if (ctx->last_result != HB_OK && instr->guest_len &&
+        (instr->op == HB_IR_POP || instr->op == HB_IR_LEAVE ||
+         instr->op == HB_IR_MOVS || instr->op == HB_IR_STOS ||
+         instr->op == HB_IR_BT || instr->op == HB_IR_BTS ||
+         instr->op == HB_IR_BTR || instr->op == HB_IR_BTC)) {
+        /* Stack operations retain pre-instruction registers; MOVS/STOS retain
+         * completed elements; bit operations retain flags on failed access.
+         * Each restarts at its own PC on fault/yield. */
+        ctx->pc = instr->guest_addr;
+        if (ctx->mode == HB_MODE_32BIT) ctx->regs.x86.eip = (uint32_t)ctx->pc;
+        else ctx->regs.x64.rip = ctx->pc;
+    }
 }
 
 static hb_result_t hb_jit_helper_exec_block_instr_for_jit(hb_context_t* ctx,
@@ -19683,6 +19874,328 @@ void hb_jit_helper_exec_ir_block(hb_context_t* ctx, const hb_ir_block_t* block) 
         return;
     }
     ctx->last_result = hb_jit_helper_exec_ir_block_once(ctx, block);
+}
+
+/* Correctness-first guard mode: no fast scans, fused stores or ahead-of-time
+ * retirement accounting. This is invoked by an actual compiled ARM64 wrapper. */
+static bool g_scalar_native;
+/* Диапазон гостевых адресов, где родной выпуск разрешён (для поиска делением пополам). */
+static uint64_t g_scalar_native_lo, g_scalar_native_hi = UINT64_MAX;
+
+void hb_codegen_set_scalar_native(bool on) {
+    __atomic_store_n(&g_scalar_native, on, __ATOMIC_RELEASE);
+}
+
+void hb_codegen_set_scalar_native_range(uint64_t lo, uint64_t hi) {
+    g_scalar_native_lo = lo;
+    g_scalar_native_hi = hi;
+}
+
+/* Скалярный MOV уходит в интерпретатор, только пока родной выпуск для него не включён. */
+/* Claude 26.09 (бит 4096, опыт): родной выпуск только для MOV-загрузок; сохранения — прежним путём. */
+static bool g_scalar_native_loads_only;
+void hb_codegen_set_scalar_native_loads_only(bool on) { g_scalar_native_loads_only = on; }
+/* Claude 26.09 (опыт): родные MOV-сохранения только для команд в [lo, hi) (hi=0 — везде). */
+static uint64_t g_store_native_lo, g_store_native_hi;
+void hb_codegen_set_store_native_range(uint64_t lo, uint64_t hi) { g_store_native_lo = lo; g_store_native_hi = hi; }
+
+static inline bool scalar_move_to_interp(const hb_context_t* ctx, const hb_ir_instr_t* instr) {
+    if (!ctx->scalar_access || !hb_ir_scalar_memory_move(instr)) return false;
+    if (!__atomic_load_n(&g_scalar_native, __ATOMIC_ACQUIRE)) return true;
+    if (g_scalar_native_loads_only && instr->op == HB_IR_STORE) return true;
+    if (instr->op == HB_IR_STORE && g_store_native_hi &&
+        (instr->guest_addr < g_store_native_lo || instr->guest_addr >= g_store_native_hi)) return true;
+    return instr->guest_addr < g_scalar_native_lo || instr->guest_addr >= g_scalar_native_hi;
+}
+
+static unsigned memory_access_block_modes(const hb_context_t* ctx, const hb_ir_block_t* block) {
+    unsigned modes = 0;
+    if (!ctx || !block) return 0;
+    if (ctx->exec_access) modes |= 4; /* Includes instructions with zero IR. */
+    for (size_t i = 0; i < block->instr_count; i++) {
+        if (scalar_move_to_interp(ctx, &block->instrs[i])) modes |= 1;
+        if (ctx->pair_access && hb_ir_pair_rmw(&block->instrs[i])) modes |= 2;
+    }
+    return modes;
+}
+
+static void hb_jit_scalar_access_block(hb_context_t* ctx, const hb_ir_block_t* block) {
+    hb_exec_result_t out;
+    if (!ctx || !block) return;
+    memset(&out, 0, sizeof(out));
+    unsigned modes = memory_access_block_modes(ctx, block);
+    if (modes & 1) ctx->scalar_access_jit_entries++;
+    if (modes & 2) ctx->pair_access_jit_entries++;
+    hb_result_t r = hb_interpreter_resume_block(ctx, block, 0, &out);
+    ctx->step_count += out.steps_executed;
+    ctx->block_count++;
+    ctx->last_result = r == HB_OK ? out.result : r;
+}
+
+/* Direct EXEC slice: one validated register/address-arithmetic instruction.
+ * Admission is narrower than the ordinary emitters: no guest-memory access,
+ * instruction helpers, register remapping, idioms, chaining or transfers. */
+static bool exec_native_gpr(const hb_ir_operand_t* op, hb_size_t width,
+                            bool allow_high_byte) {
+    if (op->type != HB_OP_REG || (unsigned)op->reg > HB_REG_R15 || op->size != width)
+        return false;
+    if (!op->reg_offset) return true;
+    return allow_high_byte && width == HB_SIZE_8 && op->reg_offset == 1 &&
+           (op->reg == HB_REG_RAX || op->reg == HB_REG_RBX ||
+            op->reg == HB_REG_RCX || op->reg == HB_REG_RDX);
+}
+
+static bool exec_native_imm(const hb_ir_operand_t* op) {
+    return op->type == HB_OP_IMM && !op->reg_offset;
+}
+
+static bool exec_native_rhs(const hb_ir_operand_t* op, hb_size_t width) {
+    return exec_native_gpr(op, width, false) || exec_native_imm(op);
+}
+
+static bool exec_native_same_gpr(const hb_ir_operand_t* a, const hb_ir_operand_t* b) {
+    return a->reg == b->reg && a->size == b->size && a->reg_offset == b->reg_offset;
+}
+
+static bool exec_native_lea_address(const hb_ir_operand_t* op) {
+    if (op->type != HB_OP_MEM || op->reg_offset || op->mem.addr16 || op->mem.vsib ||
+        op->mem.vsib_index_size || op->mem.vsib_elem_size || op->mem.vsib_count)
+        return false;
+    if ((unsigned)op->mem.base > HB_REG_R15 && op->mem.base != HB_REG_RIP &&
+        op->mem.base != HB_REG_COUNT) return false;
+    if ((unsigned)op->mem.index > HB_REG_R15 && op->mem.index != HB_REG_COUNT)
+        return false;
+    if (op->mem.base == HB_REG_RIP && op->mem.index != HB_REG_COUNT) return false;
+    if (op->mem.index != HB_REG_COUNT && op->mem.scale != 1 && op->mem.scale != 2 &&
+        op->mem.scale != 4 && op->mem.scale != 8) return false;
+    return true;
+}
+
+static bool exec_native_register_unit(const hb_ir_block_t* block) {
+    if (!hb_ir_is_exec_unit(block) || block->exec_unit_transfer ||
+        block->instr_count != 1 || !block->instrs) return false;
+    const hb_ir_instr_t* i = &block->instrs[0];
+    if (i->guest_addr != block->exec_unit_pc ||
+        i->guest_len != block->exec_unit_size || i->is_locked ||
+        i->rep_prefix || i->preserve_cf || i->zero_upper || i->zero_ymm_upper ||
+        i->scalar_memory_move) return false;
+    hb_size_t width = i->dst.size;
+    switch (i->op) {
+        case HB_IR_MOV:
+            return (width == HB_SIZE_8 || width == HB_SIZE_16 ||
+                    width == HB_SIZE_32 || width == HB_SIZE_64) &&
+                   exec_native_gpr(&i->dst, width, true) &&
+                   (exec_native_gpr(&i->src1, width, true) || exec_native_imm(&i->src1)) &&
+                   operand_is_none_or_unset(&i->src2);
+        case HB_IR_BSWAP:
+            return (width == HB_SIZE_32 || width == HB_SIZE_64) &&
+                   exec_native_gpr(&i->dst, width, false) &&
+                   operand_is_none_or_unset(&i->src1) && operand_is_none_or_unset(&i->src2);
+        case HB_IR_NOT:
+            return (width == HB_SIZE_32 || width == HB_SIZE_64) &&
+                   exec_native_gpr(&i->dst, width, false) &&
+                   exec_native_gpr(&i->src1, width, false) &&
+                   exec_native_same_gpr(&i->dst, &i->src1) &&
+                   operand_is_none_or_unset(&i->src2);
+        case HB_IR_LEA:
+            return (width == HB_SIZE_32 || width == HB_SIZE_64) &&
+                   exec_native_gpr(&i->dst, width, false) &&
+                   exec_native_lea_address(&i->src1) && operand_is_none_or_unset(&i->src2);
+        case HB_IR_ADD: case HB_IR_SUB: case HB_IR_AND: case HB_IR_OR: case HB_IR_XOR:
+            return (width == HB_SIZE_32 || width == HB_SIZE_64) &&
+                   exec_native_gpr(&i->dst, width, false) &&
+                   exec_native_gpr(&i->src1, width, false) &&
+                   exec_native_same_gpr(&i->dst, &i->src1) && exec_native_rhs(&i->src2, width);
+        case HB_IR_CMP: case HB_IR_TEST:
+            width = i->src1.size;
+            return (width == HB_SIZE_32 || width == HB_SIZE_64) &&
+                   operand_is_none_or_unset(&i->dst) &&
+                   exec_native_gpr(&i->src1, width, false) && exec_native_rhs(&i->src2, width);
+        default:
+            return false;
+    }
+}
+
+/* No ordinary instruction dispatcher: every accepted branch emits only its
+ * register/address arithmetic and canonical flag record, with no runtime
+ * instruction helper and no dependence on an optional native-op gate. */
+static bool emit_exec_native_register_body(hb_codegen_buffer_t* out,
+                                           const hb_ir_instr_t* i) {
+    if (i->op == HB_IR_MOV) return emit_native_scalar_mov(out, i);
+    if (i->op == HB_IR_BSWAP) return emit_native_bswap(out, i);
+    if (i->op == HB_IR_NOT) {
+        if (!emit_load_gpr_sized_to_x20(out, &i->src1)) return false;
+        emit_mvn_reg(out, true, 20, 20);
+        emit_store_x20_to_gpr_sized(out, &i->dst);
+        return true;
+    }
+    if (i->op == HB_IR_LEA) {
+        if (i->src1.mem.base == HB_REG_RIP)
+            emit_mov_imm64(out, 20, i->guest_addr + i->guest_len);
+        else if (i->src1.mem.base == HB_REG_COUNT)
+            emit_mov_imm64(out, 20, 0);
+        else
+            emit_ldr_gpr(out, 20, 19, (uint32_t)reg_off(out, i->src1.mem.base));
+        if (i->src1.mem.index != HB_REG_COUNT) {
+            unsigned shift = i->src1.mem.scale == 8 ? 3 :
+                             i->src1.mem.scale == 4 ? 2 : i->src1.mem.scale == 2 ? 1 : 0;
+            emit_ldr_gpr(out, 21, 19, (uint32_t)reg_off(out, i->src1.mem.index));
+            emit_add_reg_lsl(out, 20, 20, 21, shift);
+        }
+        if (i->src1.mem.disp) {
+            emit_mov_imm64(out, 21, (uint64_t)i->src1.mem.disp);
+            emit_add_reg(out, 20, 20, 21);
+        }
+        if (i->src1.mem.addr32) emit_ubfm(out, 20, 20, 31);
+        emit_store_x20_to_gpr_sized(out, &i->dst);
+        return true;
+    }
+
+    hb_lazy_flags_kind_t kind;
+    hb_size_t width = i->src1.size;
+    if (!lazy_kind_for_scalar_op(i->op, &kind) ||
+        !emit_load_gpr_sized_to_reg(out, &i->src1, 20)) return false;
+    if (i->src2.type == HB_OP_REG) {
+        if (!emit_load_gpr_sized_to_reg(out, &i->src2, 21)) return false;
+    } else {
+        emit_mov_imm64(out, 21, (uint64_t)i->src2.imm);
+        emit_mask_x_reg_to_size(out, 21, 23, width);
+    }
+    switch (i->op) {
+        case HB_IR_ADD: emit_add_reg(out, 22, 20, 21); break;
+        case HB_IR_SUB: case HB_IR_CMP: emit_sub_reg(out, 22, 20, 21); break;
+        case HB_IR_AND: case HB_IR_TEST: emit_and_reg(out, 22, 20, 21); break;
+        case HB_IR_OR: emit_orr_reg(out, 22, 20, 21); break;
+        case HB_IR_XOR: emit_eor_reg(out, 22, 20, 21); break;
+        default: return false;
+    }
+    emit_mask_x_reg_to_size(out, 22, 23, width);
+    emit_note_lazy_from_x20_x21_x22(out, kind, width);
+    if (i->op != HB_IR_CMP && i->op != HB_IR_TEST) {
+        emit_mov_reg(out, 20, 22);
+        emit_store_x20_to_gpr_sized_upper_zero(out, &i->dst);
+    }
+    return true;
+}
+
+/* Shared entry gate for bounded native EXEC bodies. This performs observation
+ * only, never guest execution or interpreter fallback. Return zero means the
+ * generated body must return immediately with the complete result below. */
+static uint64_t hb_jit_exec_native_observe(hb_context_t* ctx,
+                                          const hb_ir_block_t* block,
+                                          hb_exec_result_t* out) {
+    if (!out) return 0;
+    memset(out, 0, sizeof(*out));
+    if (!ctx) {
+        out->result = HB_ERR_INVALID_ARG;
+        out->faulted = true;
+        out->fault_reason = "invalid native EXEC context";
+        return 0;
+    }
+    ctx->exec_access_jit_entries++;
+    if (ctx->arch != HB_ARCH_X64 || ctx->mode != HB_MODE_64BIT ||
+        !ctx->exec_access || !exec_native_register_unit(block) ||
+        ctx->pc != block->exec_unit_pc || ctx->regs.x64.rip != block->exec_unit_pc) {
+        out->result = HB_ERR_INVALID_ARG;
+        out->faulted = true;
+        out->fault_reason = "invalid native EXEC instruction unit";
+        ctx->last_result = out->result;
+        return 0;
+    }
+    hb_result_t r = ctx->exec_access(ctx->exec_access_user, block->exec_unit_pc,
+                                    block->exec_unit_size);
+    if (r != HB_OK) {
+        out->result = r;
+        out->faulted = r != HB_ERR_ACCESS_PENDING;
+        out->fault_reason = out->faulted ? "instruction access rejected" : NULL;
+        ctx->last_result = r;
+        return 0;
+    }
+    return 1;
+}
+
+static void emit_exec_native_counter(hb_codegen_buffer_t* out, size_t offset) {
+    emit_ldr_x(out, 20, 19, (uint32_t)offset);
+    emit_add_imm(out, 20, 20, 1);
+    emit_str_x(out, 20, 19, (uint32_t)offset);
+}
+
+_Static_assert(offsetof(hb_context_t, exec_access_helper_entries) < 32768 &&
+               offsetof(hb_context_t, exec_access_helper_entries) % 8 == 0 &&
+               offsetof(hb_context_t, last_result) < 16384 &&
+               offsetof(hb_context_t, last_result) % 4 == 0,
+               "native EXEC frame uses scaled immediate context offsets");
+
+/* Private (ctx, out*) ABI, with a fixed 64-byte frame. The result pointer is
+ * stored at SP+48: native operand emitters may use X20..X23. No ordinary block
+ * prologue/epilogue, SRA, fast chain or shared epilogue is involved. This is the
+ * envelope to reuse when a later register-only family is separately admitted. */
+static hb_result_t emit_exec_native_register_unit(hb_codegen_buffer_t* out,
+                                            const hb_ir_block_t* block) {
+    if (!exec_native_register_unit(block) || out->rmap_active || out->sra_armed || out->sra_mask)
+        return HB_ERR_INVALID_ARG;
+    emit_u32(out, 0xa9bc53f3); /* STP X19, X20, [SP, #-64]! */
+    emit_u32(out, 0xa9015bf5); /* STP X21, X22, [SP, #16] */
+    emit_u32(out, 0xa9027bf7); /* STP X23, LR,  [SP, #32] */
+    emit_str_x(out, 1, 31, 48);
+    emit_mov_reg(out, 19, 0);
+    emit_mov_reg(out, 2, 1);
+    emit_mov_imm64(out, 1, (uint64_t)(uintptr_t)block);
+    emit_call_helper(out, (void*)hb_jit_exec_native_observe);
+    size_t rejected = emit_cbz_x_deferred(out, 0);
+
+    /* This counter is emitted AFTER successful observation, immediately before
+     * the native operation. Neither compilation nor a rejected entry counts. */
+    emit_exec_native_counter(out, offsetof(hb_context_t, exec_access_native_entries));
+    if (!emit_exec_native_register_body(out, &block->instrs[0])) return HB_ERR_JIT_FAILED;
+
+    /* The whitelist has no guest-memory access or transfer and cannot yield.
+     * The admitted body has completed, including any canonical lazy record. */
+    emit_mov_imm64(out, 20, block->exec_unit_pc + block->exec_unit_size);
+    emit_str_x(out, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
+    emit_str_x(out, 20, 19, (uint32_t)offsetof(hb_context_t, regs.x64.rip));
+    emit_exec_native_counter(out, offsetof(hb_context_t, step_count));
+    emit_exec_native_counter(out, offsetof(hb_context_t, block_count));
+    emit_mov_imm64(out, 20, HB_OK);
+    emit_str_w(out, 20, 19, (uint32_t)offsetof(hb_context_t, last_result));
+    emit_ldr_x(out, 21, 31, 48);
+    emit_str_w(out, 20, 21, (uint32_t)offsetof(hb_exec_result_t, result));
+    emit_mov_imm64(out, 20, 1);
+    emit_str_x(out, 20, 21, (uint32_t)offsetof(hb_exec_result_t, steps_executed));
+    emit_str_x(out, 20, 21, (uint32_t)offsetof(hb_exec_result_t, blocks_executed));
+
+    size_t epilogue = out->size;
+    emit_u32(out, 0xa9415bf5); /* LDP X21, X22, [SP, #16] */
+    emit_u32(out, 0xa9427bf7); /* LDP X23, LR,  [SP, #32] */
+    emit_u32(out, 0xa8c453f3); /* LDP X19, X20, [SP], #64 */
+    emit_u32(out, 0xd65f03c0); /* RET */
+    if (!patch_cbz_x(out, rejected, 0, epilogue)) return HB_ERR_JIT_FAILED;
+    return HB_OK;
+}
+
+/* EXEC wrappers have a private two-argument native entry (ctx, result). Keep
+ * the complete interpreter result: last_result alone cannot distinguish a
+ * rejected observer from a non-fault instruction-internal budget yield. The
+ * result pointer is borrowed only for this synchronous native invocation. */
+static void hb_jit_exec_access_block(hb_context_t* ctx, const hb_ir_block_t* block,
+                                      hb_exec_result_t* out) {
+    unsigned modes = memory_access_block_modes(ctx, block);
+    ctx->exec_access_jit_entries++;
+    ctx->exec_access_helper_entries++;
+    if (modes & 1) ctx->scalar_access_jit_entries++;
+    if (modes & 2) ctx->pair_access_jit_entries++;
+    hb_result_t r = hb_interpreter_resume_block(ctx, block, 0, out);
+    ctx->step_count += out->steps_executed;
+    ctx->block_count += out->blocks_executed;
+    if (r != HB_OK) {
+        out->result = r;
+        out->faulted = true;
+    }
+    ctx->last_result = out->result;
+}
+
+static bool scalar_access_block(const hb_context_t* ctx, const hb_ir_block_t* block) {
+    return memory_access_block_modes(ctx, block) != 0;
 }
 
 static hb_result_t hb_jit_helper_exec_cmp_or_test(hb_context_t* ctx,
@@ -21865,6 +22378,8 @@ hb_result_t hb_arm64_codegen_instr(hb_arm64_codegen_t* cg, const hb_ir_instr_t* 
     hb_result_t r;
     if (!instr || !out) return HB_ERR_INVALID_ARG;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
+    if (cg && cg->ctx && scalar_move_to_interp(cg->ctx, instr))
+        return emit_interp_ir_helper(out, instr);
     /* Атомарная команда содержит упорядочивание в себе (суффикс AL), поэтому ни барьеры,
      * ни общая блокировка ей не нужны — в отличие от неатомарного пути ниже. */
     if (instr->is_locked && hb_lse_atomics_enabled()) {
@@ -22166,6 +22681,22 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_noclose(hb_arm64_codegen_t* c
 
 hb_result_t hb_arm64_codegen_block_with_cfg(hb_arm64_codegen_t* cg, const hb_ir_block_t* block,
                                             const hb_ir_cfg_t* cfg, hb_codegen_buffer_t* out) {
+    if (cg && cg->ctx && cg->ctx->exec_access) {
+        /* The private EXEC entry takes out* in X1. Do not run ordinary
+         * lean/remap/SRA/dead-lazy preparation or a second emission pass: a
+         * scratch-bank prologue could overwrite X1 before it becomes X2.
+         * Runtime supplies a fresh buffer; reject composition with other code. */
+        if (!out || out->size) return HB_ERR_INVALID_ARG;
+        out->rmap_active = 0;
+        out->sra_mask = 0;
+        out->sra_armed = 0;
+        out->sra_slot_ready = 0;
+        out->sra_spill_forced_on = 0;
+        out->emitted_call = 0;
+        hb_result_t r = hb_arm64_codegen_block_with_cfg_inner(cg, block, cfg, out);
+        epi_close_pending(out);
+        return r;
+    }
     size_t reloc0 = out ? out->reloc_count : 0;
     hb_result_t r = hb_arm64_codegen_block_with_cfg_noclose(cg, block, cfg, out);
     /* Разбор мёртвых записей ленивых флагов (итерация 156, снятие — 160). Место выбрано
@@ -22456,12 +22987,16 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_noclose(hb_arm64_codegen_t* c
  * чтобы выход из единицы был ОДИН: всё, что обязано случиться на выходе (сегодня
  * это запись гостевого pc), дописывается туда однажды и покрывает все свёртки
  * разом, включая те, которых ещё нет. */
+/* Claude 26.09 (бит 2048, опыт): без ручных помощников-идиом (Unity/Mono/циклы). */
+static bool g_no_idioms;
+void hb_codegen_set_no_idioms(bool on) { g_no_idioms = on; }
+
 static bool codegen_try_idiom_block(hb_codegen_buffer_t* out,
                                     hb_arm64_codegen_t* cg,
                                     const hb_ir_cfg_t* cfg,
                                     const hb_ir_block_t* block,
                                     bool mid_block_transfer) {
-    if (mid_block_transfer) return false;
+    if (mid_block_transfer || g_no_idioms) return false;
     if (block->instr_count == 7 && emit_unity_sort_inner_loop(out, block)) return true;
     if (cfg && block->instr_count == 5) {
         const hb_ir_instr_t* jcc = &block->instrs[4];
@@ -22550,6 +23085,31 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
 
     if (!block || !out) return HB_ERR_INVALID_ARG;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
+    if (cg && cg->ctx && cg->ctx->exec_access && !hb_ir_is_exec_unit(block))
+        return HB_ERR_INVALID_ARG;
+    if (cg && cg->ctx && cg->ctx->exec_access) {
+        /* EXEC returns before the ordinary loop's per-instruction resets.
+         * Never inherit a previous compilation's dead-flags decision. */
+        g_lazy_flags_skip = 0;
+        g_lazy_pair_dead = 0;
+        if (exec_native_register_unit(block) && !out->rmap_active && !out->sra_armed && !out->sra_mask)
+            return emit_exec_native_register_unit(out, block);
+        emit_prologue(out);
+        emit_mov_reg(out, 2, 1); /* Preserve caller's result before block arg. */
+        emit_mov_reg(out, 0, 19);
+        emit_mov_imm64(out, 1, (uint64_t)(uintptr_t)block);
+        emit_call_helper(out, (void*)hb_jit_exec_access_block);
+        emit_epilogue(out);
+        return HB_OK;
+    }
+    if (scalar_access_block(cg ? cg->ctx : NULL, block)) {
+        emit_prologue(out);
+        emit_mov_reg(out, 0, 19);
+        emit_mov_imm64(out, 1, (uint64_t)(uintptr_t)block);
+        emit_call_helper(out, (void*)hb_jit_scalar_access_block);
+        emit_epilogue(out);
+        return HB_OK;
+    }
     flags_live_invalidate();   /* см. ABA у кеша неподвижной точки */
     flags_graph_invalidate();  /* тот же ABA: блоки переиспользуют адреса */
     g_cg_acfg = cfg ? cfg->acfg : NULL;
@@ -22790,6 +23350,11 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
             out->host_off[out->host_off_count++] = (uint32_t)out->size;
         } else
             out->host_off_overflow = true;
+        /* Claude 25.09: см. hb_jit_helper_keep_cf. Пропущенная запись INC/DEC уходящую не затирает. */
+        if (!g_lazy_flags_skip && incdec_needs_cf_keep(block, i, instr_limit)) {
+            emit_mov_reg(out, 0, 19);
+            emit_call_helper_wmask(out, (void*)hb_jit_helper_keep_cf, 0);
+        }
 
         /* ★★★★★★★ 05.09.2026 — БЛОКИРУЮЩАЯ RMW УХОДИТ В НЕДЕЛИМОГО ПОМОЩНИКА.
          *

@@ -187,6 +187,64 @@ hb_result_t hb_context_reset(hb_context_t* ctx) {
     ctx->indirect_ic_native_code = 0;
     ctx->codegen_module_base = 0;
     ctx->jit_signal_frame_slot = NULL;
+    ctx->scalar_access = NULL;
+    ctx->scalar_access_user = NULL;
+    ctx->scalar_access_page_size = 0;
+    ctx->scalar_access_jit_entries = 0;
+    ctx->pair_access = NULL;
+    ctx->pair_access_user = NULL;
+    ctx->pair_access_page_size = 0;
+    ctx->pair_access_jit_entries = 0;
+    ctx->pair_rmw_active = false;
+    ctx->pair_rmw_address = 0;
+    ctx->pair_rmw_size = 0;
+    ctx->exec_access = NULL;
+    ctx->exec_access_user = NULL;
+    ctx->exec_access_jit_entries = 0;
+    ctx->exec_access_native_entries = 0;
+    ctx->exec_access_helper_entries = 0;
+    return HB_OK;
+}
+
+hb_result_t hb_context_set_scalar_access(hb_context_t* ctx, hb_scalar_access_fn fn,
+                                       void* user, size_t page_size) {
+    if (!ctx) return HB_ERR_INVALID_ARG;
+    if (fn && (ctx->arch != HB_ARCH_X64 || ctx->mode != HB_MODE_64BIT ||
+               page_size < 8 || (page_size & (page_size - 1))))
+        return HB_ERR_INVALID_ARG;
+    ctx->scalar_access = fn;
+    ctx->scalar_access_user = fn ? user : NULL;
+    ctx->scalar_access_page_size = fn ? page_size : 0;
+    return HB_OK;
+}
+
+hb_result_t hb_context_set_pair_rmw_access(hb_context_t* ctx, hb_pair_rmw_access_fn fn,
+                                          void* user, size_t page_size) {
+    if (!ctx || ctx->pair_rmw_active) return HB_ERR_INVALID_ARG;
+    if (fn && (ctx->arch != HB_ARCH_X64 || ctx->mode != HB_MODE_64BIT ||
+               page_size < 16 || (page_size & (page_size - 1))))
+        return HB_ERR_INVALID_ARG;
+    ctx->pair_access = fn;
+    ctx->pair_access_user = fn ? user : NULL;
+    ctx->pair_access_page_size = fn ? page_size : 0;
+    return HB_OK;
+}
+
+bool hb_context_get_pair_rmw_intent(const hb_context_t* ctx, hb_gva_t* address,
+                                    size_t* size) {
+    if (!ctx || !ctx->pair_rmw_active) return false;
+    if (address) *address = ctx->pair_rmw_address;
+    if (size) *size = ctx->pair_rmw_size;
+    return true;
+}
+
+hb_result_t hb_context_set_exec_access(hb_context_t* ctx, hb_exec_access_fn fn,
+                                      void* user) {
+    if (!ctx || ctx->pair_rmw_active) return HB_ERR_INVALID_ARG;
+    if (fn && (ctx->arch != HB_ARCH_X64 || ctx->mode != HB_MODE_64BIT))
+        return HB_ERR_INVALID_ARG;
+    ctx->exec_access = fn;
+    ctx->exec_access_user = fn ? user : NULL;
     return HB_OK;
 }
 

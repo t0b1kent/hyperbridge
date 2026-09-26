@@ -2064,6 +2064,9 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             uint8_t sz = (opcode == 0xA4) ? 1 : (operand16 ? 2 : 4);
             set_mem(out, 1, HB_REG_RDI, -1, 1, 0, sz);
             set_mem(out, 2, HB_REG_RSI, -1, 1, 0, sz);
+            out->op1.mem.addr16 = address16;
+            out->op2.mem.addr16 = address16;
+            out->op1.mem.segment = 0x26; /* MOVS destination is always ES. */
         }
         /* Итерация 490: тот же префикс — в отдельное поле. Пока никто не читает,
          * поведение не меняется; переключение потребителей следующим шагом. */
@@ -2130,6 +2133,8 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             uint8_t sz = (opcode == 0xAA) ? 1 : (operand16 ? 2 : 4);
             set_mem(out, 1, HB_REG_RDI, -1, 1, 0, sz);
             set_reg(out, 2, HB_REG_RAX, sz);
+            out->op1.mem.addr16 = address16;
+            out->op1.mem.segment = 0x26; /* STOS ignores segment overrides. */
         }
         /* Итерация 490: тот же префикс — в отдельное поле. Пока никто не читает,
          * поведение не меняется; переключение потребителей следующим шагом. */

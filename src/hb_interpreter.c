@@ -4,6 +4,8 @@
 #include "hb_runtime.h"
 #include "hb_memory.h"
 #include "hb_flags.h"
+#include "hb_atomic128.h"
+#include "hb_pair_rmw.h"
 #include "hb_x87.h"
 #include "hb_x87_exact.h"
 #include "hb_cpuid.h"
@@ -1619,15 +1621,17 @@ static void write_reg_sized_offset(hb_context_t* ctx, int idx, uint64_t val,
 }
 
 /* Memory address resolution */
-static uint64_t resolve_addr(hb_context_t* ctx, const hb_ir_operand_t* op) {
+static uint64_t resolve_addr_with_rsp(hb_context_t* ctx, const hb_ir_operand_t* op,
+                                      uint64_t rsp) {
     uint64_t base = 0;
     if (op->mem.base < HB_REG_COUNT) {
         if (op->mem.base == HB_REG_RIP) base = ctx->pc;
+        else if (op->mem.base == HB_REG_RSP) base = rsp;
         else base = read_reg(ctx, op->mem.base);
     }
     uint64_t index = 0;
     if (op->mem.index < HB_REG_COUNT) {
-        index = read_reg(ctx, op->mem.index);
+        index = op->mem.index == HB_REG_RSP ? rsp : read_reg(ctx, op->mem.index);
     }
     /* In long mode 0x67 truncates the effective offset, not the linear
      * address. FS/GS bases remain 64-bit and are added after that truncation. */
@@ -1656,6 +1660,11 @@ static uint64_t resolve_addr(hb_context_t* ctx, const hb_ir_operand_t* op) {
         return a16 & 0xFFFFu;
     }
     return base + index * op->mem.scale + (uint64_t)op->mem.disp;
+}
+
+static uint64_t resolve_addr(hb_context_t* ctx, const hb_ir_operand_t* op) {
+    uint64_t rsp = ctx->mode == HB_MODE_32BIT ? ctx->regs.x86.esp : ctx->regs.x64.rsp;
+    return resolve_addr_with_rsp(ctx, op, rsp);
 }
 
 /* Find block by guest address */
@@ -2341,6 +2350,51 @@ static hb_result_t sys_store_descriptor_table(hb_context_t* ctx, const hb_ir_ope
     return hb_memory_write(ctx->memory, addr, image, len);
 }
 
+/* Claude, 26.09.2026 — MXCSR -> FPCR ХОСТА. Чёрный кадр HK под HB (ДОЛГ HB-ЧЁРНЫЙ-КАДР).
+ *
+ * ИЗМЕРЕНО: разностный прогон 335 команд SSE..SSE4.1 против Unicorn (40 200 случаев). При
+ * MXCSR=0x1f80 расходится только dpps (1 ULP, порядок сложения); при FTZ|DAZ (0x9fc0) — 22
+ * команды, и все на денормальных входах/выходах; при RC != 00 — последний бит у всей
+ * арифметики. Причина одна: LDMXCSR/FXRSTOR/XRSTOR писали ctx->mxcsr и больше ничего, а
+ * выпущенный код и C-код интерпретатора считают в FPCR хоста — всегда RN и без FZ.
+ * В игре PhysX ставит DAZ|FTZ на основном потоке (см. HB_MXCSR_SUPPORTED_MASK), и x86 там
+ * обнуляет крошечные промежуточные — HB их сохранял, и позиция камеры уходила в NaN/-inf.
+ *
+ * Устройство — работу делает железо (уровень 4: эмуляции по командам нет вовсе):
+ *   RC  (биты 13-14): 00 ближ. -> RMode 00 RN; 01 вниз -> 10 RM; 10 вверх -> 01 RP; 11 -> 11 RZ.
+ *   FTZ (бит 15) или DAZ (бит 6) -> FPCR.FZ (бит 24). FZ на ARM обнуляет и входы, и выходы
+ *   одинарной и двойной точности, то есть это DAZ+FTZ разом; раздельные режимы (только один
+ *   из битов) программы на практике не ставят, и FZ для них ближе к x86, чем отсутствие.
+ * Флаги исключений (биты 0-5) и маски (7-12) не переносятся — поведение прежнее.
+ * FPCR пишется только при изменении (одно mrs и сравнение на вызов). */
+static int mxcsr_fpcr_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) cached = hb_gate_flag(HB_GATE_HB_MXCSR_FPCR, 0);
+    return cached;
+}
+
+void hb_host_fpcr_apply_mxcsr(uint32_t mxcsr) {
+#if defined(__aarch64__)
+    static const uint64_t rmode[4] = {0u, 2u, 1u, 3u};
+    uint64_t fpcr, want;
+    if (!mxcsr_fpcr_enabled()) return;
+    __asm__ volatile("mrs %0, fpcr" : "=r"(fpcr));
+    want = fpcr & ~((3ull << 22) | (1ull << 24));
+    want |= rmode[(mxcsr >> 13) & 3u] << 22;
+    if (mxcsr & 0x8040u) want |= 1ull << 24;
+    if (want != fpcr) {
+        static unsigned said;
+        __asm__ volatile("msr fpcr, %0" : : "r"(want));
+        /* Доказательство, что гейт работает и какие режимы ставит гость: первые 16 смен. */
+        if (__atomic_fetch_add(&said, 1u, __ATOMIC_RELAXED) < 16u)
+            fprintf(stderr, "macrunner-hb-mxcsr-fpcr: mxcsr=%#x fpcr=%#llx->%#llx\n", mxcsr,
+                    (unsigned long long)fpcr, (unsigned long long)want);
+    }
+#else
+    (void)mxcsr;
+#endif
+}
+
 static hb_result_t sse_ldmxcsr_mem(hb_context_t* ctx, const hb_ir_operand_t* op,
                                   uint64_t instr_addr) {
     uint32_t v;
@@ -2350,6 +2404,7 @@ static hb_result_t sse_ldmxcsr_mem(hb_context_t* ctx, const hb_ir_operand_t* op,
     if (v & ~HB_MXCSR_SUPPORTED_MASK)
         return hb_fault_general_protection(ctx, instr_addr);
     ctx->mxcsr = v;
+    hb_host_fpcr_apply_mxcsr(v);
     return HB_OK;
 }
 
@@ -2553,6 +2608,7 @@ static hb_result_t x87_fxrstor_mem(hb_context_t* ctx, const hb_ir_operand_t* op,
     if (mxcsr & ~HB_MXCSR_SUPPORTED_MASK)
         return hb_fault_general_protection(ctx, instr_addr);
     ctx->mxcsr = mxcsr;
+    hb_host_fpcr_apply_mxcsr(mxcsr);
     x87_restore_fxsave_x87(ctx, image);
     /* XMM restore area -- mode-aware (see the save-side comment). Restoring into
      * ctx->regs.x86.xmm unconditionally wrote the wrong union member for x64
@@ -2694,7 +2750,10 @@ static hb_result_t xrstor_standard_mem(hb_context_t* ctx, const hb_ir_operand_t*
     }
     if (mask & 4u) memcpy(ctx->ymm_hi, ymm, sizeof(ymm));
     /* Standard XRSTOR loads MXCSR by request, even when SSE/AVX initialize. */
-    if (mask & 6u) ctx->mxcsr = mxcsr;
+    if (mask & 6u) {
+        ctx->mxcsr = mxcsr;
+        hb_host_fpcr_apply_mxcsr(mxcsr);
+    }
     return HB_OK;
 }
 
@@ -3571,6 +3630,7 @@ static const char* ir_op_name(hb_ir_op_t op) {
         case HB_IR_CLI: return "CLI";
         case HB_IR_STI: return "STI";
         case HB_IR_ENTER: return "ENTER";
+        case HB_IR_LEAVE: return "LEAVE";
         case HB_IR_RET: return "RET";
         case HB_IR_JMP: return "JMP";
         case HB_IR_Jcc: return "Jcc";
@@ -4461,6 +4521,31 @@ static int hb_is_x87_op(hb_ir_op_t op) {
     return op >= HB_IR_X87_FLD && op <= HB_IR_X87_FI;
 }
 
+static hb_result_t scalar_memory_preaccess(hb_context_t* ctx,
+                                           const hb_ir_instr_t* instr,
+                                           uint64_t addr, size_t size,
+                                           uint32_t access) {
+    hb_result_t r;
+    if (!ctx->scalar_access || !hb_ir_scalar_memory_move(instr)) return HB_OK;
+    size_t page = ctx->scalar_access_page_size;
+    /* A wrapping operand has no observable span: preserve the ordinary memory
+     * path rather than manufacturing a pending request. Unguarded cross-page
+     * MOV remains supported. Only admitting PENDING is limited to one page. */
+    if (!size || addr > UINT64_MAX - (size - 1)) return HB_OK;
+    r = ctx->scalar_access(ctx->scalar_access_user, instr->guest_addr,
+                          (hb_gva_t)addr, size, access);
+    if (r == HB_ERR_ACCESS_PENDING &&
+        (!page || size > page || (addr & (page - 1)) > page - size))
+        r = HB_ERR_UNSUPPORTED_FEATURE;
+    if (r != HB_OK) {
+        /* EA has already been resolved from the original register state. */
+        ctx->pc = instr->guest_addr;
+        ctx->regs.x64.rip = instr->guest_addr;
+        ctx->last_result = r;
+    }
+    return r;
+}
+
 static hb_result_t exec_instr(hb_context_t* ctx, const hb_ir_instr_t* instr) {
 
     if (hb_interp_lock_trace_enabled()) {
@@ -4485,6 +4570,18 @@ static hb_result_t exec_instr(hb_context_t* ctx, const hb_ir_instr_t* instr) {
         return r;
     }
     if (!instr->is_locked) {
+        if (hb_ir_pair_rmw(instr)) {
+            uint64_t addr = resolve_addr(ctx, &instr->dst);
+            hb_result_t rr = hb_pair_rmw_begin(ctx, instr, addr);
+            if (rr == HB_OK) rr = exec_instr_unlocked(ctx, instr);
+            hb_pair_rmw_end(ctx);
+            if (rr != HB_OK && instr->guest_len) {
+                ctx->pc = instr->guest_addr;
+                sync_arch_pc(ctx);
+                ctx->last_result = rr;
+            }
+            return rr;
+        }
         /* MacRunner 2026-08-11, лейн ЛЕСТНИЦА, итерация 262 — НАЗВАТЬ НЕИСПОЛНИМУЮ ОПЕРАЦИЮ.
          * Ступень 1 умирает с `exec=UNSUPPORTED_OPCODE(-5)` при `hb=OK(0)`, то есть перевод
          * прошёл, а исполнение — нет. Печать в декодере (итерация 262, первая попытка) ничего не
@@ -4623,6 +4720,37 @@ static uint64_t hb_stringop_limit(void)
         cached = n ? (uint64_t)n : 0x100000ull;
     }
     return cached;
+}
+
+/* Address size selects both the string offsets and the REP count. Element
+ * size is independent. Legacy operands without memory metadata use the mode's
+ * default address size. */
+static hb_size_t string_address_size(const hb_context_t* ctx, const hb_ir_instr_t* instr)
+{
+    if (ctx->mode == HB_MODE_32BIT)
+        return instr->src1.type == HB_OP_MEM && instr->src1.mem.addr16 ? HB_SIZE_16 : HB_SIZE_32;
+    return instr->src1.type == HB_OP_MEM && instr->src1.mem.addr32 ? HB_SIZE_32 : HB_SIZE_64;
+}
+
+static uint64_t string_source_address(const hb_context_t* ctx, uint64_t offset,
+                                      const hb_ir_operand_t* source)
+{
+    /* The effective offset has already wrapped to the address size. This
+     * core models flat DS/ES; only FS/GS carry a nonzero segment base. MOVS
+     * may override its source segment, never its ES destination. */
+    if (source->type == HB_OP_MEM) {
+        if (source->mem.segment == 0x64) offset += ctx->fs_base;
+        else if (source->mem.segment == 0x65) offset += ctx->gs_base;
+    }
+    return ctx->mode == HB_MODE_32BIT ? (uint32_t)offset : offset;
+}
+
+static bool string_budget_yield(const hb_ir_instr_t* instr, hb_result_t result)
+{
+    /* Only these tagged handlers publish every completed element before
+     * returning their internal iteration limit. Other families are unchanged. */
+    return result == HB_ERR_STEP_LIMIT && instr && instr->guest_len &&
+           (instr->op == HB_IR_MOVS || instr->op == HB_IR_STOS);
 }
 
 static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* instr) {
@@ -4949,8 +5077,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
             uint64_t mask = 1ULL << bit;
             uint64_t value = trunc_to_size(base, size);
             uint64_t new_value = value;
-            ctx->flags.cf = (value & mask) != 0;
-            hb_lazy_flags_clear(ctx);
+            bool new_cf = (value & mask) != 0;
 
             if (instr->op == HB_IR_BTS) {
                 new_value = value | mask;
@@ -4965,6 +5092,11 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
                 r = write_operand_value(ctx, &target, new_value);
                 if (r != HB_OK) return r;
             }
+            /* A rejected memory write retires neither CF nor pending flags.
+             * BT reaches this point after its successful read without a store. */
+            (void)hb_lazy_flags_materialize_available(ctx, HB_FLAG_BIT_ZF);
+            ctx->flags.cf = new_cf;
+            hb_lazy_flags_clear(ctx);
             if (trace_bitops_selected(instr)) {
                 static unsigned int bitop_count;
                 if (++bitop_count <= trace_bitops_budget()) {
@@ -5025,7 +5157,6 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
             dst_val = trunc_to_size(dst_val, size);
             src_val = trunc_to_size(src_val, size);
 
-            hb_lazy_flags_note(ctx, HB_LAZY_FLAGS_CMP, size, acc, dst_val, acc - dst_val, 0);
             if (trace_atomics_enabled()) {
                 fprintf(stderr,
                         "macrunner-hb-atomic: pc=0x%llx op=CMPXCHG size=%d acc=0x%llx dst=0x%llx src=0x%llx equal=%d",
@@ -5035,12 +5166,17 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
                 trace_operand("srcop", ctx, &instr->src2);
                 fprintf(stderr, "\n");
             }
-            if (acc == dst_val) {
-                r = write_operand_value(ctx, &instr->src1, src_val);
+            if (instr->src1.type == HB_OP_MEM || acc == dst_val) {
+                /* CMPXCHG has write intent even on comparison failure. Keep
+                 * the old accumulator and flags until that access succeeds. */
+                r = write_operand_value(ctx, &instr->src1,
+                                        acc == dst_val ? src_val : dst_val);
                 if (r != HB_OK) return r;
-            } else {
+            }
+            if (acc != dst_val) {
                 write_reg_sized(ctx, HB_REG_RAX, dst_val, size);
             }
+            hb_lazy_flags_note(ctx, HB_LAZY_FLAGS_CMP, size, acc, dst_val, acc - dst_val, 0);
             return HB_OK;
         }
 
@@ -5056,18 +5192,22 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
                 if (ctx->mode != HB_MODE_64BIT || instr->dst.type != HB_OP_MEM)
                     return HB_ERR_INTERNAL;
                 addr = resolve_addr(ctx, &instr->dst);
+                /* CMPXCHG16B requires a 16-byte-aligned operand even without
+                 * LOCK. Reject before memory access or architectural mutation. */
+                if (addr & 15u)
+                    return hb_fault_general_protection(ctx, instr->guest_addr);
+                if (hb_memory_has_atomic_cmpxchg128_handler(ctx->memory))
+                    return hb_atomic128_exec_provider(ctx, addr);
                 r = hb_memory_read(ctx->memory, addr, mem, sizeof(mem));
                 if (r != HB_OK) return r;
                 equal = mem[0] == acc[0] && mem[1] == acc[1];
-                hb_lazy_flags_clear(ctx);
-                ctx->flags.zf = equal;
-                if (equal) {
-                    r = hb_memory_write(ctx->memory, addr, src, sizeof(src));
-                    if (r != HB_OK) return r;
-                } else {
+                r = hb_memory_write(ctx->memory, addr, equal ? src : mem, sizeof(mem));
+                if (r != HB_OK) return r;
+                if (!equal) {
                     write_reg_sized(ctx, HB_REG_RAX, mem[0], HB_SIZE_64);
                     write_reg_sized(ctx, HB_REG_RDX, mem[1], HB_SIZE_64);
                 }
+                hb_pair_rmw_commit_zf(ctx, equal);
                 return HB_OK;
             }
 
@@ -5081,15 +5221,13 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
             r = read_operand_value(ctx, &instr->dst, &mem);
             if (r != HB_OK) return r;
             equal = (mem == acc);
-            hb_lazy_flags_clear(ctx);
-            ctx->flags.zf = equal;
-            if (equal) {
-                r = write_operand_value(ctx, &instr->dst, src);
-                if (r != HB_OK) return r;
-            } else {
+            r = write_operand_value(ctx, &instr->dst, equal ? src : mem);
+            if (r != HB_OK) return r;
+            if (!equal) {
                 write_reg_sized(ctx, HB_REG_RAX, (uint32_t)mem, HB_SIZE_32);
                 write_reg_sized(ctx, HB_REG_RDX, (uint32_t)(mem >> 32), HB_SIZE_32);
             }
+            hb_pair_rmw_commit_zf(ctx, equal);
             return HB_OK;
         }
 
@@ -5142,8 +5280,6 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
             dst_val = trunc_to_size(dst_val, size);
             src_val = trunc_to_size(src_val, size);
             uint64_t result = trunc_to_size(dst_val + src_val, size);
-            hb_lazy_flags_note(ctx, HB_LAZY_FLAGS_ADD, size, dst_val, src_val, result, 0);
-
             if (trace_atomics_enabled()) {
                 fprintf(stderr,
                         "macrunner-hb-atomic: pc=0x%llx op=XADD size=%d dst=0x%llx src=0x%llx result=0x%llx",
@@ -5173,16 +5309,29 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
              * невозможно, — поэтому правка одна и здесь, парной не требуется.
              *
              * Оба значения посчитаны выше, перестановка записей безопасна. */
-            r = write_operand_value(ctx, &instr->src2, dst_val);
-            if (r != HB_OK) return r;
-            r = write_operand_value(ctx, &instr->src1, result);
-            if (r != HB_OK) return r;
+            if (instr->src1.type == HB_OP_MEM) {
+                /* Resolve and write while the addressing registers still hold
+                 * their input values (including XADD [RDI], RDI). A denied
+                 * write must not retire either the source register or flags. */
+                r = write_operand_value(ctx, &instr->src1, result);
+                if (r != HB_OK) return r;
+                r = write_operand_value(ctx, &instr->src2, dst_val);
+                if (r != HB_OK) return r;
+            } else {
+                r = write_operand_value(ctx, &instr->src2, dst_val);
+                if (r != HB_OK) return r;
+                r = write_operand_value(ctx, &instr->src1, result);
+                if (r != HB_OK) return r;
+            }
+            hb_lazy_flags_note(ctx, HB_LAZY_FLAGS_ADD, size, dst_val, src_val, result, 0);
             return HB_OK;
         }
 
         case HB_IR_LOAD: {
             if (instr->src1.type != HB_OP_MEM) return HB_ERR_INTERNAL;
             uint64_t addr = resolve_addr(ctx, &instr->src1);
+            r = scalar_memory_preaccess(ctx, instr, addr, bytes_for_size(instr->src1.size), 0);
+            if (r != HB_OK) return r;
             if (instr->dst.type == HB_OP_REG && is_xmm_reg(instr->dst.reg)) {
                 uint8_t xmm[64] = {0};
                 size_t bytes = bytes_for_size(instr->src1.size);
@@ -5210,6 +5359,8 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
         case HB_IR_STORE: {
             if (instr->src1.type != HB_OP_MEM) return HB_ERR_INTERNAL;
             uint64_t addr = resolve_addr(ctx, &instr->src1);
+            r = scalar_memory_preaccess(ctx, instr, addr, bytes_for_size(instr->src1.size), 1);
+            if (r != HB_OK) return r;
             if (instr->src2.type == HB_OP_REG && is_xmm_reg(instr->src2.reg)) {
                 uint8_t xmm[64];
                 size_t bytes = bytes_for_size(instr->src1.size);
@@ -6256,20 +6407,34 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
             return HB_OK;
         }
 
+        case HB_IR_LEAVE: {
+            uint64_t frame = ctx->mode == HB_MODE_32BIT ? ctx->regs.x86.ebp : ctx->regs.x64.rbp;
+            uint64_t value = 0;
+            hb_size_t size = instr->dst.size;
+            if (instr->dst.type != HB_OP_REG || instr->dst.reg != HB_REG_RBP ||
+                (size != HB_SIZE_16 && size != HB_SIZE_32 && size != HB_SIZE_64))
+                return HB_ERR_INTERNAL;
+            r = mem_read(ctx, frame, &value, size);
+            if (r != HB_OK) return r;
+            if (ctx->mode == HB_MODE_32BIT) ctx->regs.x86.esp = (uint32_t)(frame + bytes_for_size(size));
+            else ctx->regs.x64.rsp = frame + bytes_for_size(size);
+            write_reg_sized(ctx, HB_REG_RBP, value, size);
+            return HB_OK;
+        }
+
         case HB_IR_POP: {
             uint64_t val = 0;
             uint64_t rsp_before = ctx->mode == HB_MODE_32BIT ? ctx->regs.x86.esp : ctx->regs.x64.rsp;
+            uint64_t rsp_after;
             if (ctx->mode == HB_MODE_32BIT) {
                 if (instr->dst.size == HB_SIZE_16) {
                     uint16_t v16 = 0;
                     r = hb_memory_read_u16(ctx->memory, ctx->regs.x86.esp, &v16);
                     if (r != HB_OK) return r;
                     val = v16;
-                    ctx->regs.x86.esp += 2;
                 } else {
                     r = hb_memory_read_u32(ctx->memory, ctx->regs.x86.esp, (uint32_t*)&val);
                     if (r != HB_OK) return r;
-                    ctx->regs.x86.esp += 4;
                 }
             } else if (instr->dst.size == HB_SIZE_16) {
                 /* Итерация 910: 16-битная форма в 64-битном режиме — её здесь не было,
@@ -6278,18 +6443,25 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
                 r = hb_memory_read_u16(ctx->memory, ctx->regs.x64.rsp, &v16);
                 if (r != HB_OK) return r;
                 val = v16;
-                ctx->regs.x64.rsp += 2;
             } else {
                 r = hb_memory_read_u64(ctx->memory, ctx->regs.x64.rsp, &val);
                 if (r != HB_OK) return r;
-                ctx->regs.x64.rsp += 8;
             }
+            rsp_after = rsp_before + (instr->dst.size == HB_SIZE_16 ? 2 :
+                                     ctx->mode == HB_MODE_32BIT ? 4 : 8);
+            if (ctx->mode == HB_MODE_32BIT) rsp_after = (uint32_t)rsp_after;
             if (instr->dst.type == HB_OP_REG) {
+                if (ctx->mode == HB_MODE_32BIT) ctx->regs.x86.esp = (uint32_t)rsp_after;
+                else ctx->regs.x64.rsp = rsp_after;
                 write_reg_sized(ctx, instr->dst.reg, val, instr->dst.size);
             } else if (instr->dst.type == HB_OP_MEM) {
-                uint64_t addr = resolve_addr(ctx, &instr->dst);
+                /* POP's memory EA uses the incremented SP, but faults must
+                 * expose the original SP. Do not publish it to callbacks. */
+                uint64_t addr = resolve_addr_with_rsp(ctx, &instr->dst, rsp_after);
                 r = mem_write(ctx, addr, val, instr->dst.size);
                 if (r != HB_OK) return r;
+                if (ctx->mode == HB_MODE_32BIT) ctx->regs.x86.esp = (uint32_t)rsp_after;
+                else ctx->regs.x64.rsp = rsp_after;
             } else {
                 return HB_ERR_INTERNAL;
             }
@@ -6841,7 +7013,19 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
              * ноль: гость по нему различает ядра, а у нас поток к ядру не привязан, и
              * выдумывать номер значило бы обещать несуществующее постоянство. */
             uint64_t cnt;
-            __asm__ volatile("mrs %0, cntvct_el0" : "=r"(cnt));
+            if (instr->op == HB_IR_RDTSCP) {
+                /* RDTSCP completes prior instructions and loads before its
+                 * timestamp. DSB SY completes preceding memory accesses;
+                 * ISB prevents speculative counter sampling before that
+                 * completion. The compiler memory clobber keeps surrounding
+                 * guest state/accesses on the appropriate side. This also
+                 * completes stores, a deliberately conservative ordering.
+                 * RDTSC retains its nonserializing behavior below. */
+                __asm__ volatile("dsb sy\n\tisb\n\tmrs %0, cntvct_el0"
+                                 : "=r"(cnt) : : "memory");
+            } else {
+                __asm__ volatile("mrs %0, cntvct_el0" : "=r"(cnt));
+            }
             uint64_t tsc = cnt * 125u;
 
             write_reg_sized(ctx, HB_REG_RAX, (uint32_t)tsc, HB_SIZE_32);
@@ -6986,35 +7170,32 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
              * `coverage.py` (`_rep_string_extra_budget`). */
             bool repeated = (rep == 0xf2 || rep == 0xf3);
             bool mode32 = ctx->mode == HB_MODE_32BIT;
-            uint64_t count = repeated ? (mode32 ? ctx->regs.x86.ecx : ctx->regs.x64.rcx) : 1;
-            uint64_t rsi = mode32 ? ctx->regs.x86.esi : ctx->regs.x64.rsi;
-            uint64_t rdi = mode32 ? ctx->regs.x86.edi : ctx->regs.x64.rdi;
-            int64_t step = (int64_t)size;
+            hb_size_t address_size = string_address_size(ctx, instr);
+            uint64_t address_mask = mask_for_size(address_size);
+            uint64_t count = repeated ? read_reg(ctx, HB_REG_RCX) & address_mask : 1;
+            uint64_t rsi = read_reg(ctx, HB_REG_RSI) & address_mask;
+            uint64_t rdi = read_reg(ctx, HB_REG_RDI) & address_mask;
+            uint64_t step = (uint64_t)size;
             if ((mode32 ? ctx->regs.x86.eflags : ctx->regs.x64.rflags) & (1ULL << 10))
-                step = -step; /* Direction flag. */
+                step = 0 - step; /* Unsigned modular decrement, including wrap. */
 
             uint64_t iterations = 0;
             while (count > 0) {
                 uint64_t value = 0;
-                r = mem_read(ctx, rsi, &value, size);
+                r = mem_read(ctx, string_source_address(ctx, rsi, &instr->src2), &value, size);
                 if (r != HB_OK) return r;
                 r = mem_write(ctx, rdi, value, size);
                 if (r != HB_OK) return r;
-                rsi = (uint64_t)((int64_t)rsi + step);
-                rdi = (uint64_t)((int64_t)rdi + step);
+                rsi = (rsi + step) & address_mask;
+                rdi = (rdi + step) & address_mask;
                 if (repeated) count--;
+                /* A later access can fault. Publish only this completed
+                 * element, retaining prior memory writes for same-PC retry. */
+                write_reg_sized(ctx, HB_REG_RSI, rsi, address_size);
+                write_reg_sized(ctx, HB_REG_RDI, rdi, address_size);
+                if (repeated) write_reg_sized(ctx, HB_REG_RCX, count, address_size);
                 if (!repeated) break;
                 if (++iterations > hb_stringop_limit()) return HB_ERR_STEP_LIMIT;
-            }
-
-            if (mode32) {
-                ctx->regs.x86.esi = (uint32_t)rsi;
-                ctx->regs.x86.edi = (uint32_t)rdi;
-                if (repeated) ctx->regs.x86.ecx = (uint32_t)count;
-            } else {
-                ctx->regs.x64.rsi = rsi;
-                ctx->regs.x64.rdi = rdi;
-                if (repeated) ctx->regs.x64.rcx = count;
             }
             return HB_OK;
         }
@@ -7188,29 +7369,27 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
             /* Итерация 506: откат 503 — обоснование при MOVS выше. */
             bool repeated = (rep == 0xf2 || rep == 0xf3);
             bool mode32 = ctx->mode == HB_MODE_32BIT;
-            uint64_t count = repeated ? (mode32 ? ctx->regs.x86.ecx : ctx->regs.x64.rcx) : 1;
-            uint64_t rdi = mode32 ? ctx->regs.x86.edi : ctx->regs.x64.rdi;
+            hb_size_t address_size = string_address_size(ctx, instr);
+            uint64_t address_mask = mask_for_size(address_size);
+            uint64_t count = repeated ? read_reg(ctx, HB_REG_RCX) & address_mask : 1;
+            uint64_t rdi = read_reg(ctx, HB_REG_RDI) & address_mask;
             uint64_t acc = read_reg_sized(ctx, HB_REG_RAX, size, 0);
-            int64_t step = (int64_t)size;
+            uint64_t step = (uint64_t)size;
             if ((mode32 ? ctx->regs.x86.eflags : ctx->regs.x64.rflags) & (1ULL << 10))
-                step = -step; /* Direction flag. */
+                step = 0 - step; /* Unsigned modular decrement, including wrap. */
 
             uint64_t iterations = 0;
             while (count > 0) {
                 r = mem_write(ctx, rdi, acc, size);
                 if (r != HB_OK) return r;
-                rdi = (uint64_t)((int64_t)rdi + step);
+                rdi = (rdi + step) & address_mask;
                 if (repeated) count--;
+                /* The failed element retires nothing; successful earlier
+                 * stores and their pointer/count progress remain committed. */
+                write_reg_sized(ctx, HB_REG_RDI, rdi, address_size);
+                if (repeated) write_reg_sized(ctx, HB_REG_RCX, count, address_size);
                 if (!repeated) break;
                 if (++iterations > hb_stringop_limit()) return HB_ERR_STEP_LIMIT;
-            }
-
-            if (mode32) {
-                ctx->regs.x86.edi = (uint32_t)rdi;
-                if (repeated) ctx->regs.x86.ecx = (uint32_t)count;
-            } else {
-                ctx->regs.x64.rdi = rdi;
-                if (repeated) ctx->regs.x64.rcx = count;
             }
             return HB_OK;
         }
@@ -10719,6 +10898,58 @@ hb_result_t hb_interpreter_exec_one_for_jit(hb_context_t* ctx, const hb_ir_instr
  *
  * Тело цикла не тронуто: переходы он и так выбирает по ctx->pc через find_block,
  * поэтому продолжение с середины функции для него естественно. */
+/* One architectural instruction per invocation in explicit EXEC mode. This
+ * entry is shared by the interpreter and the compiled sequential wrapper.
+ * No CFG lookup or equality-based fallthrough inference is allowed here. */
+static hb_result_t interpreter_exec_unit(hb_context_t* ctx,
+                                         const hb_ir_block_t* block,
+                                         hb_exec_result_t* out) {
+    if (ctx->arch != HB_ARCH_X64 || ctx->mode != HB_MODE_64BIT ||
+        !ctx->exec_access || !hb_ir_is_exec_unit(block) ||
+        ctx->pc != block->exec_unit_pc || ctx->regs.x64.rip != block->exec_unit_pc) {
+        out->result = HB_ERR_INVALID_ARG;
+        out->faulted = true;
+        out->fault_reason = "invalid EXEC instruction unit";
+        return HB_ERR_INVALID_ARG;
+    }
+    hb_result_t r = ctx->exec_access(ctx->exec_access_user, block->exec_unit_pc,
+                                   block->exec_unit_size);
+    if (r != HB_OK) {
+        out->result = r;
+        out->faulted = r != HB_ERR_ACCESS_PENDING;
+        out->fault_reason = out->faulted ? "instruction access rejected" : NULL;
+        ctx->last_result = r;
+        return HB_OK;
+    }
+    trace_refresh_runtime_flags();
+    out->blocks_executed = 1;
+    for (size_t i = 0; i < block->instr_count; i++) {
+        const hb_ir_instr_t* instr = &block->instrs[i];
+        trace_current_instr = instr;
+        r = exec_instr(ctx, instr);
+        trace_current_instr = NULL;
+        if (r != HB_OK) {
+            ctx->pc = block->exec_unit_pc;
+            sync_arch_pc(ctx);
+            out->result = r;
+            out->steps_executed = i; /* Only successful IR operations count. */
+            out->faulted = r != HB_ERR_ACCESS_PENDING && !string_budget_yield(instr, r);
+            out->fault_reason = out->faulted ?
+                (instr->op == HB_IR_UNSUPPORTED ? instr->comment : "instruction unit fault") : NULL;
+            ctx->last_result = r;
+            return HB_OK;
+        }
+    }
+    if (!block->exec_unit_transfer) {
+        ctx->pc = block->exec_unit_pc + block->exec_unit_size;
+        sync_arch_pc(ctx);
+    }
+    out->result = HB_OK;
+    out->steps_executed = block->instr_count;
+    ctx->last_result = HB_OK;
+    return HB_OK;
+}
+
 hb_result_t hb_interpreter_run_from(hb_interpreter_t* interp, const hb_ir_func_t* func,
                                     hb_ir_block_t* start, hb_exec_result_t* out) {
     if (!interp || !func || !out) return HB_ERR_INVALID_ARG;
@@ -10727,6 +10958,18 @@ hb_result_t hb_interpreter_run_from(hb_interpreter_t* interp, const hb_ir_func_t
 
     hb_context_t* ctx = interp->ctx;
     hb_ir_block_t* block = start ? start : func->cfg->entry;
+    if (ctx->exec_access) {
+        if (func->truncated || func->has_unsupported || !func->cfg->blocks ||
+            func->cfg->block_cap < 1 || func->cfg->block_count != 1 || block != func->cfg->entry ||
+            func->cfg->blocks[0] != block || func->guest_addr != block->exec_unit_pc ||
+            func->guest_len != block->exec_unit_size) {
+            out->result = HB_ERR_INVALID_ARG;
+            out->faulted = true;
+            out->fault_reason = "EXEC requires one complete instruction unit";
+            return HB_ERR_INVALID_ARG;
+        }
+        return interpreter_exec_unit(ctx, block, out);
+    }
     /* ★ Индекс команды, с которой начинается ТЕКУЩИЙ блок. Ноль везде, кроме входа по
      * адресу внутри блока (см. `find_block_containing`). Обнуляется сразу после того, как
      * блок начат, — иначе смещение «прилипло» бы к следующему блоку и часть его команд
@@ -10791,12 +11034,20 @@ hb_result_t hb_interpreter_run_from(hb_interpreter_t* interp, const hb_ir_func_t
             if (r == HB_OK && (trace_runtime_flags & TRACE_FLAG_SIMD_DATA))
                 trace_simd_data_exec(ctx, instr, "post", block->guest_addr, i, steps);
             trace_current_instr = NULL;
+            if (r == HB_ERR_ACCESS_PENDING) {
+                out->result = r;
+                out->steps_executed = steps - 1; /* Pending instruction did not retire. */
+                out->blocks_executed = blocks_executed;
+                out->faulted = false;
+                return HB_OK;
+            }
             if (r == HB_ERR_UNSUPPORTED_OPCODE || r == HB_ERR_EXEC_FAULT) {
                 ctx->pc = instr->guest_addr;
                 sync_arch_pc(ctx);
                 trace_exec_fault(ctx, instr, r, block->guest_addr, i, steps);
                 out->result = r;
-                out->steps_executed = steps;
+                out->steps_executed = steps - ((ctx->scalar_access && hb_ir_scalar_memory_move(instr)) ||
+                                               hb_ir_pair_rmw(instr));
                 out->blocks_executed = blocks_executed;
                 out->faulted = true;
                 out->fault_reason = (instr->op == HB_IR_UNSUPPORTED) ? instr->comment : "exec fault";
@@ -10805,9 +11056,16 @@ hb_result_t hb_interpreter_run_from(hb_interpreter_t* interp, const hb_ir_func_t
             if (r != HB_OK) {
                 ctx->pc = instr->guest_addr;
                 sync_arch_pc(ctx);
+                if (string_budget_yield(instr, r)) {
+                    out->result = r;
+                    out->steps_executed = steps;
+                    out->blocks_executed = blocks_executed;
+                    return HB_OK;
+                }
                 trace_exec_fault(ctx, instr, r, block->guest_addr, i, steps);
                 out->result = r;
-                out->steps_executed = steps;
+                out->steps_executed = steps - ((ctx->scalar_access && hb_ir_scalar_memory_move(instr)) ||
+                                               hb_ir_pair_rmw(instr));
                 out->blocks_executed = blocks_executed;
                 out->faulted = true;
                 out->fault_reason = "memory or internal fault";
@@ -10907,6 +11165,15 @@ hb_result_t hb_interpreter_resume_block(hb_context_t* ctx, const hb_ir_block_t* 
     uint64_t steps = 0;
     if (!ctx || !block || !out) return HB_ERR_INVALID_ARG;
     memset(out, 0, sizeof(hb_exec_result_t));
+    if (ctx->exec_access) {
+        if (start_index != 0) {
+            out->result = HB_ERR_INVALID_ARG;
+            out->faulted = true;
+            out->fault_reason = "EXEC cannot resume inside an instruction";
+            return HB_ERR_INVALID_ARG;
+        }
+        return interpreter_exec_unit(ctx, block, out);
+    }
     if (start_index >= block->instr_count) return HB_ERR_INVALID_ARG;
 
     trace_refresh_runtime_flags();
@@ -10919,19 +11186,40 @@ hb_result_t hb_interpreter_resume_block(hb_context_t* ctx, const hb_ir_block_t* 
         trace_current_instr = instr;
         r = exec_instr(ctx, instr);
         trace_current_instr = NULL;
+        if (r == HB_ERR_ACCESS_PENDING) {
+            out->result = r;
+            out->steps_executed = steps - 1;
+            out->faulted = false;
+            return HB_OK;
+        }
+        if (r != HB_OK && instr->guest_len &&
+            (ctx->scalar_access || hb_ir_pair_rmw(instr) || instr->op == HB_IR_MOVS || instr->op == HB_IR_STOS ||
+             instr->op == HB_IR_BT || instr->op == HB_IR_BTS ||
+             instr->op == HB_IR_BTR || instr->op == HB_IR_BTC)) {
+            ctx->pc = instr->guest_addr;
+            sync_arch_pc(ctx);
+        }
         if (r == HB_ERR_UNSUPPORTED_OPCODE || r == HB_ERR_EXEC_FAULT) {
             trace_exec_fault(ctx, instr, r, block->guest_addr, i, steps);
             out->result = r;
-            out->steps_executed = steps;
+            out->steps_executed = steps - ((ctx->scalar_access && hb_ir_scalar_memory_move(instr)) ||
+                                           hb_ir_pair_rmw(instr));
             out->faulted = true;
             out->fault_reason = (instr->op == HB_IR_UNSUPPORTED) ? instr->comment : "exec fault";
             ctx->last_result = r;
             return HB_OK;
         }
         if (r != HB_OK) {
+            if (string_budget_yield(instr, r)) {
+                out->result = r;
+                out->steps_executed = steps;
+                ctx->last_result = r;
+                return HB_OK;
+            }
             trace_exec_fault(ctx, instr, r, block->guest_addr, i, steps);
             out->result = r;
-            out->steps_executed = steps;
+            out->steps_executed = steps - ((ctx->scalar_access && hb_ir_scalar_memory_move(instr)) ||
+                                           hb_ir_pair_rmw(instr));
             out->faulted = true;
             out->fault_reason = "memory or internal fault";
             ctx->last_result = r;

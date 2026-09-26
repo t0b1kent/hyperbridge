@@ -1,7 +1,7 @@
 /* Actual VEX F16C instructions, independent integer-only numerical oracles.
  * All guest FP exceptions are masked; IE/DE/UE/OE/PE status and delivery remain
  * outside this regression. DAZ controls directly seed internal state and do
- * not claim admission by LDMXCSR/FXRSTOR: the mask remains 0xffbf. Narrowing FTZ
+ * not depend on admission by LDMXCSR/FXRSTOR (the mask is 0xffff since 25.09.2026). Narrowing FTZ
  * and widening DAZ/FTZ must not change results; narrowing DAZ=1 is not tested.
  * Full upper storage is checked without
  * claiming AVX-512 exposure or native SIMD lowering. Private memory uses the
@@ -237,7 +237,7 @@ static const struct{const char *name;enum hb_gate_id id;} gates[]={
 int main(void)
 {
     char *saved[sizeof(gates)/sizeof(gates[0])]={0};size_t saved_count=0;int changed=0,host_saved=0;fenv_t original_host;
-    check(HB_MXCSR_SUPPORTED_MASK==0xffbfu,"guest MXCSR mask unchanged; DAZ probes use internal state");
+    check(HB_MXCSR_SUPPORTED_MASK==0xffffu,"guest MXCSR mask admits DAZ; DAZ probes use internal state");
     /* Anchor the exhaustive mathematical oracle to independent known words. */
     check(wide_oracle(0x0001)==0x33800000&&wide_oracle(0x03ff)==0x387fc000&&wide_oracle(0x0400)==0x38800000&&wide_oracle(0x7c01)==0x7fc02000&&wide_oracle(0xfc01)==0xffc02000,"widening oracle anchors");
     for(size_t i=0;i<sizeof(gates)/sizeof(gates[0]);++i){const char *v=getenv(gates[i].name);if(v&&!check((saved[i]=strdup(v))!=NULL,"save gate"))goto done;++saved_count;}

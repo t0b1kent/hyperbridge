@@ -1,6 +1,7 @@
 /* Actual FXSAVE/FXRSTOR instructions; synthetic private guest memory only.
  * The 512-byte images are constructed independently, not by FXSAVE followed
- * by FXRSTOR. Test the engine's 0xffbf MXCSR policy and invalid-state #GP,
+ * by FXRSTOR. Test the engine's 0xffff MXCSR policy (DAZ admitted since
+ * 25.09.2026) and invalid-state #GP,
  * not DAZ arithmetic support or late partial writes. The image oracle covers
  * the inherited empty-x87/XMM image fields plus MXCSR; complete architectural
  * FIP/FDP serialization is not implemented and is not claimed here. */
@@ -105,7 +106,7 @@ static void make_image(uint8_t image[IMAGE_BYTES], uint32_t mxcsr,
     put16(image + 2, restore ? 0x0100 : 0);
     /* Empty abridged x87 tag word; all eight x87 data slots remain zero. */
     put32(image + 0x18, mxcsr);
-    put32(image + 0x1c, 0xffbf);
+    put32(image + 0x1c, 0xffff);
     unsigned count = restore ? 16 : arch == HB_ARCH_X64 ? 16 : 8;
     for (unsigned i = 0; i < count; ++i) {
         put64(image + 0xa0 + 16 * i, xmm_word(i, 0, restore));
@@ -282,9 +283,10 @@ int main(void)
 {
     static const uint32_t values[] = {
         0, 0x1f80, 0x3f80, 0x5f80, 0x7f80, 0x9f80, 0xbf80, 0xdf80, 0xff80,
-        0x1f81, 0x1f82, 0x1f84, 0x1f88, 0x1f90, 0x1fa0, 0xffbf
+        0x1f81, 0x1f82, 0x1f84, 0x1f88, 0x1f90, 0x1fa0, 0xffbf,
+        0x1fc0, 0x9fc0, 0xffff
     };
-    static const uint32_t invalid_bits[] = {0x40, 0x10000, UINT32_C(0x80000000)};
+    static const uint32_t invalid_bits[] = {0x10000, UINT32_C(0x80000000)};
     static const uint32_t untrusted_masks[] = {0, UINT32_MAX};
     const size_t gate_count = sizeof(gates) / sizeof(gates[0]);
     size_t saved = 0;

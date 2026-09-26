@@ -194,10 +194,12 @@ hb_result_t hb_lift_x64(const hb_decoded_t* dec, hb_ir_builder_t* b) {
             hb_ir_operand_t src = operand_from_dec(dec, 2);
             if (dec->op1.is_mem && (dec->op2.is_reg || dec->op2.is_imm)) {
                 /* MOV [mem], reg/imm */
-                emit(b, hb_ir_emit_store(b, dst, src), dec);
+                hb_ir_instr_t* i = emit(b, hb_ir_emit_store(b, dst, src), dec);
+                if (i) i->scalar_memory_move = true;
             } else if (dec->op1.is_reg && dec->op2.is_mem) {
                 /* MOV reg, [mem] */
-                emit(b, hb_ir_emit_load(b, dst, src), dec);
+                hb_ir_instr_t* i = emit(b, hb_ir_emit_load(b, dst, src), dec);
+                if (i) i->scalar_memory_move = true;
             } else {
                 /* MOV reg, reg/imm or other forms */
                 emit(b, hb_ir_emit_mov(b, dst, src), dec);
@@ -1188,12 +1190,15 @@ hb_result_t hb_lift_x64(const hb_decoded_t* dec, hb_ir_builder_t* b) {
             return HB_OK;
         }
         case HB_INS_LEAVE: {
-            hb_size_t sz = size_from_dec(dec->op1.size);
-            hb_ir_operand_t sp = hb_ir_reg(HB_REG_RSP, sz);
-            hb_ir_operand_t bp_same_size = hb_ir_reg(HB_REG_RBP, sz);
-            hb_ir_operand_t bp = operand_from_dec(dec, 1);
-            emit(b, hb_ir_emit_mov(b, sp, bp_same_size), dec);
-            emit(b, hb_ir_emit_pop(b, bp), dec);
+            /* The stack read can fault. Keep SP/BP unchanged until it succeeds;
+             * even operand-size 16 uses the full long-mode frame pointer. */
+            hb_ir_instr_t *i = hb_ir_emit(b, HB_IR_LEAVE);
+            if (i) {
+                i->dst = operand_from_dec(dec, 1);
+                /* Expose the faultable read to memory/flags observers. */
+                i->src1 = hb_ir_mem(HB_REG_RBP, HB_REG_COUNT, 1, 0, i->dst.size);
+            }
+            emit(b, i, dec);
             return HB_OK;
         }
         case HB_INS_CALL: {
@@ -2062,6 +2067,57 @@ hb_result_t hb_lift_x64(const hb_decoded_t* dec, hb_ir_builder_t* b) {
                                    (uint8_t*)dec->bytes, dec->len), dec);
             return HB_ERR_UNSUPPORTED_FEATURE;
     }
+}
+
+hb_result_t hb_lift_unit_x64(const hb_decoded_t* dec, hb_ir_func_t** out) {
+    if (!dec || !out || !dec->len || dec->len > 15 ||
+        dec->addr > UINT64_MAX - dec->len ||
+        dec->opcode == HB_INS_UNSUPPORTED || dec->opcode == HB_INS_UNAVAILABLE_EXT)
+        return HB_ERR_INVALID_ARG;
+    hb_ir_func_t* func = hb_ir_func_create(dec->addr, dec->len);
+    if (!func) return HB_ERR_OUT_OF_MEMORY;
+    hb_ir_block_t* block = hb_ir_block_create(0, dec->addr);
+    if (!block) {
+        hb_ir_func_destroy(func);
+        return HB_ERR_OUT_OF_MEMORY;
+    }
+    hb_ir_cfg_add_block(func->cfg, block);
+    if (func->cfg->block_count != 1) {
+        hb_ir_block_destroy(block);
+        hb_ir_func_destroy(func);
+        return HB_ERR_OUT_OF_MEMORY;
+    }
+    func->cfg->entry = block;
+    hb_ir_builder_t* b = hb_ir_builder_create(func);
+    if (!b) {
+        hb_ir_func_destroy(func);
+        return HB_ERR_OUT_OF_MEMORY;
+    }
+    hb_ir_builder_set_block(b, block);
+    hb_result_t r = hb_lift_x64(dec, b);
+    if (r == HB_OK) {
+        for (size_t i = 0; i < block->instr_count; i++)
+            if (dec->lock_prefix) block->instrs[i].is_locked = true;
+        block->exec_unit_valid = true;
+        block->exec_unit_pc = dec->addr;
+        block->exec_unit_size = dec->len;
+        block->exec_unit_transfer = block->instr_count &&
+            hb_ir_exec_unit_transfer(block->instrs[block->instr_count - 1].op);
+        if (!hb_ir_is_exec_unit(block)) r = HB_ERR_INVALID_ARG;
+    }
+    if (r == HB_OK) {
+        hb_cfg_ledger_note(func, dec->addr, dec->len, 0, block->instr_count,
+                          dec->is_branch, dec->is_conditional, dec->is_call, dec->is_ret,
+                          dec->is_branch && dec->branch_target != 0, dec->branch_target);
+        hb_cfg_build(func, block);
+    }
+    hb_ir_builder_destroy(b);
+    if (r != HB_OK) {
+        hb_ir_func_destroy(func);
+        return r;
+    }
+    *out = func;
+    return HB_OK;
 }
 
 hb_result_t hb_lift_func_x64(hb_decoder_t* dec, hb_ir_func_t** out) {

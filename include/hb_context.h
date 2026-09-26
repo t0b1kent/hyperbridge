@@ -42,10 +42,21 @@ typedef struct {
 
 #define HB_CONTEXT_CODEGEN_MONO_MODULE 0x00000001u
 
-/* Current guest SSE control-state contract. DAZ (bit 6) is not advertised.
- * Zero is a valid live MXCSR value; defaults belong to create/reset only. */
+/* Current guest SSE control-state contract.
+ * Zero is a valid live MXCSR value; defaults belong to create/reset only.
+ * ★ Claude, 25.09.2026: DAZ (бит 6) ОБЪЯВЛЕН. Его поддерживает каждый x86-64 процессор (с первого
+ *   AMD64 и Pentium 4), поэтому программы ставят его без проверки MXCSR_MASK: PhysX в Hollow Knight
+ *   делает LDMXCSR с DAZ|FTZ, и при маске 0xffbf движок отвечал #GP — игра падала в первом кадре
+ *   (`macrunner-hb-interp-unsupported: op=LDMXCSR`, UnityPlayer RaycastTry). FEX объявляет 0xffff.
+ *   Ограничение: интерпретатор бит хранит, но денормальные ВХОДЫ пока не обнуляет (запись в ДОЛГ). */
 #define HB_MXCSR_DEFAULT        0x1f80u
-#define HB_MXCSR_SUPPORTED_MASK 0xffbfu
+#define HB_MXCSR_SUPPORTED_MASK 0xffffu
+
+/* Claude, 26.09.2026 — MXCSR гостя -> FPCR хоста (гейт MACRUNNER_HB_MXCSR_FPCR, умолчание ВЫКЛ).
+ * Режим округления RC и обнуление денормалей FTZ|DAZ исполняет само железо: RC -> FPCR.RMode,
+ * FTZ|DAZ -> FPCR.FZ. Звать при каждой смене ctx->mxcsr и на входе в исполнение гостя.
+ * FPCR — регистр потока; в ARM64EC MXCSR и FPCR по ABI общие. */
+void hb_host_fpcr_apply_mxcsr(uint32_t mxcsr);
 
 /* Guest register file x64 */
 typedef struct {
@@ -161,6 +172,29 @@ struct hb_cache_ext;
 
 /* Runtime context */
 typedef struct hb_context hb_context_t;
+
+/* Invocation-owned pre-access observer for x64 scalar memory MOV only.
+ * HB_OK proceeds through ordinary memory checks; ACCESS_PENDING stops before
+ * touching guest memory. The observer must not mutate architectural state,
+ * execute guest code recursively on this context, or retain borrowed inputs.
+ * READ=0, WRITE=1. This is not a permission grant or a mapping lifetime lease. */
+typedef hb_result_t (*hb_scalar_access_fn)(void* user, uint64_t guest_pc,
+                                         hb_gva_t address, size_t size,
+                                         uint32_t access);
+/* Independent opt-in for CMPXCHG8B/16B WRITE pre-access, never scalar MOV.
+ * The invocation ownership/reentry restrictions above apply. */
+typedef hb_result_t (*hb_pair_rmw_access_fn)(void* user, uint64_t guest_pc,
+                                           hb_gva_t address, size_t size,
+                                           uint32_t access);
+/* Independent x64 instruction-entry observer. Called before any IR for one
+ * explicit instruction unit, including a unit with no IR. HB_OK permits the
+ * attempt; ACCESS_PENDING stops without retirement. The caller must establish
+ * context PC and architectural RIP at unit start.
+ * A mismatch is rejected before the callback, without rewriting either PC.
+ * The callback grants no context/memory lease and must not mutate architectural state, replace
+ * hooks, reenter this context, or retain borrowed inputs. */
+typedef hb_result_t (*hb_exec_access_fn)(void* user, uint64_t guest_pc,
+                                       size_t instruction_size);
 
 /* Нумерация помощников: 1…55, нулевой слот не используется (0 = «не помощник»). */
 #define HB_HELPER_TABLE_SLOTS 64u
@@ -505,6 +539,25 @@ struct hb_context {
     /* Перепись блокирующих операций гостя — разбор у HB_LKC_* выше.
      * Пишется ВЫПУЩЕННЫМ кодом (ldr/add/str от X19), читается C. */
     uint64_t lock_census[HB_LKC_N];
+    /* Append-only: offsets used by existing generated code remain unchanged. */
+    hb_scalar_access_fn scalar_access;
+    void* scalar_access_user;
+    size_t scalar_access_page_size;
+    uint64_t scalar_access_jit_entries; /* Actual compiled-wrapper invocations. */
+    hb_pair_rmw_access_fn pair_access;
+    void* pair_access_user;
+    size_t pair_access_page_size;
+    uint64_t pair_access_jit_entries;
+    hb_gva_t pair_rmw_address;
+    size_t pair_rmw_size;
+    bool pair_rmw_active;
+    hb_exec_access_fn exec_access;
+    void* exec_access_user;
+    uint64_t exec_access_jit_entries; /* Actual compiled-wrapper entries. */
+    /* Additive observations: preserve every existing context-field offset.
+     * Setters preserve these counters; context initialization resets them. */
+    uint64_t exec_access_native_entries; /* Observer accepted; emitted body entered. */
+    uint64_t exec_access_helper_entries; /* Interpreter-backed EXEC wrapper attempts. */
 };
 
 /* Природа отказа исполнения (`ctx->last_fault_kind`). Ноль — «не заполнено». */
@@ -634,6 +687,20 @@ static inline const hb_x87_state_t* hb_context_x87_const(const hb_context_t* ctx
 hb_context_t* hb_context_create(hb_arch_t arch, hb_backend_t backend);
 void hb_context_destroy(hb_context_t* ctx);
 hb_result_t hb_context_reset(hb_context_t* ctx);
+/* Set/clear only while this context is not executing. JIT runtimes flush warm
+ * translations on enabled/disabled transitions at their next run. Changing the
+ * callback/user while enabled is allowed between invocations. Reset clears it. */
+hb_result_t hb_context_set_scalar_access(hb_context_t* ctx, hb_scalar_access_fn fn,
+                                        void* user, size_t page_size);
+hb_result_t hb_context_set_pair_rmw_access(hb_context_t* ctx, hb_pair_rmw_access_fn fn,
+                                          void* user, size_t page_size);
+hb_result_t hb_context_set_exec_access(hb_context_t* ctx, hb_exec_access_fn fn,
+                                      void* user);
+/* Valid only during an actual pair memory/provider/CAS operation, after the
+ * observer returned HB_OK. Inactive/invalid leaves optional outputs untouched.
+ * No permission grant, retained pointer, TLS token, or mapping lease. */
+bool hb_context_get_pair_rmw_intent(const hb_context_t* ctx, hb_gva_t* address,
+                                    size_t* size);
 hb_result_t hb_context_set_pc(hb_context_t* ctx, hb_gva_t pc);
 hb_result_t hb_context_set_step_limit(hb_context_t* ctx, uint64_t limit);
 hb_result_t hb_context_set_block_limit(hb_context_t* ctx, uint64_t limit);

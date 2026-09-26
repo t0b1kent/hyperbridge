@@ -412,6 +412,10 @@ typedef struct {
 
 hb_ic_slot_t* hb_ic_slot_alloc(void);
 void hb_ic_slots_clear_all(void);
+/* Opus 26.09.2026 — ТОЧЕЧНОЕ гашение: только слоты, чей нативный адрес признан `inside`
+ * (возврат мёртвого места арены). Чужие слоты не трогаются — их потоки не теряют попаданий.
+ * Возвращает число погашенных. Порядок гашения тот же: сперва натив, потом гость. */
+uint64_t hb_ic_slots_clear_matching(int (*inside)(uint64_t native, void* arg), void* arg);
 void hb_ic_slot_stats(uint64_t* allocated, uint64_t* exhausted, uint64_t* cleared);
 /* ★ 07.09.2026, лейн ПОВТОРНЫЙ-ВЫПУСК — ОРАКУЛ ДЛЯ ПРИЁМКИ, не горячий путь.
  * Отвечает, держит ли ХОТЬ ОДИН слот названный нативный адрес. Нужен затем, что

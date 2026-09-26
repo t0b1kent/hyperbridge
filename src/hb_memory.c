@@ -865,6 +865,67 @@ static void install_sig_handlers(void) {
     sigaction(SIGBUS, &sa, &g_prev_bus);
     mem_segv_probe_prev_owner();
 }
+
+/* Claude 26.09 — УСТАНОВИТЬ ПЕРЕХВАТ ОТКАЗОВ ВЫПУЩЕННОГО КОДА ДЛЯ ЭТОЙ КОПИИ ЯДРА.
+ * В ntdll.so Wine вшита СВОЯ (старая) копия ядра, и обработчик Wine спрашивает ЕЁ перехват — рамка
+ * которой в этом адаптере не ставится никогда. Поэтому отказ родного обращения к памяти из JIT
+ * адаптера уходил в Wine мимо восстановления (набор Astra с битом 64: seh/seh-detail/guard-scalar).
+ * Ставим свой обработчик ПЕРЕД обработчиком Wine, сохраняя его SA_ONSTACK и маску; чужие отказы
+ * уходят Wine без изменений (safe_copy_signal_handler -> chain). */
+/* Короткий обработчик для адаптера: без диагностики (её обход цепочки кадров падал на рамках Wine
+ * — stack-restart на бите 64). Только перехват выпущенного кода, собственный safe-jmp ядра и
+ * передача дальше без изменений. */
+static void lean_fault_handler(int sig, siginfo_t* info, void* context) {
+    extern int hb_jit_runtime_handle_signal_fault(uint64_t pc, uint64_t fault_addr,
+                                                  int signal, const void* host_context);
+    const ucontext_t* uc = (const ucontext_t*)context;
+    const struct sigaction* prev = sig == SIGBUS ? &g_prev_bus : &g_prev_segv;
+    if (uc && uc->uc_mcontext) {
+        uint64_t pc = (uint64_t)uc->uc_mcontext->__ss.__pc;
+        uint64_t lr = (uint64_t)uc->uc_mcontext->__ss.__lr;
+        uint64_t addr = (uint64_t)(uintptr_t)(info ? info->si_addr : NULL);
+        if (hb_jit_runtime_handle_signal_fault(pc, addr, sig, context) ||
+            hb_jit_runtime_handle_signal_fault(lr, addr, sig, context))
+            return;
+    }
+    if (hb_safe_jmp_get()) {
+        sigset_t only;
+        sigemptyset(&only);
+        sigaddset(&only, sig);
+        sigprocmask(SIG_UNBLOCK, &only, NULL);
+        hb_vhod_snyat();
+        siglongjmp(*hb_safe_jmp_get(), 1);
+    }
+    if ((prev->sa_flags & SA_SIGINFO) && prev->sa_sigaction) {
+        prev->sa_sigaction(sig, info, context);
+    } else if (prev->sa_handler && prev->sa_handler != SIG_DFL && prev->sa_handler != SIG_IGN) {
+        prev->sa_handler(sig);
+    } else {
+        signal(sig, SIG_DFL);
+        raise(sig);
+    }
+}
+
+void hb_memory_install_fault_handlers(void) {
+    struct sigaction sa, old_segv, old_bus;
+    if (__atomic_load_n(&g_sig_handlers_installed, __ATOMIC_ACQUIRE)) return;
+    if (__atomic_test_and_set(&g_sig_handlers_installed, __ATOMIC_RELAXED)) return;
+    memset(&sa, 0, sizeof(sa));
+    memset(&old_segv, 0, sizeof(old_segv));
+    memset(&old_bus, 0, sizeof(old_bus));
+    sigaction(SIGSEGV, NULL, &old_segv);
+    sigaction(SIGBUS, NULL, &old_bus);
+    g_prev_segv = old_segv;
+    g_prev_bus = old_bus;
+    sa.sa_sigaction = lean_fault_handler;
+    sa.sa_flags = SA_SIGINFO | (old_segv.sa_flags & SA_ONSTACK);
+    sa.sa_mask = old_segv.sa_mask;
+    sigaction(SIGSEGV, &sa, NULL);
+    sa.sa_flags = SA_SIGINFO | (old_bus.sa_flags & SA_ONSTACK);
+    sa.sa_mask = old_bus.sa_mask;
+    sigaction(SIGBUS, &sa, NULL);
+    mem_segv_probe_prev_owner();
+}
 #endif
 
 #ifndef MAP_NORESERVE
@@ -4429,6 +4490,11 @@ grow_retry:
             /* ★ То же, что в ветви окна гостя ниже: право в НАШЕЙ таблице не значит, что
              * страница отображена у хозяина. Голая запись падала бы SIGBUS внутри memmove,
              * мимо обработки отказов. mach_copy_to_host возвращает код вместо падения. */
+            /* ★ Claude 25.09.2026: встраивающий с безопасной прямой записью (страховка отказа
+             * своя) берёт её на себя — без вызова ядра на каждое обращение (профиль HK: ~40 %
+             * основного потока). Его код ошибки окончателен. */
+            if (mem->identity_writes_special && mem->special_write)
+                return mem->special_write(mem->special_user, addr, in, size);
             hb_result_t idw = mach_copy_to_host((void*)(uintptr_t)addr, in, size);
             if (idw != HB_OK) return idw;
             return HB_OK;
@@ -4747,6 +4813,10 @@ static void* hb_memory_host_ptr_inner(hb_memory_t* mem, hb_gva_t addr, size_t si
     return (void*)(uintptr_t)addr;
 }
 
+void hb_memory_set_identity_writes_special(hb_memory_t* mem, bool on) {
+    if (mem) mem->identity_writes_special = on;
+}
+
 void hb_memory_set_special_handlers(hb_memory_t* mem,
                                     hb_result_t (*read_fn)(void* user, hb_gva_t addr, void* out, size_t size),
                                     hb_result_t (*write_fn)(void* user, hb_gva_t addr, const void* in, size_t size),
@@ -4778,6 +4848,38 @@ void macrunner_hb_memory_debug_handlers(const hb_memory_t* mem,
 void hb_memory_set_grow_handler(hb_memory_t* mem, bool (*grow_fn)(void* user, hb_gva_t addr)) {
     if (!mem) return;
     mem->special_grow = grow_fn;
+}
+
+void hb_memory_set_atomic_cmpxchg128_handler(hb_memory_t* mem,
+                                            hb_memory_atomic_cmpxchg128_fn callback,
+                                            void* user) {
+    if (!mem) return;
+    mem->atomic_cmpxchg128_user = user;
+    mem->atomic_cmpxchg128 = callback;
+}
+
+bool hb_memory_has_atomic_cmpxchg128_handler(const hb_memory_t* mem) {
+    return mem && mem->atomic_cmpxchg128 != NULL;
+}
+
+hb_result_t hb_memory_atomic_cmpxchg128(hb_memory_t* mem, hb_gva_t addr,
+                                      const uint64_t expected[2], const uint64_t desired[2],
+                                      uint64_t observed[2], bool* exchanged) {
+    uint64_t expected_copy[2], desired_copy[2], result[2] = {0, 0};
+    bool replaced = false;
+    hb_result_t status;
+    if (!mem || !expected || !desired || !observed || !exchanged ||
+        (addr & 15u) || addr > UINT64_MAX - 16u)
+        return HB_ERR_INVALID_ARG;
+    if (!mem->atomic_cmpxchg128) return HB_ERR_UNSUPPORTED_FEATURE;
+    memcpy(expected_copy, expected, sizeof(expected_copy));
+    memcpy(desired_copy, desired, sizeof(desired_copy));
+    status = mem->atomic_cmpxchg128(mem->atomic_cmpxchg128_user, addr,
+                                  expected_copy, desired_copy, result, &replaced);
+    if (status != HB_OK) return status;
+    memcpy(observed, result, sizeof(result));
+    *exchanged = replaced;
+    return HB_OK;
 }
 
 #define RW_U(bits) \
