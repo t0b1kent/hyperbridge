@@ -5362,9 +5362,23 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
                     r = read_vec_reg_bytes(ctx, instr->dst.reg, xmm, 16);
                     if (r != HB_OK) return r;
                 }
-                r = hb_memory_read(ctx->memory, addr, xmm, bytes);
-                if (r != HB_OK) return r;
-                trace_mem_watch_bytes(ctx, "read", addr, xmm, bytes, NULL);
+                if (evex_target_present(instr) && evex_target_mask(instr) != 0) {
+                    const uint64_t k = ctx->k[evex_target_mask(instr) & 7u];
+                    /* Mask the memory footprint BEFORE reading, not just writeback.
+                     * No read, translation or permission check for inactive lanes.
+                     * Retire the vector only after every enabled lane succeeded. */
+                    for (size_t off = 0; off < bytes; off += lane) {
+                        if (!((k >> (off / lane)) & 1u)) continue;
+                        const size_t n = bytes - off < lane ? bytes - off : lane;
+                        r = hb_memory_read(ctx->memory, addr + off, xmm + off, n);
+                        if (r != HB_OK) return r;
+                        trace_mem_watch_bytes(ctx, "read", addr + off, xmm + off, n, NULL);
+                    }
+                } else {
+                    r = hb_memory_read(ctx->memory, addr, xmm, bytes);
+                    if (r != HB_OK) return r;
+                    trace_mem_watch_bytes(ctx, "read", addr, xmm, bytes, NULL);
+                }
                 return write_vec_reg_bytes_evex_masked(ctx, instr, xmm, bytes < 16 ? 16 : bytes, lane);
             }
             uint64_t val = 0;

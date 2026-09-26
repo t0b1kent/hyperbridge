@@ -8293,7 +8293,17 @@ static bool emit_native_scalar_mov(hb_codegen_buffer_t* buf, const hb_ir_instr_t
     return false;
 }
 
+/* EVEX.aaa == 0 is unmasked, independently of the contents of k0.
+ * Call this only for vector IR; target also contains branch addresses elsewhere.
+ * Upper-register zeroing is not a substitute for element writemasking. */
+static bool jit_evex_write_masked(const hb_ir_instr_t* instr) {
+    const uint32_t t = instr ? (uint32_t)instr->target : 0u;
+    return (t & HB_EVEX_TARGET_PRESENT) != 0 &&
+           ((t >> HB_EVEX_TARGET_MASK_SHIFT) & 7u) != 0;
+}
+
 static bool emit_native_xmm_mov(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    if (!instr || jit_evex_write_masked(instr)) return false;
     /* MacRunner 2026-08-12, лейн ЛЕСТНИЦА, итерация 509 — VEX.128 НАТИВНО НЕ ВЫПУСКАЕМ.
      * Нативный выпуск пишет только 128 бит и про `ymm_hi` не знает вовсе, а 128-битная
      * VEX-команда обязана обнулить старшую половину приёмника. Отдаём такие помощнику —
@@ -11457,6 +11467,8 @@ static bool emit_xmm_load_store_pair(hb_codegen_buffer_t* buf, const hb_ir_instr
     if (!jit_direct_mem_codegen_enabled(buf) || !load || !store) return false;
     if (diag_no_xmm_dload() || diag_no_xmm_dstore()) return false;
     if (load->op != HB_IR_LOAD || store->op != HB_IR_STORE) return false;
+    /* A masked LOAD or STORE must not enter the unconditional 128-bit fusion. */
+    if (jit_evex_write_masked(load) || jit_evex_write_masked(store)) return false;
     if (!is_xmm_reg_operand(&load->dst) || !is_xmm_reg_operand(&store->src2) ||
         load->dst.reg != store->src2.reg)
         return false;
@@ -15276,6 +15288,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         case HB_IR_LOAD: {
             if (instr->src1.type != HB_OP_MEM) return HB_ERR_INTERNAL;
             perepis_shirin_vzvesti();
+            if (jit_evex_write_masked(instr)) {
+                perepis_uchest(buf, 0, instr->src1.size, SH_POM_NE_REG);
+                return emit_interp_ir_helper(buf, instr);
+            }
             if (emit_native_ymm_load(buf, instr)) {          /* Claude 26.09: VEX.256 без помощника */
                 hb_emit_note_native_exit();
                 return HB_OK;
@@ -15392,6 +15408,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         case HB_IR_STORE: {
             if (instr->src1.type != HB_OP_MEM) return HB_ERR_INTERNAL;
             perepis_shirin_vzvesti();
+            if (jit_evex_write_masked(instr)) {
+                perepis_uchest(buf, 1, instr->src1.size, SH_POM_NE_REG);
+                return emit_interp_ir_helper(buf, instr);
+            }
             if (emit_native_ymm_store(buf, instr)) {         /* Claude 26.09: VEX.256 под картой прав */
                 hb_emit_note_native_exit();
                 return HB_OK;
@@ -19659,6 +19679,8 @@ static bool hb_jit_helper_match_vector_store_loop(const hb_ir_block_t* block,
     for (size_t i = 0; i < 8; i++) {
         const hb_ir_instr_t* instr = &block->instrs[i];
         if (instr->op != HB_IR_STORE) return false;
+        /* The 128-byte pattern shortcut has no per-lane writemask. */
+        if (jit_evex_write_masked(instr)) return false;
         if (instr->src1.type != HB_OP_MEM || instr->src1.size != HB_SIZE_128) return false;
         if (instr->src1.mem.base != HB_REG_RCX || instr->src1.mem.index != HB_REG_COUNT) return false;
         if (instr->src1.mem.scale != 1 || instr->src1.mem.disp != (int64_t)(i * 16)) return false;
