@@ -6104,6 +6104,133 @@ static uint64_t g_inval_seq;               /* сколько объявлени�
 static pthread_mutex_t g_inval_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t g_inval_all_calls, g_inval_all_applied, g_inval_all_overflow;
 
+/* Claude 26.09.2026 — ПЕРЕПОЛНЕНИЕ КОЛЬЦА БЕЗ ПОЛНОЙ ЧИСТКИ (уровень 4, ДОЛГ HB-INVAL-WIDE).
+ *
+ * Замер HK (507, 26.09): 20–29 переполнений за прогон, каждое — полная чистка кеша потока:
+ * 250–287 тыс. выселений (у основного потока 196 тыс.) и столько же повторных переводов.
+ *
+ * Рядом с кольцом ведём ПОКОЛЕНИЕ каждого участка 64 КБ: объявитель под замком пишет номер
+ * объявления (seq+1) во все участки своего окна. Отставшая среда выселяет только блоки,
+ * задевающие участок с поколением новее её `inval_seen`: это надмножество того, что сделали бы
+ * пропущенные объявления (блок берётся с запасом HB_INVAL_MAX_BLOCK, как у выселения по
+ * диапазону), и ничего за пределами объявленных участков. Объявление «всё пространство»
+ * (≥ 2^47) по-прежнему даёт полную чистку — там она и есть правда.
+ *
+ * Порядок памяти: поколения пишутся под g_inval_lock ДО release-записи g_inval_seq, среда
+ * читает seq с acquire — всё объявленное до seq ей видно. Увидеть поколение НОВЕЕ seq можно,
+ * это даёт лишнее выселение, но не пропуск.
+ *
+ * Гейт MACRUNNER_HB_INVAL_OVERFLOW_SCOPED, умолчание 1; =0 — прежняя полная чистка. */
+#define HB_INVAL_CHUNK_SHIFT 16u
+#define HB_INVAL_REGION_SHIFT 32u
+#define HB_INVAL_REGIONS (1u << 16)                                   /* адреса до 2^48 */
+#define HB_INVAL_CHUNKS_PER_REGION (1u << (HB_INVAL_REGION_SHIFT - HB_INVAL_CHUNK_SHIFT))
+static uint64_t* g_inval_chunk_gen[HB_INVAL_REGIONS];
+static uint64_t g_inval_region_gen[HB_INVAL_REGIONS];
+static uint64_t g_inval_global_gen;
+static uint64_t g_inval_overflow_scoped, g_inval_overflow_scoped_ev;
+
+static int inval_overflow_scoped_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = hb_gate_flag( HB_GATE_HB_INVAL_OVERFLOW_SCOPED, 1 );
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_INVAL_OVERFLOW_SCOPED=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+
+/* Под g_inval_lock. [start, start+len) — окно объявления, gen — номер объявления + 1. */
+static void inval_chunks_mark_locked(uint64_t start, uint64_t len, uint64_t gen) {
+    uint64_t end = start + len, c, c_last;
+    if (len >= (1ull << 47) || start >= (1ull << 48) || end < start) {
+        __atomic_store_n(&g_inval_global_gen, gen, __ATOMIC_RELAXED);
+        return;
+    }
+    if (end > (1ull << 48)) end = 1ull << 48;
+    c = start >> HB_INVAL_CHUNK_SHIFT;
+    c_last = (end - 1u) >> HB_INVAL_CHUNK_SHIFT;
+    if (c_last - c > (1u << 20)) {                 /* больше 64 ГБ — честнее полная чистка */
+        __atomic_store_n(&g_inval_global_gen, gen, __ATOMIC_RELAXED);
+        return;
+    }
+    for (; c <= c_last; c++) {
+        uint32_t r = (uint32_t)(c >> (HB_INVAL_REGION_SHIFT - HB_INVAL_CHUNK_SHIFT));
+        uint64_t* arr = __atomic_load_n(&g_inval_chunk_gen[r], __ATOMIC_ACQUIRE);
+        if (!arr) {
+            arr = calloc(HB_INVAL_CHUNKS_PER_REGION, sizeof(uint64_t));
+            if (!arr) { __atomic_store_n(&g_inval_global_gen, gen, __ATOMIC_RELAXED); return; }
+            __atomic_store_n(&g_inval_chunk_gen[r], arr, __ATOMIC_RELEASE);
+        }
+        __atomic_store_n(&arr[c & (HB_INVAL_CHUNKS_PER_REGION - 1u)], gen, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_inval_region_gen[r], gen, __ATOMIC_RELAXED);
+    }
+}
+
+/* Задевает ли [a, b) участок, объявленный после `seen`. */
+static int inval_chunks_dirty(uint64_t a, uint64_t b, uint64_t seen) {
+    uint64_t c, c_last;
+    if (a >= (1ull << 48)) return 1;
+    if (b <= a) b = a + 1u;
+    if (b > (1ull << 48)) b = 1ull << 48;
+    c = a >> HB_INVAL_CHUNK_SHIFT;
+    c_last = (b - 1u) >> HB_INVAL_CHUNK_SHIFT;
+    for (; c <= c_last; c++) {
+        uint32_t r = (uint32_t)(c >> (HB_INVAL_REGION_SHIFT - HB_INVAL_CHUNK_SHIFT));
+        const uint64_t* arr;
+        if (__atomic_load_n(&g_inval_region_gen[r], __ATOMIC_RELAXED) <= seen) {
+            c = ((uint64_t)(r + 1u) << (HB_INVAL_REGION_SHIFT - HB_INVAL_CHUNK_SHIFT)) - 1u;
+            continue;                              /* область не трогали — к следующей */
+        }
+        arr = __atomic_load_n(&g_inval_chunk_gen[r], __ATOMIC_ACQUIRE);
+        if (arr && __atomic_load_n(&arr[c & (HB_INVAL_CHUNKS_PER_REGION - 1u)], __ATOMIC_RELAXED) > seen)
+            return 1;
+    }
+    return 0;
+}
+
+static void runtime_apply_overflow_scoped(hb_jit_runtime_t* rt, uint64_t seen) {
+    hb_block_cache_t* cache = rt->block_cache;
+    uint64_t dropped = 0, t0;
+    size_t i, n;
+    if (!cache || !cache->entries) return;
+    if (__atomic_load_n(&g_inval_global_gen, __ATOMIC_ACQUIRE) > seen) {
+        (void)hb_jit_invalidate_guest_range(rt, 0, ~0ull);     /* объявляли «всё пространство» */
+        return;
+    }
+    __atomic_add_fetch(&g_inval_overflow_scoped, 1, __ATOMIC_RELAXED);
+    t_inval_w_calls[HB_INVAL_WHY_OVERFLOW]++;
+    t0 = mach_absolute_time();
+    n = cache->used_overflow ? cache->size : cache->used_count;
+    for (i = 0; i < n; i++) {
+        hb_block_cache_entry_t* e = cache->used_overflow ? &cache->entries[i]
+                                                         : &cache->entries[cache->used_slots[i]];
+        uint64_t a, b;
+        if (!e->valid) continue;
+        if (e->smc_span_len) { a = e->smc_span_start; b = a + e->smc_span_len; }
+        else { a = e->guest_addr; b = a + HB_INVAL_MAX_BLOCK; }
+        if (!inval_chunks_dirty(a, b, seen)) continue;
+        block_cache_evict_entry(rt, cache, e, HB_DEATH_RANGE);
+        dropped++;
+    }
+    t_inval_w_ev[HB_INVAL_WHY_OVERFLOW] += dropped;
+    t_inval_w_ticks[HB_INVAL_WHY_OVERFLOW] += mach_absolute_time() - t0;
+    __atomic_add_fetch(&g_inval_overflow_scoped_ev, dropped, __ATOMIC_RELAXED);
+    if (dropped) {
+        __atomic_add_fetch(&g_inval_dropped, dropped, __ATOMIC_RELAXED);
+        hb_ic_slots_clear_all();
+    }
+    {
+        static uint64_t said;
+        uint64_t k = __atomic_add_fetch(&said, 1, __ATOMIC_RELAXED);
+        if (k <= 8 || (k & 63u) == 0) {
+            fprintf(stderr, "macrunner-hb-inval-overflow-scoped: n=%llu seen=%llu ev=%llu cache=%zu\n",
+                    (unsigned long long)k, (unsigned long long)seen, (unsigned long long)dropped, n);
+            fflush(stderr);
+        }
+    }
+}
+
 void hb_jit_inval_all_stats(uint64_t* calls, uint64_t* applied, uint64_t* overflow_clears) {
     if (calls) *calls = __atomic_load_n(&g_inval_all_calls, __ATOMIC_RELAXED);
     if (applied) *applied = __atomic_load_n(&g_inval_all_applied, __ATOMIC_RELAXED);
@@ -6122,6 +6249,7 @@ uint64_t hb_jit_invalidate_guest_range_all_why(hb_jit_runtime_t* self, uint64_t 
         g_inval_ring[seq % HB_INVAL_RING].start = start;
         g_inval_ring[seq % HB_INVAL_RING].len = len;
         g_inval_ring[seq % HB_INVAL_RING].why = why;
+        if (inval_overflow_scoped_enabled()) inval_chunks_mark_locked(start, len, seq + 1);
         __atomic_store_n(&g_inval_seq, seq + 1, __ATOMIC_RELEASE);
     }
     pthread_mutex_unlock(&g_inval_lock);
@@ -6147,11 +6275,12 @@ static void runtime_apply_pending_inval(hb_jit_runtime_t* rt) {
     uint64_t n, i;
     if (seq == seen) return;
     if (seq - seen > HB_INVAL_RING) {
-        /* отстали — кольцо перезаписано; чистим всё своё */
+        /* отстали — кольцо перезаписано; выселяем только объявленные участки (или всё при =0) */
         __atomic_add_fetch(&g_inval_all_overflow, 1, __ATOMIC_RELAXED);
         rt->inval_seen = seq;
         t_inval_cur_why = HB_INVAL_WHY_OVERFLOW;
-        (void)hb_jit_invalidate_guest_range(rt, 0, ~0ull);
+        if (inval_overflow_scoped_enabled()) runtime_apply_overflow_scoped(rt, seen);
+        else (void)hb_jit_invalidate_guest_range(rt, 0, ~0ull);
         t_inval_cur_why = HB_INVAL_WHY_UNKNOWN;
         return;
     }
@@ -6164,7 +6293,8 @@ static void runtime_apply_pending_inval(hb_jit_runtime_t* rt) {
         __atomic_add_fetch(&g_inval_all_overflow, 1, __ATOMIC_RELAXED);
         rt->inval_seen = seq;
         t_inval_cur_why = HB_INVAL_WHY_OVERFLOW;
-        (void)hb_jit_invalidate_guest_range(rt, 0, ~0ull);
+        if (inval_overflow_scoped_enabled()) runtime_apply_overflow_scoped(rt, seen);
+        else (void)hb_jit_invalidate_guest_range(rt, 0, ~0ull);
         t_inval_cur_why = HB_INVAL_WHY_UNKNOWN;
         return;
     }
