@@ -14073,6 +14073,19 @@ static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* in
         if (scalar) emit_fp_ldst(buf, true, dbl, 0, 19, od);
         else emit_ldr_q(buf, 0, 19, od);
         if (kind == K_MINMAX) {
+            /* ★ DAZ/FTZ (аппаратный эталон Астры, N02, 26.09): x86 MIN/MAX выбирает БИТЫ источника,
+             * DAZ сбрасывает оба входа в знаковый ноль ДО выбора, FTZ скопированную денормаль НЕ
+             * трогает. FCMP+FCSEL верен, только пока у гостя ни DAZ, ни FTZ: иначе FCMP смотрит
+             * через FPCR.FZ хозяина, а FCSEL отдаёт сырые биты (корпус Астры: 72 расхождения, только
+             * JIT, только режимы с DAZ). Поэтому: MXCSR & 0x8040 == 0 — прежний быстрый путь; иначе
+             * скаляр — целочисленный порядок встроенно (как исправленный интерпретатор, без вызова),
+             * вектор — помощник. */
+            size_t to_int_daz, to_int_ftz, done_fast;
+            emit_ldr_w(buf, 22, 19, (uint32_t)offsetof(hb_context_t, mxcsr));
+            emit_gpr_word(buf, 0x721a001fu, 31, 22, 0);             /* TST W22, #0x40   (DAZ) */
+            to_int_daz = emit_bcond_deferred(buf, 1 /* NE */);
+            emit_gpr_word(buf, 0x7211001fu, 31, 22, 0);             /* TST W22, #0x8000 (FTZ) */
+            to_int_ftz = emit_bcond_deferred(buf, 1 /* NE */);
             if (scalar) {
                 emit_fcmp_rr(buf, dbl, 0, 1);
                 emit_fcsel(buf, dbl, 2, 0, 1, is_max ? HB_AC_GT : HB_AC_MI);
@@ -14084,6 +14097,55 @@ static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* in
                 emit_vec_rrr(buf, 0x6e601c00u, 3, 0, 1);            /* BSL: маска ? a : b */
                 emit_str_q(buf, 3, 19, od);
             }
+            done_fast = emit_b_deferred(buf);
+            patch_bcond(buf, to_int_daz, 1, buf->size);
+            patch_bcond(buf, to_int_ftz, 1, buf->size);
+            if (scalar) {
+                const uint32_t X = dbl ? 0x80000000u : 0u;           /* sf: 64-битные формы */
+                size_t nan_br, daz_skip, a_ok, b_ok, tie_br, st1;
+                emit_gpr_word(buf, dbl ? 0x9e660000u : 0x1e260000u, 20, 0, 0);   /* FMOV W|X20, S0|D0 */
+                emit_gpr_word(buf, dbl ? 0x9e660000u : 0x1e260000u, 21, 1 /* V1 */, 0);
+                emit_gpr_word(buf, 0x721a001fu, 31, 22, 0);          /* TST W22, #0x40 */
+                daz_skip = emit_bcond_deferred(buf, 0 /* EQ: DAZ снят */);
+                emit_gpr_word(buf, dbl ? 0xf24c281fu : 0x72091c1fu, 31, 20, 0);  /* TST a, #EXP */
+                a_ok = emit_bcond_deferred(buf, 1 /* NE */);
+                emit_gpr_word(buf, dbl ? 0x92410000u : 0x12010000u, 20, 20, 0);  /* AND a, a, #SIGN */
+                patch_bcond(buf, a_ok, 1, buf->size);
+                emit_gpr_word(buf, dbl ? 0xf24c281fu : 0x72091c1fu, 31, 21, 0);  /* TST b, #EXP */
+                b_ok = emit_bcond_deferred(buf, 1 /* NE */);
+                emit_gpr_word(buf, dbl ? 0x92410000u : 0x12010000u, 21, 21, 0);  /* AND b, b, #SIGN */
+                patch_bcond(buf, b_ok, 1, buf->size);
+                patch_bcond(buf, daz_skip, 0, buf->size);
+                /* NaN -> второй операнд, но ПОСЛЕ сброса DAZ (как интерпретатор): денормаль рядом с NaN
+                 * тоже уходит в знаковый ноль. Полный корпус Астры (2,96 млн) до этой правки: 3 072
+                 * случая только-JIT, все — MIN/MAX с DAZ, NaN и денормалью. FCMP смотрит на V0/V1:
+                 * NaN от сброса не зависит. */
+                emit_fcmp_rr(buf, dbl, 0, 1);
+                nan_br = emit_bcond_deferred(buf, HB_AC_VS);
+                emit_gpr_word(buf, 0x2a000000u | X, 23, 20, 21);     /* ORR t, a, b */
+                emit_gpr_word(buf, dbl ? 0xf240f81fu : 0x7200781fu, 31, 23, 0);  /* TST t, #ABS */
+                tie_br = emit_bcond_deferred(buf, 0 /* EQ: ±0 и ±0 */);
+                /* ключ порядка: отрицательное -> ~x, положительное -> x ^ SIGN; беззнаковое сравнение */
+                emit_gpr_word(buf, dbl ? 0x937ffc00u : 0x131f7c00u, 22, 20, 0);  /* ASR k, a, #31|63 */
+                emit_gpr_word(buf, dbl ? 0xb2410000u : 0x32010000u, 22, 22, 0);  /* ORR k, k, #SIGN */
+                emit_gpr_word(buf, 0x4a000000u | X, 22, 22, 20);     /* EOR k, k, a */
+                emit_gpr_word(buf, dbl ? 0x937ffc00u : 0x131f7c00u, 23, 21, 0);
+                emit_gpr_word(buf, dbl ? 0xb2410000u : 0x32010000u, 23, 23, 0);
+                emit_gpr_word(buf, 0x4a000000u | X, 23, 23, 21);
+                emit_gpr_word(buf, 0x6b00001fu | X, 31, 22, 23);     /* CMP ka, kb */
+                emit_gpr_word(buf, (0x1a800000u | X) | ((uint32_t)(is_max ? 8 /* HI */ : 3 /* LO */) << 12),
+                              20, 20, 21);                            /* CSEL a|b */
+                st1 = emit_b_deferred(buf);
+                patch_bcond(buf, tie_br, 0, buf->size);
+                patch_bcond(buf, nan_br, HB_AC_VS, buf->size);
+                emit_gpr_word(buf, 0x2a0003e0u | X, 20, 31, 21);     /* MOV r, b (после DAZ) */
+                patch_b(buf, st1, buf->size);
+                emit_fmov_gpr_to_fp(buf, dbl, 2, 20);
+                emit_fp_ldst(buf, false, dbl, 2, 19, od);
+            } else {
+                emit_interp_ir_helper(buf, instr);
+            }
+            patch_b(buf, done_fast, buf->size);
         } else {
             emit_fp_arith(buf, fop, dbl, !scalar, 2, 0, 1);
             if (hb_jit_gate_flag( HB_GATE_HB_TEST_SSE_FP_NO_SLOW, 0 )) {
