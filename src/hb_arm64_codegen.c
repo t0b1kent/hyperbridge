@@ -13853,6 +13853,29 @@ unsigned hb_codegen_emit_counts(unsigned* n_out, unsigned* nhelp_out, unsigned m
     return n;
 }
 
+/* Claude 26.09.2026 — VEX.128 MOVD/MOVQ ОБЯЗАНЫ ОБНУЛИТЬ ВСЁ ВЫШЕ БИТА 127 ПРИЁМНИКА.
+ * Разностный стенд на железе ARM64 (JIT против интерпретатора, 4000 случаев x64, 26.09): у
+ * vmovd xmm0,ecx / vmovq xmm0,rcx / vmovq xmm0,xmm1 (F3 0F 7E) / vmovq xmm1,xmm0 (66 0F D6)
+ * расходились 20 из 20 по ymm_hi приёмника — нативный выпуск MOVD писал 128 бит и про
+ * старшие части не знал, а интерпретатор (write_vec_reg_bytes) обнуляет и ymm_hi (биты
+ * 128..255), и zmm_hi (256..511). Первая редакция обнуляла только ymm_hi — стенд тут же
+ * показал zmm_hi. Шесть STR XZR дешевле, чем отдавать команду помощнику. Устаревшие SSE
+ * (без VEX) старшие части сохраняют — у них признак не выставлен, выпуск прежний. */
+static void emit_zero_ymm_hi_if_vex(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    uint32_t off, zoff;
+    if (!instr->zero_ymm_upper || instr->dst.type != HB_OP_REG ||
+        instr->dst.reg < HB_REG_XMM0 || instr->dst.reg > HB_REG_XMM15)
+        return;
+    off = (uint32_t)(offsetof(hb_context_t, ymm_hi) + (size_t)(instr->dst.reg - HB_REG_XMM0) * 16u);
+    zoff = (uint32_t)(offsetof(hb_context_t, zmm_hi) + (size_t)(instr->dst.reg - HB_REG_XMM0) * 32u);
+    emit_str_x(buf, 31, 19, off);
+    emit_str_x(buf, 31, 19, off + 8u);
+    emit_str_x(buf, 31, 19, zoff);
+    emit_str_x(buf, 31, 19, zoff + 8u);
+    emit_str_x(buf, 31, 19, zoff + 16u);
+    emit_str_x(buf, 31, 19, zoff + 24u);
+}
+
 static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
     {
         /* MacRunner 2026-08-11, лейн ЛЕСТНИЦА, итерация 370 — ПЕЧАТЬ НЕ НА ВЫХОДЕ, А ПЕРИОДОМ.
@@ -14939,6 +14962,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                     emit_load_xmm_to_x20_x22(buf, instr->src1.reg);   /* x20 = low */
                     emit_mov_imm64(buf, 22, 0);                        /* high обнуляется */
                     emit_store_x20_x22_to_xmm(buf, instr->dst.reg);
+                    emit_zero_ymm_hi_if_vex(buf, instr);
                     hb_emit_note_native_exit();
                     return HB_OK;
                 }
@@ -14947,6 +14971,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                     if (emit_load_gpr_sized_to_x20(buf, &instr->src1)) {
                         emit_mov_imm64(buf, 22, 0);
                         emit_store_x20_x22_to_xmm(buf, instr->dst.reg);
+                        emit_zero_ymm_hi_if_vex(buf, instr);
                         hb_emit_note_native_exit();
                         return HB_OK;
                     }
@@ -14979,6 +15004,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                     emit_direct_mem_load_to_x20(buf, ширина);
                     emit_mov_imm64(buf, 22, 0);
                     emit_store_x20_x22_to_xmm(buf, instr->dst.reg);
+                    emit_zero_ymm_hi_if_vex(buf, instr);
                     hb_emit_restore_stack_access(prev_stack);
                     jit_native_mem_count(1);
                     hb_emit_note_native_exit();
