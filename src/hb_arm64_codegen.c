@@ -13853,6 +13853,414 @@ unsigned hb_codegen_emit_counts(unsigned* n_out, unsigned* nhelp_out, unsigned m
     return n;
 }
 
+/* ═══ Claude 26.09.2026 — НАТИВНАЯ SSE-АРИФМЕТИКА С ПЛАВАЮЩЕЙ ТОЧКОЙ (уровень 4: вызова нет) ═══
+ *
+ * ИЗМЕРЕНО (Hollow Knight, 330 с, прибор MACRUNNER_HB_INTERP_SHAPES): 2,12 млрд исполнений через
+ * hb_jit_helper_exec_interp_ir, из них MULSS 33 %, ADDSS 23 %, SUBSS 13 %, MAXSS 6 %, COMISS 6,5 %,
+ * CVTTSS2SI 2,7 % — вся эта группа уходила помощнику БЕЗ УСЛОВИЙ. Каждый вызов — сохранение
+ * состояния, TLS (`_tlv_get_addr` 8 % потока), разбор операндов, memmove.
+ *
+ * Точное равенство с интерпретатором (он — эталон), по построению:
+ *   арифметика  — та же операция IEEE при том же FPCR хозяина (интерпретатор считает в C на
+ *                 том же FPCR). Отличаются только NaN-исходы (выбор полезной нагрузки, знак
+ *                 «неопределённого»): при NaN-результате (FCMP r,r; B.VS) — медленный путь в
+ *                 помощника ДО записи результата, то есть он видит исходное состояние;
+ *   MIN/MAX     — правило x86 «a<b ? a : b» (MAX: a>b) — ровно FCMP+FCSEL MI/GT; NaN и ±0
+ *                 дают второй операнд и там и там; вектор — FCMGT+BSL;
+ *   COMISS      — FCMP: ZF=Z|V, PF=V, CF=LT, OF=SF=AF=0, ленивые флаги обнуляются целиком
+ *                 (как hb_lazy_flags_clear);
+ *   CVTT*2SI    — FCVTZS + поправка насыщения на «целое неопределённое» 0x80…0 без ветвления.
+ * Формы: только устаревшие SSE (без VEX/EVEX — zero_ymm_upper и старшие биты target отсекают),
+ * приёмник XMM0..15, источник — XMM или память прямым путём (тем же, что у MOVD). Прочее —
+ * прежним путём. Гейт MACRUNNER_HB_NATIVE_SSE_FP, умолчание 1; =0 — прежний вызов помощника. */
+#define HB_FPA_ADD 0
+#define HB_FPA_SUB 1
+#define HB_FPA_MUL 2
+#define HB_FPA_DIV 3
+#define HB_AC_EQ 0
+#define HB_AC_MI 4
+#define HB_AC_VS 6
+#define HB_AC_VC 7
+#define HB_AC_LT 11
+#define HB_AC_GT 12
+
+static int native_sse_fp_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = hb_jit_gate_flag( HB_GATE_HB_NATIVE_SSE_FP, 1 ) ? 1 : 0;
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_NATIVE_SSE_FP=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+
+/* Листовые кодировщики (сверены ассемблером хозяина 26.09). Регистры V не переназначаются,
+ * X — через hb_rm. */
+static void emit_fp_ldst(hb_codegen_buffer_t* buf, bool load, bool dbl, int vt, int rn, uint32_t off) {
+    uint32_t base = dbl ? (load ? 0xfd400000u : 0xfd000000u) : (load ? 0xbd400000u : 0xbd000000u);
+    rn = hb_rm(buf, rn);
+    emit_u32(buf, base | (((off / (dbl ? 8u : 4u)) & 0xfffu) << 10) | ((uint32_t)rn << 5) | (uint32_t)vt);
+}
+static void emit_fp_arith(hb_codegen_buffer_t* buf, int op, bool dbl, bool vec, int vd, int vn, int vm) {
+    static const uint32_t sc[4] = { 0x1e202800u, 0x1e203800u, 0x1e200800u, 0x1e201800u };
+    static const uint32_t ve[4] = { 0x4e20d400u, 0x4ea0d400u, 0x6e20dc00u, 0x6e20fc00u };
+    uint32_t w = (vec ? ve[op] : sc[op]) | (dbl ? 0x00400000u : 0u);
+    emit_u32(buf, w | ((uint32_t)vm << 16) | ((uint32_t)vn << 5) | (uint32_t)vd);
+}
+static void emit_fcmp_rr(hb_codegen_buffer_t* buf, bool dbl, int vn, int vm) {
+    emit_u32(buf, (dbl ? 0x1e602000u : 0x1e202000u) | ((uint32_t)vm << 16) | ((uint32_t)vn << 5));
+}
+static void emit_fcsel(hb_codegen_buffer_t* buf, bool dbl, int vd, int vn, int vm, int cond) {
+    emit_u32(buf, (dbl ? 0x1e600c00u : 0x1e200c00u) | ((uint32_t)vm << 16) | ((uint32_t)cond << 12) |
+                  ((uint32_t)vn << 5) | (uint32_t)vd);
+}
+static void emit_fmov_gpr_to_fp(hb_codegen_buffer_t* buf, bool dbl, int vd, int rn) {
+    rn = hb_rm(buf, rn);
+    emit_u32(buf, (dbl ? 0x9e670000u : 0x1e270000u) | ((uint32_t)rn << 5) | (uint32_t)vd);
+}
+static void emit_fmov_s_to_w(hb_codegen_buffer_t* buf, int rd, int vn) {
+    rd = hb_rm(buf, rd);
+    emit_u32(buf, 0x1e260000u | ((uint32_t)vn << 5) | (uint32_t)rd);
+}
+static void emit_vec_rrr(hb_codegen_buffer_t* buf, uint32_t base, int vd, int vn, int vm) {
+    emit_u32(buf, base | ((uint32_t)vm << 16) | ((uint32_t)vn << 5) | (uint32_t)vd);
+}
+static void emit_gpr_word(hb_codegen_buffer_t* buf, uint32_t base, int rd, int rn, int rm) {
+    rd = hb_rm(buf, rd); rn = hb_rm(buf, rn); rm = hb_rm(buf, rm);
+    emit_u32(buf, base | ((uint32_t)rm << 16) | ((uint32_t)rn << 5) | (uint32_t)rd);
+}
+/* INS Vd.T[di], Vn.T[si]; esz: 1 — H, 2 — S, 3 — D (сверено ассемблером). */
+static void emit_ins_elem(hb_codegen_buffer_t* buf, unsigned esz, int vd, unsigned di, int vn, unsigned si) {
+    uint32_t imm5 = (di << (esz + 1)) | (1u << esz), imm4 = si << esz;
+    emit_u32(buf, 0x6e000400u | (imm5 << 16) | (imm4 << 11) | ((uint32_t)vn << 5) | (uint32_t)vd);
+}
+
+/* Вид источника: 0 — не наш, 1 — XMM, 2 — память прямым путём. Ничего не выпускает. */
+static int sse_fp_src_kind(hb_codegen_buffer_t* buf, const hb_ir_operand_t* op, unsigned bytes) {
+    if (is_xmm_reg_operand(op)) return 1;
+    if (op->type != HB_OP_MEM || !jit_direct_mem_codegen_enabled(buf)) return 0;
+    if (bytes == 16)
+        return (!diag_no_xmm_dload() && op->size == HB_SIZE_128 && direct_user_xmm_mem_allowed(buf, op)) ? 2 : 0;
+    if (op->size != (bytes == 8 ? HB_SIZE_64 : HB_SIZE_32)) return 0;
+    return (!diag_no_scalar_dload() && direct_user_mem_load_allowed(buf, op)) ? 2 : 0;
+}
+
+/* Загрузить источник в V<vt>: скаляр — S|D, вектор — Q. */
+static void emit_sse_fp_src(hb_codegen_buffer_t* buf, const hb_ir_operand_t* op, int kind,
+                            unsigned bytes, int vt) {
+    if (kind == 1) {
+        if (bytes == 16) emit_ldr_q(buf, vt, 19, xmm_reg_off(buf, op->reg));
+        else emit_fp_ldst(buf, true, bytes == 8, vt, 19, xmm_reg_off(buf, op->reg));
+        return;
+    }
+    {
+        unsigned char prev_stack = hb_emit_mark_stack_access(op);
+        emit_direct_mem_addr(buf, op);
+        if (bytes == 16) {
+            ea_materialize(buf);                 /* сырое LDR Q по X21 — адрес обязан быть хозяйским */
+            emit_ldr_q(buf, vt, 21, 0);
+            emit_dmb_ishld(buf);
+        } else {
+            emit_direct_mem_load_to_x20(buf, bytes == 8 ? HB_SIZE_64 : HB_SIZE_32);
+            emit_fmov_gpr_to_fp(buf, bytes == 8, vt, 20);
+        }
+        hb_emit_restore_stack_access(prev_stack);
+        jit_native_mem_count(0);
+    }
+}
+
+static uint64_t g_native_sse_fp_emitted;
+
+static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    enum { K_ARITH, K_MINMAX, K_COMI, K_CVTT, K_CVT, K_SHUF } kind;
+    int fop = HB_FPA_ADD, k2;
+    bool dbl = false, scalar = true, is_max = false;
+    unsigned bytes;
+    if (!instr || instr->zero_ymm_upper || !native_sse_fp_enabled()) return false;
+    switch (instr->op) {
+        case HB_IR_MULSS: kind = K_ARITH; fop = HB_FPA_MUL; break;
+        case HB_IR_DIVSS: kind = K_ARITH; fop = HB_FPA_DIV; break;
+        case HB_IR_ADDSD: kind = K_ARITH; fop = HB_FPA_ADD; dbl = true; break;
+        case HB_IR_SUBSD: kind = K_ARITH; fop = HB_FPA_SUB; dbl = true; break;
+        case HB_IR_MULSD: kind = K_ARITH; fop = HB_FPA_MUL; dbl = true; break;
+        case HB_IR_DIVSD: kind = K_ARITH; fop = HB_FPA_DIV; dbl = true; break;
+        case HB_IR_FADD: case HB_IR_FSUB: case HB_IR_FMUL: case HB_IR_FDIV:
+        case HB_IR_FMIN: case HB_IR_FMAX: {
+            unsigned lane = (unsigned)(instr->target & 0xffu);
+            if ((instr->target & ~0x1ffull) != 0 || (lane != 4 && lane != 8)) return false;
+            dbl = lane == 8;
+            scalar = (instr->target & 0x100u) != 0;
+            if (instr->op == HB_IR_FMIN || instr->op == HB_IR_FMAX) {
+                kind = K_MINMAX; is_max = instr->op == HB_IR_FMAX;
+            } else {
+                kind = K_ARITH;
+                fop = instr->op == HB_IR_FADD ? HB_FPA_ADD : instr->op == HB_IR_FSUB ? HB_FPA_SUB :
+                      instr->op == HB_IR_FMUL ? HB_FPA_MUL : HB_FPA_DIV;
+            }
+            break;
+        }
+        case HB_IR_COMISS: kind = K_COMI; break;
+        case HB_IR_COMISD: kind = K_COMI; dbl = true; break;
+        case HB_IR_CVTTSS2SI: kind = K_CVTT; break;
+        case HB_IR_CVTTSD2SI: kind = K_CVTT; dbl = true; break;
+        case HB_IR_CVTSS2SD: case HB_IR_CVTSD2SS: case HB_IR_CVTSI2SS: case HB_IR_CVTSI2SD:
+        case HB_IR_CVTDQ2PD: case HB_IR_CVTPS2PD: case HB_IR_CVTPD2PS: case HB_IR_CVTDQ2PS:
+            kind = K_CVT; break;
+        case HB_IR_PSHUF: case HB_IR_FSHUF: kind = K_SHUF; break;
+        default: return false;
+    }
+    bytes = scalar ? (dbl ? 8u : 4u) : 16u;
+
+    if (kind == K_ARITH || kind == K_MINMAX) {
+        uint32_t od;
+        size_t slow = 0, done = 0;
+        if (!is_xmm_reg_operand(&instr->dst) || !is_xmm_reg_operand(&instr->src1) ||
+            instr->src1.reg != instr->dst.reg)
+            return false;                                   /* только двухоперандная форма SSE */
+        k2 = sse_fp_src_kind(buf, &instr->src2, bytes);
+        if (!k2) return false;
+        od = xmm_reg_off(buf, instr->dst.reg);
+        emit_sse_fp_src(buf, &instr->src2, k2, bytes, 1);   /* память первой: её адрес портит x20..x22 */
+        if (scalar) emit_fp_ldst(buf, true, dbl, 0, 19, od);
+        else emit_ldr_q(buf, 0, 19, od);
+        if (kind == K_MINMAX) {
+            if (scalar) {
+                emit_fcmp_rr(buf, dbl, 0, 1);
+                emit_fcsel(buf, dbl, 2, 0, 1, is_max ? HB_AC_GT : HB_AC_MI);
+                emit_fp_ldst(buf, false, dbl, 2, 19, od);
+            } else {
+                uint32_t gt = dbl ? 0x6ee0e400u : 0x6ea0e400u;      /* FCMGT .2D|.4S */
+                if (is_max) emit_vec_rrr(buf, gt, 3, 0, 1);         /* маска a > b */
+                else        emit_vec_rrr(buf, gt, 3, 1, 0);         /* маска b > a, то есть a < b */
+                emit_vec_rrr(buf, 0x6e601c00u, 3, 0, 1);            /* BSL: маска ? a : b */
+                emit_str_q(buf, 3, 19, od);
+            }
+        } else {
+            emit_fp_arith(buf, fop, dbl, !scalar, 2, 0, 1);
+            if (hb_jit_gate_flag( HB_GATE_HB_TEST_SSE_FP_NO_SLOW, 0 )) {
+                /* ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ тестов: без медленного пути NaN-исходы берутся от ARM
+                 * (другой выбор полезной нагрузки и знак «неопределённого») — тест обязан это видеть. */
+                if (scalar) emit_fp_ldst(buf, false, dbl, 2, 19, od);
+                else emit_str_q(buf, 2, 19, od);
+                __atomic_add_fetch(&g_native_sse_fp_emitted, 1, __ATOMIC_RELAXED);
+                return true;
+            }
+            if (scalar) {
+                emit_fcmp_rr(buf, dbl, 2, 2);
+                slow = emit_bcond_deferred(buf, HB_AC_VS);         /* NaN-результат -> помощник */
+                emit_fp_ldst(buf, false, dbl, 2, 19, od);
+            } else {
+                emit_vec_rrr(buf, dbl ? 0x4e60e400u : 0x4e20e400u, 3, 2, 2);   /* FCMEQ: 1 где не NaN */
+                emit_u32(buf, 0x6eb1a800u | (3u << 5) | 3u);                  /* UMINV S3, V3.4S */
+                emit_fmov_s_to_w(buf, 20, 3);
+                slow = emit_cbz_x_deferred(buf, 20);
+                emit_str_q(buf, 2, 19, od);
+            }
+            done = emit_b_deferred(buf);
+            if (scalar) patch_bcond(buf, slow, HB_AC_VS, buf->size);
+            else patch_cbz_x(buf, slow, 20, buf->size);
+            emit_interp_ir_helper(buf, instr);
+            patch_b(buf, done, buf->size);
+        }
+        __atomic_add_fetch(&g_native_sse_fp_emitted, 1, __ATOMIC_RELAXED);
+        return true;
+    }
+
+    /* Преобразования: интерпретатор делает их приведениями C при FPCR хозяина — это ровно
+     * FCVT/SCVTF/FCVTL/FCVTN, поэтому совпадение побитное и для NaN, медленный путь не нужен.
+     * Скалярные формы — только устаревшие: второй источник пуст (у VEX он есть). У упакованных
+     * лифтер второй источник НЕ заполняет (нулевой = «регистр 0»), и интерпретатор его не читает. */
+    if (kind == K_CVT) {
+        uint32_t od;
+        int k1;
+        if (!is_xmm_reg_operand(&instr->dst)) return false;
+        if ((instr->op == HB_IR_CVTSS2SD || instr->op == HB_IR_CVTSD2SS || instr->op == HB_IR_CVTSI2SS ||
+             instr->op == HB_IR_CVTSI2SD) && instr->src2.type != HB_OP_NONE)
+            return false;
+        od = xmm_reg_off(buf, instr->dst.reg);
+        switch (instr->op) {
+            case HB_IR_CVTSS2SD: case HB_IR_CVTSD2SS: {
+                const bool from_d = instr->op == HB_IR_CVTSD2SS;
+                k1 = sse_fp_src_kind(buf, &instr->src1, from_d ? 8u : 4u);
+                if (!k1) return false;
+                emit_sse_fp_src(buf, &instr->src1, k1, from_d ? 8u : 4u, 0);
+                emit_u32(buf, (from_d ? 0x1e624000u : 0x1e22c000u) | 2u);      /* FCVT S2,D0 | D2,S0 */
+                emit_fp_ldst(buf, false, !from_d, 2, 19, od);                   /* младшая дорожка    */
+                break;
+            }
+            case HB_IR_CVTSI2SS: case HB_IR_CVTSI2SD: {
+                const bool to_d = instr->op == HB_IR_CVTSI2SD;
+                const bool src64 = instr->src1.size == HB_SIZE_64;
+                if (instr->src1.size != HB_SIZE_32 && !src64) return false;
+                if (is_gpr_reg_operand(&instr->src1)) {
+                    if (!emit_load_gpr_sized_to_x20(buf, &instr->src1)) return false;
+                } else if (instr->src1.type == HB_OP_MEM && jit_direct_mem_codegen_enabled(buf) &&
+                           !diag_no_scalar_dload() && direct_user_mem_load_allowed(buf, &instr->src1)) {
+                    unsigned char prev_stack = hb_emit_mark_stack_access(&instr->src1);
+                    emit_direct_mem_addr(buf, &instr->src1);
+                    emit_direct_mem_load_to_x20(buf, src64 ? HB_SIZE_64 : HB_SIZE_32);
+                    hb_emit_restore_stack_access(prev_stack);
+                    jit_native_mem_count(0);
+                } else {
+                    return false;
+                }
+                emit_u32(buf, (src64 ? 0x9e220000u : 0x1e220000u) | (to_d ? 0x00400000u : 0u) |
+                              ((uint32_t)hb_rm(buf, 20) << 5) | 2u);            /* SCVTF S|D2, W|X20  */
+                emit_fp_ldst(buf, false, to_d, 2, 19, od);
+                break;
+            }
+            case HB_IR_CVTDQ2PD: case HB_IR_CVTPS2PD: {
+                if (instr->dst.size != HB_SIZE_128) return false;
+                k1 = sse_fp_src_kind(buf, &instr->src1, 8u);                    /* младшие 64 бита    */
+                if (!k1) return false;
+                emit_sse_fp_src(buf, &instr->src1, k1, 8u, 1);
+                if (instr->op == HB_IR_CVTDQ2PD) {
+                    emit_u32(buf, 0x0f20a400u | (1u << 5) | 1u);                /* SXTL V1.2D, V1.2S  */
+                    emit_u32(buf, 0x4e61d800u | (1u << 5) | 2u);                /* SCVTF V2.2D, V1.2D */
+                } else {
+                    emit_u32(buf, 0x0e617800u | (1u << 5) | 2u);                /* FCVTL V2.2D, V1.2S */
+                }
+                emit_str_q(buf, 2, 19, od);
+                break;
+            }
+            case HB_IR_CVTPD2PS: case HB_IR_CVTDQ2PS: {
+                if (instr->dst.size != HB_SIZE_128) return false;
+                k1 = sse_fp_src_kind(buf, &instr->src1, 16u);
+                if (!k1) return false;
+                emit_sse_fp_src(buf, &instr->src1, k1, 16u, 1);
+                if (instr->op == HB_IR_CVTPD2PS)
+                    emit_u32(buf, 0x0e616800u | (1u << 5) | 2u);   /* FCVTN V2.2S, V1.2D; верх 64 = 0 */
+                else
+                    emit_u32(buf, 0x4e21d800u | (1u << 5) | 2u);   /* SCVTF V2.4S, V1.4S */
+                emit_str_q(buf, 2, 19, od);
+                break;
+            }
+            default:
+                return false;
+        }
+        __atomic_add_fetch(&g_native_sse_fp_emitted, 1, __ATOMIC_RELAXED);
+        return true;
+    }
+
+    /* Перестановки дорожек — чистое перемещение битов: INS по элементам, без арифметики.
+     * PSHUFD (target 4), PSHUFLW (2), PSHUFHW (0x102); SHUFPS/SHUFPD (target = дорожка | imm<<8). */
+    if (kind == K_SHUF) {
+        uint32_t od;
+        uint64_t t = instr->target;
+        unsigned i, imm;
+        int k1;
+        if (!is_xmm_reg_operand(&instr->dst)) return false;
+        od = xmm_reg_off(buf, instr->dst.reg);
+        if (instr->op == HB_IR_PSHUF) {
+            if ((t != 4 && t != 2 && t != 0x102) || instr->src2.type != HB_OP_IMM) return false;
+            k1 = sse_fp_src_kind(buf, &instr->src1, 16u);
+            if (!k1) return false;
+            imm = (unsigned)instr->src2.imm & 0xffu;
+            emit_sse_fp_src(buf, &instr->src1, k1, 16u, 1);
+            if (t == 4) {
+                for (i = 0; i < 4; i++) emit_ins_elem(buf, 2, 0, i, 1, (imm >> (i * 2)) & 3u);
+            } else {
+                const unsigned half = t == 0x102 ? 4u : 0u;
+                emit_vec_rrr(buf, 0x4ea01c00u, 0, 1, 1);                         /* MOV V0.16B, V1.16B */
+                for (i = 0; i < 4; i++) emit_ins_elem(buf, 1, 0, half + i, 1, half + ((imm >> (i * 2)) & 3u));
+            }
+            emit_str_q(buf, 0, 19, od);
+        } else {
+            const unsigned lane = (unsigned)(t & 0xffu);
+            imm = (unsigned)((t >> 8) & 0xffu);
+            if ((t >> 16) != 0 || (lane != 4 && lane != 8) || !is_xmm_reg_operand(&instr->src1)) return false;
+            k1 = sse_fp_src_kind(buf, &instr->src2, 16u);
+            if (!k1) return false;
+            emit_sse_fp_src(buf, &instr->src2, k1, 16u, 1);                     /* правый -> V1 */
+            emit_ldr_q(buf, 0, 19, xmm_reg_off(buf, instr->src1.reg));          /* левый  -> V0 */
+            if (lane == 4) {
+                emit_ins_elem(buf, 2, 2, 0, 0, imm & 3u);
+                emit_ins_elem(buf, 2, 2, 1, 0, (imm >> 2) & 3u);
+                emit_ins_elem(buf, 2, 2, 2, 1, (imm >> 4) & 3u);
+                emit_ins_elem(buf, 2, 2, 3, 1, (imm >> 6) & 3u);
+            } else {
+                emit_ins_elem(buf, 3, 2, 0, 0, imm & 1u);
+                emit_ins_elem(buf, 3, 2, 1, 1, (imm >> 1) & 1u);
+            }
+            emit_str_q(buf, 2, 19, od);
+        }
+        __atomic_add_fetch(&g_native_sse_fp_emitted, 1, __ATOMIC_RELAXED);
+        return true;
+    }
+
+    if (kind == K_COMI) {
+        uint32_t fl = (uint32_t)offsetof(hb_context_t, flags);
+        uint32_t lz = (uint32_t)offsetof(hb_context_t, lazy_flags);
+        if (!is_xmm_reg_operand(&instr->src1)) return false;
+        k2 = sse_fp_src_kind(buf, &instr->src2, bytes);
+        if (!k2) return false;
+        emit_sse_fp_src(buf, &instr->src2, k2, bytes, 1);
+        emit_fp_ldst(buf, true, dbl, 0, 19, xmm_reg_off(buf, instr->src1.reg));
+        emit_fcmp_rr(buf, dbl, 0, 1);
+        emit_cset_w(buf, 20, HB_AC_EQ);                        /* Z                          */
+        emit_cset_w(buf, 21, HB_AC_VS);                        /* V = «не упорядочены» = PF  */
+        emit_orr_reg(buf, 20, 20, 21);                         /* ZF = Z | V                 */
+        emit_cset_w(buf, 22, HB_AC_LT);                        /* CF = N != V                */
+        emit_gpr_word(buf, 0x2a004000u, 20, 20, 22);           /* ORR W20, W20, W22, LSL #16 */
+        emit_str_w(buf, 20, 19, fl);                           /* zf, sf=0, cf, of=0         */
+        emit_strh_w(buf, 21, 19, fl + 4u);                     /* pf, af=0                   */
+        emit_add_imm(buf, 22, 19, lz);                         /* hb_lazy_flags_clear: 64 байта */
+        emit_stp_x(buf, 31, 31, 22, 0);
+        emit_stp_x(buf, 31, 31, 22, 16);
+        emit_stp_x(buf, 31, 31, 22, 32);
+        emit_stp_x(buf, 31, 31, 22, 48);
+        __atomic_add_fetch(&g_native_sse_fp_emitted, 1, __ATOMIC_RELAXED);
+        return true;
+    }
+
+    /* K_CVTT: GPR <- усечение S|D; вне диапазона и NaN — «целое неопределённое» 0x80…0.
+     *
+     * ★ ДОГОВОР ИЗОЛЯЦИИ FP-ОКРУЖЕНИЯ ХОЗЯИНА (tests/hb_sse_integer_rounding_test): исполнение
+     * гостя не должно взводить флаги исключений хозяина. Первая редакция (FCVTZS напрямую)
+     * нарушала его: на дробном входе FCVTZS даёт Inexact, на NaN и вне диапазона — Invalid.
+     * Интерпретатор этот договор держит целочисленным путём. Здесь так же: диапазон и NaN —
+     * ЦЕЛЫМИ операциями над битами; в FCVTZS идёт только безопасное значение (иначе FCSEL
+     * подставляет 0), и FRINTZ сперва делает его целым — FRINTZ Inexact не взводит, а FCVTZS
+     * от целого значения точен. Ветвлений нет.
+     * Порог |x| < 2^31 (int32) или 2^63 (int64): всё прочее либо вне диапазона, либо ровно
+     * -2^31/-2^63 после усечения — а у тех ответ побитно совпадает с «неопределённым». */
+    {
+        const bool w64 = instr->dst.size == HB_SIZE_64;
+        int k1;
+        if (!is_gpr_reg_operand(&instr->dst) || (instr->dst.size != HB_SIZE_32 && !w64))
+            return false;
+        k1 = sse_fp_src_kind(buf, &instr->src1, bytes);
+        if (!k1) return false;
+        emit_sse_fp_src(buf, &instr->src1, k1, bytes, 0);
+        if (dbl) {
+            emit_gpr_word(buf, 0x9e660000u, 21, 0, 0);          /* FMOV X21, D0                */
+            emit_gpr_word(buf, 0x9240fa00u, 22, 21, 0);         /* AND X22, X21, #0x7fff…ffff  */
+            emit_mov_imm64(buf, 23, w64 ? 0x43e0000000000000ull : 0x41e0000000000000ull);
+            emit_gpr_word(buf, 0xeb00001fu, 31, 22, 23);        /* CMP X22, X23 -> LO = безопасно */
+            emit_u32(buf, 0x9e6703e0u | 3u);                    /* FMOV D3, XZR                */
+        } else {
+            emit_gpr_word(buf, 0x1e260000u, 21, 0, 0);          /* FMOV W21, S0                */
+            emit_gpr_word(buf, 0x12007a00u, 22, 21, 0);         /* AND W22, W21, #0x7fffffff   */
+            emit_mov_imm64(buf, 23, w64 ? 0x5f000000ull : 0x4f000000ull);
+            emit_gpr_word(buf, 0x6b00001fu, 31, 22, 23);        /* CMP W22, W23                */
+            emit_u32(buf, 0x1e2703e0u | 3u);                    /* FMOV S3, WZR                */
+        }
+        emit_fcsel(buf, dbl, 1, 0, 3, 3 /* LO */);              /* S1 = безопасно ? S0 : 0     */
+        emit_u32(buf, (dbl ? 0x1e65c000u : 0x1e25c000u) | (1u << 5) | 1u);   /* FRINTZ S1, S1  */
+        emit_u32(buf, (w64 ? (dbl ? 0x9e780000u : 0x9e380000u) : (dbl ? 0x1e780000u : 0x1e380000u)) |
+                      (1u << 5) | (uint32_t)hb_rm(buf, 20));    /* FCVTZS W|X20, S1|D1         */
+        emit_mov_imm64(buf, 23, w64 ? 0x8000000000000000ull : 0x80000000ull);
+        emit_gpr_word(buf, (w64 ? 0x9a800000u : 0x1a800000u) | (3u << 12), 20, 20, 23);  /* CSEL …, LO */
+        emit_store_x20_to_gpr_sized(buf, &instr->dst);
+        __atomic_add_fetch(&g_native_sse_fp_emitted, 1, __ATOMIC_RELAXED);
+        return true;
+    }
+}
+
+uint64_t hb_codegen_native_sse_fp_emitted(void) {
+    return __atomic_load_n(&g_native_sse_fp_emitted, __ATOMIC_RELAXED);
+}
+
 /* Claude 26.09.2026 — VEX.128 MOVD/MOVQ ОБЯЗАНЫ ОБНУЛИТЬ ВСЁ ВЫШЕ БИТА 127 ПРИЁМНИКА.
  * Разностный стенд на железе ARM64 (JIT против интерпретатора, 4000 случаев x64, 26.09): у
  * vmovd xmm0,ecx / vmovq xmm0,rcx / vmovq xmm0,xmm1 (F3 0F 7E) / vmovq xmm1,xmm0 (66 0F D6)
@@ -15123,6 +15531,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         case HB_IR_LGS:
             /* Учёт стоит перед общим уходом в интерпретатор: у этой ветки НЕТ условия,
              * поэтому причина одна и слиться ей не с чем — вся семья идёт сюда всегда. */
+            if (emit_native_sse_fp(buf, instr)) {   /* Claude 26.09: SSE FP без помощника */
+                hb_emit_note_native_exit();
+                return HB_OK;
+            }
             perepis_shirin_vzvesti();
             perepis_interp_uchest(buf, instr);
             return emit_interp_ir_helper(buf, instr);
@@ -18157,6 +18569,89 @@ void hb_jit_helper_exec_loop_branch(hb_context_t* ctx, const hb_ir_instr_t* inst
     ctx->last_result = HB_OK;
 }
 
+/* Claude 26.09.2026 — СОСТАВ ОТКАТА ВЫПУЩЕННОГО КОДА В ИНТЕРПРЕТАТОР, ПО ФОРМАМ.
+ * Профиль Hollow Knight: собственные отсчёты `_tlv_get_addr` и `memmove` почти целиком
+ * приходят из `exec_instr_unlocked` / `read_vec_reg_bytes` / `hb_memory_read_inner`, то есть
+ * из этого помощника. Номер операции не называет работу: ADDSS с регистром и с памятью —
+ * разные выпуски. Ключ = операция + (тип, размер, класс регистра) у dst/src1/src2.
+ * Гейт MACRUNNER_HB_INTERP_SHAPES, умолчание 0; при выключенном — одна проверка статической. */
+#define HB_ISHAPE_SLOTS 4096u
+static uint64_t g_ishape_key[HB_ISHAPE_SLOTS];
+static uint64_t g_ishape_cnt[HB_ISHAPE_SLOTS];
+static uint64_t g_ishape_total, g_ishape_lost;
+static int g_ishape_on = -1;
+
+static unsigned ishape_size_code(unsigned sz) {
+    switch (sz) { case 1: return 1; case 2: return 2; case 4: return 3; case 8: return 4;
+                  case 10: return 5; case 16: return 6; case 32: return 7; default: return 0; }
+}
+
+static uint64_t ishape_opnd(const hb_ir_operand_t* o) {
+    unsigned t = (unsigned)o->type & 3u, cls = 0;
+    if (o->type == HB_OP_REG) {
+        if (o->reg >= HB_REG_XMM0 && o->reg <= HB_REG_XMM31) cls = 1;
+        else if (o->reg > HB_REG_R15) cls = 2;
+    }
+    return (uint64_t)(t | (ishape_size_code((unsigned)o->size) << 2) | (cls << 5));
+}
+
+static void ishape_print(void) {
+    static const char* tn[4] = { "R", "I", "M", "L" };
+    static const char* sn[8] = { "?", "8", "16", "32", "64", "80", "128", "256" };
+    extern const char* hb_ir_op_name_public(int op);
+    uint64_t used[HB_ISHAPE_SLOTS];
+    unsigned i, k;
+    for (i = 0; i < HB_ISHAPE_SLOTS; i++) used[i] = __atomic_load_n(&g_ishape_cnt[i], __ATOMIC_RELAXED);
+    fprintf(stderr, "macrunner-hb-interp-shapes: total=%llu lost=%llu top=",
+            (unsigned long long)g_ishape_total, (unsigned long long)g_ishape_lost);
+    for (k = 0; k < 32; k++) {
+        unsigned best = HB_ISHAPE_SLOTS, j;
+        for (i = 0; i < HB_ISHAPE_SLOTS; i++)
+            if (used[i] && (best == HB_ISHAPE_SLOTS || used[i] > used[best])) best = i;
+        if (best == HB_ISHAPE_SLOTS) break;
+        {
+            uint64_t key = __atomic_load_n(&g_ishape_key[best], __ATOMIC_RELAXED) - 1u;
+            fprintf(stderr, "%s%s(", k ? " " : "", hb_ir_op_name_public((int)(key & 0x1ffu)));
+            for (j = 0; j < 3; j++) {
+                unsigned o = (unsigned)((key >> (9 + 7 * j)) & 0x7fu);
+                fprintf(stderr, "%s%s%s%s", j ? "," : "", tn[o & 3u], sn[(o >> 2) & 7u],
+                        ((o >> 5) & 3u) == 1 ? "x" : ((o >> 5) & 3u) == 2 ? "o" : "");
+            }
+            if (key >> 30) fprintf(stderr, ")#%llu=%llu", (unsigned long long)(key >> 30),
+                                   (unsigned long long)used[best]);
+            else fprintf(stderr, ")=%llu", (unsigned long long)used[best]);
+        }
+        used[best] = 0;
+    }
+    fprintf(stderr, "\n");
+    fflush(stderr);
+}
+
+static void ishape_note(const hb_ir_instr_t* instr) {
+    uint64_t key = ((uint64_t)instr->op & 0x1ffu) | (ishape_opnd(&instr->dst) << 9) |
+                   (ishape_opnd(&instr->src1) << 16) | (ishape_opnd(&instr->src2) << 23);
+    if (instr->op == HB_IR_VEC_PACKED)   /* подвид векторной операции едет в target >> 32 */
+        key |= ((instr->target >> 32) & 0x3ffull) << 30;
+    uint64_t want = key + 1u, h = (key * 0x9e3779b97f4a7c15ull) >> 52;
+    unsigned probe;
+    for (probe = 0; probe < 64; probe++) {
+        unsigned slot = (unsigned)((h + probe) & (HB_ISHAPE_SLOTS - 1u));
+        uint64_t cur = __atomic_load_n(&g_ishape_key[slot], __ATOMIC_RELAXED);
+        if (cur == 0) {
+            uint64_t zero = 0;
+            if (__atomic_compare_exchange_n(&g_ishape_key[slot], &zero, want, false,
+                                            __ATOMIC_RELAXED, __ATOMIC_RELAXED)) cur = want;
+            else cur = zero;
+        }
+        if (cur == want) {
+            __atomic_fetch_add(&g_ishape_cnt[slot], 1u, __ATOMIC_RELAXED);
+            if ((__atomic_add_fetch(&g_ishape_total, 1u, __ATOMIC_RELAXED) & 0x3fffffu) == 0) ishape_print();
+            return;
+        }
+    }
+    __atomic_fetch_add(&g_ishape_lost, 1u, __ATOMIC_RELAXED);
+}
+
 void hb_jit_helper_exec_interp_ir(hb_context_t* ctx, const hb_ir_instr_t* instr) {
     /* ★ 26.08.2026 — СЧИТАТЬ НАДО ПРИ ИСПОЛНЕНИИ, А НЕ ПРИ ТРАНСЛЯЦИИ.
      * Первая попытка разметила 22 места вызова `emit_interp_ir_helper` в кодогенераторе и
@@ -18203,6 +18698,13 @@ void hb_jit_helper_exec_interp_ir(hb_context_t* ctx, const hb_ir_instr_t* instr)
     if (!ctx || !instr) {
         if (ctx) ctx->last_result = HB_ERR_INVALID_ARG;
         return;
+    }
+    if (__builtin_expect(g_ishape_on != 0, 0)) {
+        if (g_ishape_on < 0) {
+            g_ishape_on = hb_gate_flag( HB_GATE_HB_INTERP_SHAPES, 0 ) ? 1 : 0;
+            fprintf(stderr, "macrunner-gate: MACRUNNER_HB_INTERP_SHAPES=%d\n", g_ishape_on);
+        }
+        if (g_ishape_on) ishape_note(instr);
     }
     ctx->last_result = hb_interpreter_exec_one_for_jit(ctx, instr);
     if (ctx->last_result != HB_OK && instr->guest_len &&
