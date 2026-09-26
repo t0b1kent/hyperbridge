@@ -357,6 +357,8 @@ typedef struct {
     uint8_t ymm_hi_ext[16][16];
     uint8_t zmm_hi_ext[16][32];
     uint64_t k[8];
+    uint32_t sse_mxcsr;
+    uint64_t sse_host_control, sse_host_status;
     uint16_t x87_cw;
     uint16_t x87_sw;
     uint16_t x87_tag;
@@ -514,6 +516,7 @@ typedef struct {
 } hb_diff_nachalo_t;
 
 static const hb_diff_nachalo_t* g_diff_nachalo;
+#include "hb_sse_oracle/runner_extension.h"
 
 /* Имена в том же порядке, что `reg_name`/индексы снимка: rax rbx rcx rdx rsi rdi rsp rbp
  * r8..r15. Порядок НЕ архитектурный (в x86 он rax rcx rdx rbx), он наш, снимочный, и
@@ -717,7 +720,7 @@ static hb_result_t init_context(hb_context_t* ctx, uint64_t seed, const uint8_t*
     /* ★ НАЧАЛЬНЫЕ ЗНАЧЕНИЯ ИЗ СТРОКИ КОРПУСА — ПОСЛЕДНИМ ДЕЙСТВИЕМ.
      * Выше по функции их затёрло бы засевкой регистров и флагов; ниже нет ничего. */
     hb_diff_nalozhit_nachalo(ctx, g_diff_nachalo);
-    return HB_OK;
+    return hb_sse_apply(ctx);
 }
 
 static hb_result_t lift_code(hb_arch_t arch, const uint8_t* code, size_t code_len, hb_ir_func_t** out_func) {
@@ -732,6 +735,9 @@ static void capture_snapshot(hb_context_t* ctx, hb_diff_snapshot_t* s,
                               hb_result_t api_result, hb_exec_result_t* exec) {
     memset(s, 0, sizeof(*s));
     s->arch = ctx->arch;
+    s->sse_mxcsr = ctx->mxcsr;
+    { hb_sse_host_state_t h = hb_sse_host_save();
+      s->sse_host_control = h.control; s->sse_host_status = h.status; }
     s->lazy_pending = ctx->lazy_flags.pending;
     s->lazy_kind = (uint8_t)ctx->lazy_flags.kind;
     s->lazy_width = ctx->lazy_flags.width;
@@ -890,7 +896,7 @@ static void hb_diff_install_fault_guard(void) {
     sigaction(SIGBUS, &sa, NULL);
 }
 
-static hb_result_t run_backend(hb_arch_t arch, const uint8_t* code, size_t code_len, uint64_t seed,
+static hb_result_t run_backend_sse_inner(hb_arch_t arch, const uint8_t* code, size_t code_len, uint64_t seed,
                                hb_backend_t backend, hb_diff_snapshot_t* initial,
                                hb_diff_snapshot_t* final) {
     hb_ir_func_t* func = NULL;
@@ -994,6 +1000,14 @@ static hb_result_t run_backend(hb_arch_t arch, const uint8_t* code, size_t code_
     return api;
 }
 
+static hb_result_t run_backend(hb_arch_t arch, const uint8_t* code, size_t code_len, uint64_t seed,
+                               hb_backend_t backend, hb_diff_snapshot_t* initial,
+                               hb_diff_snapshot_t* final) {
+    hb_sse_host_state_t old = hb_sse_host_save();
+    hb_result_t r = run_backend_sse_inner(arch, code, code_len, seed, backend, initial, final);
+    hb_sse_host_restore(old);
+    return r;
+}
 static const char* reg_name(hb_arch_t arch, unsigned i) {
     static const char* names64[16] = {
         "rax","rbx","rcx","rdx","rsi","rdi","rsp","rbp",
@@ -1268,6 +1282,8 @@ static void print_snapshot_json(const char* name, const hb_diff_snapshot_t* s) {
            s->x87_cw, s->x87_sw, s->x87_tag);
     printf(",\"seg\":{\"es\":%u,\"cs\":%u,\"ss\":%u,\"ds\":%u,\"fs\":%u,\"gs\":%u}",
            s->seg[0], s->seg[1], s->seg[2], s->seg[3], s->seg[4], s->seg[5]);
+    printf(",\"mxcsr\":\"0x%04x\",\"host_fp_control\":\"0x%llx\",\"host_fp_status\":\"0x%llx\"",
+           s->sse_mxcsr, (unsigned long long)s->sse_host_control, (unsigned long long)s->sse_host_status);
     printf(",\"data_at_1000\":\"");
     print_hex_bytes(s->data + 0x1000, 32);
     printf("\"");
@@ -1443,6 +1459,14 @@ static void run_case_line(hb_arch_t arch, uint64_t seed, const char* code_hex,
             }
         }
     }
+    char sse_seed_diff[64] = {0}, sse_i_diff[64] = {0}, sse_j_diff[64] = {0};
+    int sse_seed_ok = hb_sse_check_seed(&initial, sse_seed_diff, sizeof(sse_seed_diff));
+    int sse_i_ok = hb_sse_check_value(&interp, sse_i_diff, sizeof(sse_i_diff));
+    int sse_j_ok = interp_only ? 1 : hb_sse_check_value(&jit, sse_j_diff, sizeof(sse_j_diff));
+    if (g_hb_sse.touched && (!sse_seed_ok || !sse_i_ok || !sse_j_ok)) {
+        if (ok) snprintf(diff, sizeof(diff), "%s", !sse_seed_ok ? sse_seed_diff : !sse_i_ok ? sse_i_diff : sse_j_diff);
+        ok = false;
+    }
     bool ispolnen = (ri == HB_OK) && (interp_only || rj == HB_OK);
     bool otkaz = ispolnen && (interp.exec_result != HB_OK || jit.exec_result != HB_OK);
     printf("{\"ok\":%s,\"исполнен\":%s,\"отказ\":%s,"
@@ -1451,6 +1475,7 @@ static void run_case_line(hb_arch_t arch, uint64_t seed, const char* code_hex,
            arch == HB_ARCH_X86 ? "x86" : "x64", seed);
     print_hex_bytes(code, code_len);
     printf("\",\"diff\":\"%s\",", diff);
+    hb_sse_json(&interp, &jit, sse_seed_ok, sse_i_ok, sse_j_ok, interp_only);
     print_snapshot_json("initial", &initial);
     putchar(',');
     print_snapshot_json("interp", &interp);
@@ -1490,8 +1515,13 @@ int main(void) {
      * `hb_memory_create`, поэтому движковый обработчик (когда он ставится) окажется
      * СВЕРХУ и в конце цепочки найдёт наше. */
     hb_diff_install_fault_guard();
-    char line[1024];   /* 128 байт гостя = 256 знаков + зерно и счёт */
+    char line[8192];   /* 128 байт гостя = 256 знаков + зерно и счёт */
     while (fgets(line, sizeof(line), stdin)) {
+        if (!strchr(line, '\n') && !feof(stdin)) {
+            int ch; while ((ch = getchar()) != '\n' && ch != EOF) {}
+            printf("{\"ok\":false,\"error\":\"line-too-long\"}\n");
+            continue;
+        }
         char* p = line;
         while (*p && isspace((unsigned char)*p)) p++;
         if (!*p || *p == '#') continue;
@@ -1523,10 +1553,12 @@ int main(void) {
          * а намерение — тот, кто подаёт случай. Расхождение = отказ, а не тихий результат. */
         long want_instrs = -1;
         hb_diff_ozhid_t ozh = { -1, -1, -1 };
+        hb_sse_reset();
         hb_diff_nachalo_t nachalo;
         memset(&nachalo, 0, sizeof(nachalo));
         while (*rest && isspace((unsigned char)*rest)) rest++;
-        if (*rest && *rest != '#' && !strchr(rest, '=')) {
+        if (*rest && *rest != '#' &&
+            strcspn(rest, "= \t\r\n") == strcspn(rest, " \t\r\n")) {
             char* want_s = rest;
             while (*rest && !isspace((unsigned char)*rest)) rest++;
             if (*rest) *rest++ = 0;
@@ -1553,7 +1585,14 @@ int main(void) {
 #define HB_DIFF_POLE(imya) (!strncmp(tok, imya, strlen(imya)) ? tok + strlen(imya) : NULL)
             {
                 const char* v;
-                if ((v = HB_DIFF_POLE("ожид-вид=")))        ozh.vid    = strtol(v, NULL, 0);
+                int sse_field = hb_sse_parse(tok);
+                if (sse_field) {
+                    if (sse_field < 0) {
+                        printf("{\"ok\":false,\"error\":\"sse-field\"}\n");
+                        pole_bad = 1;
+                    }
+                }
+                else if ((v = HB_DIFF_POLE("ожид-вид=")))        ozh.vid    = strtol(v, NULL, 0);
                 else if ((v = HB_DIFF_POLE("ожид-pc=")))    ozh.pc_off = strtoll(v, NULL, 0);
                 else if ((v = HB_DIFF_POLE("ожид-адрес="))) ozh.adres  = strtoll(v, NULL, 0);
                 else if ((v = HB_DIFF_POLE("флаги="))) {
@@ -1584,6 +1623,10 @@ int main(void) {
                 }
             }
 #undef HB_DIFF_POLE
+        }
+        if (!pole_bad && !hb_sse_validate()) {
+            printf("{\"ok\":false,\"error\":\"sse-version-or-input\"}\n");
+            pole_bad = 1;
         }
         if (pole_bad) continue;
         uint64_t seed = strtoull(seed_s, NULL, 0);
