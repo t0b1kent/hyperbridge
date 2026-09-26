@@ -511,6 +511,9 @@ typedef enum {
 /* Rs — операнд, Rt — куда лечь старому значению, Rn — адрес. Всегда Acquire+Release. */
 static void emit_lse_al(hb_codegen_buffer_t* buf, hb_lse_op_t op, bool is64,
                         int rs, int rn, int rt) {
+    rs = hb_rm(buf, rs);
+    rn = hb_rm(buf, rn);
+    rt = hb_rm(buf, rt);
     uint32_t v = (uint32_t)(is64 ? 0b11 : 0b10) << 30;
     v |= 0b111u << 27;
     v |= 1u << 23;              /* A — acquire */
@@ -877,6 +880,8 @@ static void emit_guest_fence(hb_codegen_buffer_t* buf, hb_fence_kind_t kind) {
 static void emit_mem_reg_uxtw(hb_codegen_buffer_t* buf, bool is_load, unsigned size,
                               int rt, int rn, int rm, unsigned scale_log2);
 static void ea_materialize(hb_codegen_buffer_t* buf);
+static void emit_ubfm(hb_codegen_buffer_t* buf, int rd, int rn, uint32_t imms);
+static bool kraya_test_no_wrap(void);
 
 static void emit_ldr_x(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) {
     /* ★ ПЕРЕХВАТ слитной адресации: пока база окна не прибавлена, X21 держит
@@ -884,7 +889,7 @@ static void emit_ldr_x(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) {
      * [X24, W21, UXTW]; в любом другом случае — сперва материализуем. */
     if (buf && buf->ea_guest32 && rn == 21) {
         if (off == 0 && buf->pinned_g32_base) {
-            emit_mem_reg_uxtw(buf, true, 3u, hb_rm(buf, rt), 24, 21, 0);
+            emit_mem_reg_uxtw(buf, true, 3u, hb_rm(buf, rt), hb_rm(buf, 24), hb_rm(buf, 21), 0);
             return;
         }
         ea_materialize(buf);
@@ -908,7 +913,7 @@ static void emit_ldr_w(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) {
      * [X24, W21, UXTW]; в любом другом случае — сперва материализуем. */
     if (buf && buf->ea_guest32 && rn == 21) {
         if (off == 0 && buf->pinned_g32_base) {
-            emit_mem_reg_uxtw(buf, true, 2u, hb_rm(buf, rt), 24, 21, 0);
+            emit_mem_reg_uxtw(buf, true, 2u, hb_rm(buf, rt), hb_rm(buf, 24), hb_rm(buf, 21), 0);
             return;
         }
         ea_materialize(buf);
@@ -984,7 +989,7 @@ static bool ea_fused_uxtw_enabled(void) {
 static void emit_mem_reg_uxtw(hb_codegen_buffer_t* buf, bool is_load, unsigned size,
                               int rt, int rn, int rm, unsigned scale_log2) {
     uint32_t opc = is_load ? 1u : 0u;
-    emit_u32(buf, ((uint32_t)size << 30) | (0x7u << 27) | (0x1u << 24) | (opc << 22) |
+    emit_u32(buf, ((uint32_t)size << 30) | (0x7u << 27) | (opc << 22) |
                   (1u << 21) | ((uint32_t)rm << 16) | (0x2u << 13) |
                   ((scale_log2 ? 1u : 0u) << 12) | (0x2u << 10) |
                   ((uint32_t)rn << 5) | (uint32_t)rt);
@@ -994,6 +999,8 @@ static void emit_mem_reg_uxtw(hb_codegen_buffer_t* buf, bool is_load, unsigned s
 static void ea_materialize(hb_codegen_buffer_t* buf) {
     if (!buf || !buf->ea_guest32) return;
     buf->ea_guest32 = 0;
+    /* Deferred EA is still a 32-bit guest sum, not a 64-bit host offset. */
+    if (!kraya_test_no_wrap()) emit_ubfm(buf, 21, 21, 31);
     if (buf->pinned_g32_base) { emit_add_reg(buf, 21, 21, 24); return; }
     emit_ldr_x(buf, 22, 19, (uint32_t)offsetof(hb_context_t, guest32_base));
     emit_add_reg(buf, 21, 21, 22);
@@ -1031,7 +1038,7 @@ static void emit_ldrb_w(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) 
      * [X24, W21, UXTW]; в любом другом случае — сперва материализуем. */
     if (buf && buf->ea_guest32 && rn == 21) {
         if (off == 0 && buf->pinned_g32_base) {
-            emit_mem_reg_uxtw(buf, true, 0u, hb_rm(buf, rt), 24, 21, 0);
+            emit_mem_reg_uxtw(buf, true, 0u, hb_rm(buf, rt), hb_rm(buf, 24), hb_rm(buf, 21), 0);
             return;
         }
         ea_materialize(buf);
@@ -1055,7 +1062,7 @@ static void emit_ldrh_w(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) 
      * [X24, W21, UXTW]; в любом другом случае — сперва материализуем. */
     if (buf && buf->ea_guest32 && rn == 21) {
         if (off == 0 && buf->pinned_g32_base) {
-            emit_mem_reg_uxtw(buf, true, 1u, hb_rm(buf, rt), 24, 21, 0);
+            emit_mem_reg_uxtw(buf, true, 1u, hb_rm(buf, rt), hb_rm(buf, 24), hb_rm(buf, 21), 0);
             return;
         }
         ea_materialize(buf);
@@ -1326,7 +1333,7 @@ static void emit_ldar_to_reg_off(hb_codegen_buffer_t* buf, int rt, int rn, hb_si
     /* Смещение решается ДО переназначения регистров: материализация запасного пути сама
      * зовёт emit_add_*, а те переназначают свои операнды — второе переназначение подряд
      * дало бы чужой регистр. */
-    if (off && buf && buf->ea_guest32 && hb_rm(buf, rn) == 21) {
+    if (off && buf && buf->ea_guest32 && rn == 21) {
         macrunner_hb_kraya_off[3]++;   /* НАШЕ: слитная адресация guest32 */
         ea_materialize(buf);
     }
@@ -1346,12 +1353,12 @@ static void emit_ldar_to_reg_off(hb_codegen_buffer_t* buf, int rt, int rn, hb_si
      *
      * Именно этих двух не хватало в первой редакции: перехват стоял в восьми эмиттерах emit_ldr и emit_str, а часть доступов идёт сюда, сырым словом. Приёмка тогда встала с
      * чтением по гостевому адресу без базы. Теперь покрыты все шестнадцать мест выпуска. */
-    if (buf && buf->ea_guest32 && rn == 21) {
+    if (buf && buf->ea_guest32 && rn == hb_rm(buf, 21)) {
         unsigned sz = (size == HB_SIZE_8) ? 0u : (size == HB_SIZE_16) ? 1u
                     : (size == HB_SIZE_32) ? 2u : 3u;
         /* признак НЕ гасим: по одному адресу бывает несколько доступов
          * (128-битные читают две половины) — каждый обязан прибавить базу. */
-        emit_mem_reg_uxtw(buf, true, sz, rt, 24, 21, 0);
+        emit_mem_reg_uxtw(buf, true, sz, rt, hb_rm(buf, 24), hb_rm(buf, 21), 0);
         macrunner_hb_tso_loads_emitted++;
         if (hb_tso_relax_this_access()) hb_tso_relax_uchest();
     if (!tso_relaxed_loads() && !hb_tso_relax_this_access()) {
@@ -1401,7 +1408,7 @@ static void emit_str_x(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) {
      * [X24, W21, UXTW]; в любом другом случае — сперва материализуем. */
     if (buf && buf->ea_guest32 && rn == 21) {
         if (off == 0 && buf->pinned_g32_base) {
-            emit_mem_reg_uxtw(buf, false, 3u, hb_rm(buf, rt), 24, 21, 0);
+            emit_mem_reg_uxtw(buf, false, 3u, hb_rm(buf, rt), hb_rm(buf, 24), hb_rm(buf, 21), 0);
             return;
         }
         ea_materialize(buf);
@@ -1437,7 +1444,7 @@ static void emit_str_w(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) {
      * [X24, W21, UXTW]; в любом другом случае — сперва материализуем. */
     if (buf && buf->ea_guest32 && rn == 21) {
         if (off == 0 && buf->pinned_g32_base) {
-            emit_mem_reg_uxtw(buf, false, 2u, hb_rm(buf, rt), 24, 21, 0);
+            emit_mem_reg_uxtw(buf, false, 2u, hb_rm(buf, rt), hb_rm(buf, 24), hb_rm(buf, 21), 0);
             return;
         }
         ea_materialize(buf);
@@ -1484,7 +1491,7 @@ static void emit_strb_w(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) 
      * [X24, W21, UXTW]; в любом другом случае — сперва материализуем. */
     if (buf && buf->ea_guest32 && rn == 21) {
         if (off == 0 && buf->pinned_g32_base) {
-            emit_mem_reg_uxtw(buf, false, 0u, hb_rm(buf, rt), 24, 21, 0);
+            emit_mem_reg_uxtw(buf, false, 0u, hb_rm(buf, rt), hb_rm(buf, 24), hb_rm(buf, 21), 0);
             return;
         }
         ea_materialize(buf);
@@ -1508,7 +1515,7 @@ static void emit_strh_w(hb_codegen_buffer_t* buf, int rt, int rn, uint32_t off) 
      * [X24, W21, UXTW]; в любом другом случае — сперва материализуем. */
     if (buf && buf->ea_guest32 && rn == 21) {
         if (off == 0 && buf->pinned_g32_base) {
-            emit_mem_reg_uxtw(buf, false, 1u, hb_rm(buf, rt), 24, 21, 0);
+            emit_mem_reg_uxtw(buf, false, 1u, hb_rm(buf, rt), hb_rm(buf, 24), hb_rm(buf, 21), 0);
             return;
         }
         ea_materialize(buf);
@@ -1603,7 +1610,7 @@ static void emit_stlr_from_reg_off_ex(hb_codegen_buffer_t* buf, int rt, int rn, 
         rn = kraya_materializovat_bazu(buf, rn, off);
         off = 0;
     }
-    if (off && buf && buf->ea_guest32 && hb_rm(buf, rn) == 21) {
+    if (off && buf && buf->ea_guest32 && rn == 21) {
         macrunner_hb_kraya_off[3]++;   /* НАШЕ: слитная адресация guest32 */
         ea_materialize(buf);
     }
@@ -1629,12 +1636,12 @@ static void emit_stlr_from_reg_off_ex(hb_codegen_buffer_t* buf, int rt, int rn, 
     /* ★ ПЕРЕХВАТ слитной адресации — сторона ЗАПИСИ. Парен перехвату в emit_ldar_to_reg;
      * без него приёмка вставала на записи по гостевому адресу (site=emit_stlr_from_reg,
      * fault=0x140fb64). Барьер записи, если он нужен, остаётся ниже без изменений. */
-    if (buf && buf->ea_guest32 && rn == 21) {
+    if (buf && buf->ea_guest32 && rn == hb_rm(buf, 21)) {
         unsigned sz = (size == HB_SIZE_8) ? 0u : (size == HB_SIZE_16) ? 1u
                     : (size == HB_SIZE_32) ? 2u : 3u;
         /* признак НЕ гасим: по одному адресу бывает несколько доступов
          * (128-битные читают две половины) — каждый обязан прибавить базу. */
-        emit_mem_reg_uxtw(buf, false, sz, rt, 24, 21, 0);
+        emit_mem_reg_uxtw(buf, false, sz, rt, hb_rm(buf, 24), hb_rm(buf, 21), 0);
         macrunner_hb_tso_stores_emitted++;
         macrunner_hb_tso_report();
         return;
@@ -7923,6 +7930,9 @@ static bool direct_mem_unsigned_offset_ex(hb_codegen_buffer_t* buf,
     if (op->mem.base == HB_REG_COUNT || op->mem.base == HB_REG_RIP || op->mem.base >= HB_REG_XMM0)
         return false;
     if (op->mem.disp < 0) return false;
+    /* An i386 displacement belongs inside the modulo-2^32 EA, not after
+     * guest32_base has been added. Keep direct access; fold only x64 offsets. */
+    if (buf && buf->arch == HB_ARCH_X86 && op->mem.disp != 0) return false;
     disp = (uint64_t)op->mem.disp;
     switch (op->size) {
         case HB_SIZE_8:
@@ -8034,11 +8044,13 @@ static void emit_load_xmm_to_pair(hb_codegen_buffer_t* buf, hb_reg_t reg, int lo
  *     zip2 v3.16b            4e017803      бит 14 отличает zip2 от zip1
  */
 static void emit_ldr_q(hb_codegen_buffer_t* buf, int vt, int rn, uint32_t off) {
+    rn = hb_rm(buf, rn);
     uint32_t imm12 = (off / 16u) & 0xfffu;
     emit_u32(buf, 0x3dc00000u | (imm12 << 10) | ((uint32_t)rn << 5) | (uint32_t)vt);
 }
 
 static void emit_str_q(hb_codegen_buffer_t* buf, int vt, int rn, uint32_t off) {
+    rn = hb_rm(buf, rn);
     uint32_t imm12 = (off / 16u) & 0xfffu;
     emit_u32(buf, 0x3d800000u | (imm12 << 10) | ((uint32_t)rn << 5) | (uint32_t)vt);
 }
@@ -12017,9 +12029,13 @@ static struct cs_otkaz emit_copy_scan_counted_loop_pochemu(hb_codegen_buffer_t* 
                                                load->src1.size == HB_SIZE_8))
         return CS_OTKAZ(ADRES_CHTENIYA);
     emit_direct_mem_load_to_x20(buf, load->dst.size);
-    if (!emit_direct_mem_addr_with_override_ex(buf, &store->src1, inc_reg, 23,
-                                               direct_byte_store_enabled() ||
-                                               store_perm_checked(buf)))
+    /* X23 is the live loop pointer, X20 the copied value. The store may
+     * have a different index or a large displacement even when the load
+     * passed preserves_override; keep both live values and use dead X22. */
+    if (!emit_direct_mem_addr_with_override_scratch_ex(buf, &store->src1, inc_reg,
+                                                       23, 22,
+                                                       direct_byte_store_enabled() ||
+                                                       store_perm_checked(buf)))
         return CS_OTKAZ(ADRES_ZAPISI);
     if (perm_check) {
         /* Право на запись проверяется КАЖДУЮ итерацию: диапазон цикла не известен на выпуске
@@ -22319,11 +22335,12 @@ static bool emit_locked_sub_atomic(hb_codegen_buffer_t* out, const hb_ir_instr_t
     is64 = (instr->dst.size == HB_SIZE_64);
 
     emit_direct_mem_addr(out, &instr->dst);   /* адрес -> x21 */
+    ea_materialize(out);                   /* LSE consumes a host address. */
     emit_mov_reg(out, 23, 21);                /* адрес -> x23 */
     if (!emit_scalar_operand_to_x20(out, &instr->src2, instr->dst.size)) return false;
 
-    emit_neg_reg(out, is64, 24, 20);          /* x24 = -b; исходный b остаётся в x20 */
-    emit_lse_al(out, HB_LSE_ADD, is64, 24, 23, 22);  /* x22 = старое, память += (-b) */
+    emit_neg_reg(out, is64, 16, 20);          /* x16 = -b; исходный b остаётся в x20 */
+    emit_lse_al(out, HB_LSE_ADD, is64, 16, 23, 22);  /* x22 = старое, память += (-b) */
 
     if (g_lazy_flags_skip) return true;       /* флаги мертвы — обслуживать нечего */
 
@@ -22345,17 +22362,18 @@ static bool emit_locked_rmw_lse(hb_codegen_buffer_t* out, const hb_ir_instr_t* i
     is64 = (instr->dst.size == HB_SIZE_64);
 
     emit_direct_mem_addr(out, &instr->dst);   /* адрес → x21 */
+    ea_materialize(out);                   /* LSE consumes a host address. */
     emit_mov_reg(out, 23, 21);                /* адрес → x23 (x21 нужен под правый операнд) */
     if (!emit_scalar_operand_to_x20(out, &instr->src2, instr->dst.size)) return false;
 
     if (instr->op == HB_IR_AND) {
         /* LDCLRAL сбрасывает биты, ВЫСТАВЛЕННЫЕ в маске. Чтобы получить AND, маску надо
          * инвертировать: сбросить те биты, которых в операнде НЕТ. Для флагов нужен
-         * исходный операнд, поэтому его копия сохраняется в x24 до инверсии.
+         * исходный операнд, поэтому его копия сохраняется в x16 до инверсии.
          *
          * ★ УРОВЕНЬ 4 (п.9 разбора): при мёртвых флагах исходный операнд не нужен НИКОМУ,
          * поэтому и копия не выпускается — маска инвертируется на месте. */
-        if (!g_lazy_flags_skip) emit_mov_reg(out, 24, 20);
+        if (!g_lazy_flags_skip) emit_mov_reg(out, 16, 20);
         emit_mvn_reg(out, is64, 20, 20);
     }
     emit_lse_al(out, lop, is64, 20, 23, 22);  /* x22 = старое значение, память изменена атомарно */
@@ -22368,7 +22386,7 @@ static bool emit_locked_rmw_lse(hb_codegen_buffer_t* out, const hb_ir_instr_t* i
      * памяти выше остаётся целиком — исчезает только работа для невыпускаемой записи. */
     if (g_lazy_flags_skip) return true;
 
-    if (instr->op == HB_IR_AND) emit_mov_reg(out, 20, 24);   /* вернуть исходный операнд */
+    if (instr->op == HB_IR_AND) emit_mov_reg(out, 20, 16);   /* вернуть исходный операнд */
 
     emit_mov_reg(out, 21, 20);                /* правый операнд */
     emit_mov_reg(out, 20, 22);                /* левый операнд = старое значение */
