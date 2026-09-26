@@ -198,9 +198,16 @@ void hb_lazy_flags_note(hb_context_t* ctx, hb_lazy_flags_kind_t kind,
      * НА МОМЕНТ КОМАНДЫ, а прежняя отложенная запись строкой ниже затирается. Без этого «прежний
      * CF» оказывался тем, что успело материализоваться, и стороны расходились: стенд дал 51 отказ
      * с `result=0 OK` на мнемониках inc/dec — подпись рассинхронизации интерпретатора и помощника.
-     * Досчитываем CF из УХОДЯЩЕЙ записи до её затирания. */
+     * Досчитываем CF из УХОДЯЩЕЙ записи до её затирания.
+     *
+     * Claude 26.09 — КРОМЕ МАТЕРИАЛИЗОВАННОГО CF. Бит CF в materialized_mask значит «настоящий CF уже
+     * лежит в ctx->flags» (так пишет родной BMI: вид AND, а CF от ИСТОЧНИКА). Пересчёт из операндов
+     * такой записи его затирал (для AND — нулём). Выпущенный код (досчёт перед INC/DEC и помощник
+     * keep_cf) маску уважает — стороны расходились: tests/hb_lazy_cond_native_test, формы
+     * «inc eax; jcc» / «dec rcx; jcc» с CF поверх записи — 8 928 из 826 368 до правки. */
     if ((kind == HB_LAZY_FLAGS_INC || kind == HB_LAZY_FLAGS_DEC) &&
-        lf->pending && (lf->valid_mask & (uint32_t)HB_FLAG_BIT_CF))
+        lf->pending && (lf->valid_mask & (uint32_t)HB_FLAG_BIT_CF) &&
+        !(lf->materialized_mask & (uint32_t)HB_FLAG_BIT_CF))
         ctx->flags.cf = compute_flag(lf, HB_FLAG_BIT_CF);
     /* ★★ MacRunner 2026-08-23, лейн РАЗРЫВ, итерация 229 — ПОМОЩНИК ОТСТАЛ ОТ СОБСТВЕННОГО ВЫПУСКА.
      *

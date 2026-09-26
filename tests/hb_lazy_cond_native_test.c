@@ -8,7 +8,8 @@
  * hb_lazy_flags_materialize в профиле HK). Матрица: запись не отложена (шесть байтов флагов) либо
  * отложена с видом ADD/SUB/CMP/AND/OR/XOR/TEST (родной путь) и INC/SHL/ADC (ветвь помощника),
  * ширины 1/2/4/8, операнды с мусором ВЫШЕ ширины (прижатие обязано его отбросить), граничные
- * значения знака и переноса. Вариант «переопределено»: CF и AF уже лежат в ctx->flags поверх
+ * значения знака и переноса; формы «inc eax; jcc» и «dec rcx; jcc» — досчёт CF уходящей записи перед
+ * записью INC/DEC (INC/DEC CF не меняют). Вариант «переопределено»: CF и AF уже лежат в ctx->flags поверх
  * записи (materialized_mask — так пишет родной BMI); из операндов записи их считать нельзя.
  * Сравниваются выбранная ветвь (pc), все 16 регистров и материализованные флаги.
  *
@@ -34,8 +35,10 @@
 
 extern uint64_t hb_codegen_native_lazy_cond_emitted(void) __attribute__((weak));
 extern uint64_t hb_codegen_native_cmov_setcc_emitted(void) __attribute__((weak));
+extern uint64_t hb_codegen_native_keep_cf_emitted(void) __attribute__((weak));
 static uint64_t cond_count(void) { return hb_codegen_native_lazy_cond_emitted ? hb_codegen_native_lazy_cond_emitted() : 0; }
 static uint64_t cmov_count(void) { return hb_codegen_native_cmov_setcc_emitted ? hb_codegen_native_cmov_setcc_emitted() : 0; }
+static uint64_t keep_count(void) { return hb_codegen_native_keep_cf_emitted ? hb_codegen_native_keep_cf_emitted() : 0; }
 
 static uint64_t V[] = { 0, 1, 2, 0x7f, 0x80, 0xff, 0x7fff, 0x8000, 0xffff, 0x7fffffff, 0x80000000u,
                         0xffffffffu, 0x7fffffffffffffffull, 0x8000000000000000ull, 0xffffffffffffffffull,
@@ -48,14 +51,18 @@ static const hb_lazy_flags_kind_t K[] = { HB_LAZY_FLAGS_ADD, HB_LAZY_FLAGS_SUB, 
 #define NK (sizeof(K) / sizeof(K[0]))
 
 /* cc_at — байт кода условия, cc_base — его основа; nv_max — сколько значений брать (CMOVcc/SETcc
- * проверяют обвязку выбора и записи, а разбор условия общий с Jcc — ему полная матрица). */
-struct form { const char* name; uint8_t bytes[4]; int len; int cc_at; uint8_t cc_base; unsigned nv_max; int cmov; };
+ * проверяют обвязку выбора и записи, а разбор условия общий с Jcc — ему полная матрица); kind —
+ * какой родной выпуск обязан состояться: 0 условие, 1 CMOVcc/SETcc, 2 досчёт CF перед INC/DEC. */
+struct form { const char* name; uint8_t bytes[5]; int len; int cc_at; uint8_t cc_base; unsigned nv_max; int kind; };
 static const struct form FORMS[] = {
     {"jcc +0x10",      {0x70, 0x10},             2, 0, 0x70, 99, 0},
     {"cmovcc eax,ebx", {0x0f, 0x40, 0xc3},       3, 1, 0x40, 5,  1},
     {"cmovcc rax,rbx", {0x48, 0x0f, 0x40, 0xc3}, 4, 2, 0x40, 5,  1},
     {"cmovcc ax,bx",   {0x66, 0x0f, 0x40, 0xc3}, 4, 2, 0x40, 5,  1},
     {"setcc cl",       {0x0f, 0x90, 0xc1},       3, 1, 0x90, 5,  1},
+    /* INC/DEC CF не меняют: перед их записью CF уходящей записи досчитывается (emit_keep_cf). */
+    {"inc eax; jcc",   {0xff, 0xc0, 0x70, 0x10},       4, 2, 0x70, 99, 2},
+    {"dec rcx; jcc",   {0x48, 0xff, 0xc9, 0x70, 0x10}, 5, 3, 0x70, 99, 2},
 };
 #define NFORMS (sizeof(FORMS) / sizeof(FORMS[0]))
 
@@ -108,7 +115,7 @@ int main(void) {
     for (unsigned f = 0; f < NFORMS; f++) {
         const struct form* F = &FORMS[f];
         const unsigned nv = NV < F->nv_max ? NV : F->nv_max;
-        const uint64_t cond_before = cond_count(), cmov_before = cmov_count();
+        const uint64_t cond_before = cond_count(), cmov_before = cmov_count(), keep_before = keep_count();
         unsigned long form_bad = 0;
         for (unsigned x = 0; x < 16; x++) {                 /* код условия x86: O NO B AE E NE BE A S NS P NP L GE LE G */
             uint8_t* at = code + 16384u * (16u * f + x);
@@ -183,14 +190,17 @@ int main(void) {
             }
             /* func не освобождается: среда JIT держит выпуск по адресу гостя до конца прогона. */
         }
-        const int native = F->cmov ? cmov_count() != cmov_before : cond_count() != cond_before;
+        const int native = F->kind == 2 ? keep_count() != keep_before
+                         : F->kind == 1 ? cmov_count() != cmov_before : cond_count() != cond_before;
         printf("%-16s значений=%u расхождений=%lu%s\n", F->name, nv, form_bad, native ? "" : "  НЕ НАТИВНО");
     }
     hb_jit_runtime_destroy(rt);
-    printf("случаев=%lu расхождений=%lu родных_условий=%llu родных_cmov_setcc=%llu\n", cases, bad,
-           (unsigned long long)cond_count(), (unsigned long long)cmov_count());
+    printf("случаев=%lu расхождений=%lu родных_условий=%llu родных_cmov_setcc=%llu родных_cf_inc_dec=%llu\n",
+           cases, bad, (unsigned long long)cond_count(), (unsigned long long)cmov_count(),
+           (unsigned long long)keep_count());
     if (cond_count() == 0) { printf("НАРУШЕНИЕ: родной выпуск условия не состоялся ни разу\n"); bad++; }
     if (cmov_count() == 0) { printf("НАРУШЕНИЕ: родной выпуск CMOVcc/SETcc не состоялся ни разу\n"); bad++; }
+    if (keep_count() == 0) { printf("НАРУШЕНИЕ: родной досчёт CF перед INC/DEC не состоялся ни разу\n"); bad++; }
     printf("TOTAL_BAD=%lu\n", bad);
     return bad ? 1 : 0;
 }

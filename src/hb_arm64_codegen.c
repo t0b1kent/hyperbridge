@@ -14701,6 +14701,97 @@ static bool emit_native_cmovcc(hb_codegen_buffer_t* buf, const hb_ir_instr_t* in
     __atomic_add_fetch(&g_native_cmov_setcc_emitted, 1, __ATOMIC_RELAXED);
     return true;
 }
+/* ═══ Claude 26.09.2026 — CF ПЕРЕД INC/DEC БЕЗ ВЫЗОВА (уровень 4) ═══
+ * hb_jit_helper_keep_cf (досчёт CF уходящей записи перед встроенной записью INC/DEC) в профиле HK —
+ * 95 отсчётов hb_lazy_flags_materialize с родителем «выпущенный код» (хвостовой вызов прячет кадр
+ * помощника). Тот же разбор вида, что в emit_native_cond_to_w0, но результат — байт ctx->flags.cf:
+ * запись не отложена или CF уже материализован (так пишет и родной BMI) — CF в ctx->flags верен;
+ * CMP/SUB — заём после SUBS прижатых операндов; ADD — перенос после ADDS; AND/OR/XOR/TEST — 0;
+ * INC/DEC — CF и так лежит в ctx->flags; прочее — прежний помощник. Бит materialized_mask не
+ * ставится: следом идёт заметка INC/DEC, а если она снята живостью, прочие читатели CF посчитают
+ * его из той же записи тем же значением. Гейт тот же, MACRUNNER_HB_NATIVE_LAZY_COND. */
+static uint64_t g_native_keep_cf_emitted;
+uint64_t hb_codegen_native_keep_cf_emitted(void) {
+    return __atomic_load_n(&g_native_keep_cf_emitted, __ATOMIC_RELAXED);
+}
+static void emit_keep_cf(hb_codegen_buffer_t* buf) {
+    const uint32_t lz = (uint32_t)offsetof(hb_context_t, lazy_flags);
+    const uint32_t cf = (uint32_t)offsetof(hb_context_t, flags) + (uint32_t)offsetof(hb_flags_t, cf);
+    size_t not_pending, have_cf, to_sub1, to_sub2, to_logic1, to_logic2, to_add, to_inc, to_dec, to_helper;
+    size_t d_sub, d_logic, d_add;
+    if (!native_lazy_cond_enabled()) {
+        emit_mov_reg(buf, 0, 19);
+        emit_call_helper_wmask(buf, (void*)hb_jit_helper_keep_cf, 0);
+        return;
+    }
+    emit_ldrb_w(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, pending));
+    not_pending = emit_cbz_x_deferred(buf, 20);
+    emit_ldr_w(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, materialized_mask));
+    emit_mov_imm_compact(buf, 21, (uint64_t)HB_FLAG_BIT_CF);
+    emit_gpr_word(buf, 0x6a00001fu, 31, 20, 21);             /* TST W20, W21 */
+    have_cf = emit_bcond_deferred(buf, 1 /* NE: CF уже в ctx->flags */);
+    emit_ldr_w(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, kind));
+    emit_ldrb_w(buf, 22, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, width));
+    emit_gpr_word(buf, 0x531d7000u, 22, 22, 0);              /* LSL W22, W22, #3 */
+    emit_mov_imm_compact(buf, 23, 64);
+    emit_gpr_word(buf, 0x4b000000u, 23, 23, 22);             /* SUB W23, W23, W22 */
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_CMP);
+    to_sub1 = emit_bcond_deferred(buf, 0);
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_SUB);
+    to_sub2 = emit_bcond_deferred(buf, 0);
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_TEST);
+    to_logic1 = emit_bcond_deferred(buf, 0);
+    emit_gpr_word(buf, 0x51000000u | ((uint32_t)HB_LAZY_FLAGS_AND << 10), 20, 21, 0);   /* SUB W20, W21, #AND */
+    emit_cmp_imm(buf, 20, (uint32_t)(HB_LAZY_FLAGS_XOR - HB_LAZY_FLAGS_AND));
+    to_logic2 = emit_bcond_deferred(buf, 9 /* LS */);
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_ADD);
+    to_add = emit_bcond_deferred(buf, 0);
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_INC);
+    to_inc = emit_bcond_deferred(buf, 0);
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_DEC);
+    to_dec = emit_bcond_deferred(buf, 0);
+    to_helper = emit_b_deferred(buf);
+
+    patch_bcond(buf, to_sub1, 0, buf->size);                  /* CMP/SUB: CF = заём */
+    patch_bcond(buf, to_sub2, 0, buf->size);
+    emit_ldr_x(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, lhs));
+    emit_ldr_x(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, rhs));
+    emit_gpr_word(buf, 0x9ac02000u, 20, 20, 23);              /* LSLV */
+    emit_gpr_word(buf, 0x9ac02000u, 21, 21, 23);
+    emit_gpr_word(buf, 0xeb00001fu, 31, 20, 21);              /* CMP X20, X21 */
+    /* Контроль теста (MACRUNNER_HB_TEST_LAZY_COND_FLIP=1): перенос вместо заёма — обязан упасть. */
+    emit_cset_w(buf, 0, hb_jit_gate_flag( HB_GATE_HB_TEST_LAZY_COND_FLIP, 0 ) ? 2 : 3 /* LO */);
+    emit_strb_w(buf, 0, 19, cf);
+    d_sub = emit_b_deferred(buf);
+
+    patch_bcond(buf, to_add, 0, buf->size);                   /* ADD: CF = перенос */
+    emit_ldr_x(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, lhs));
+    emit_ldr_x(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, rhs));
+    emit_gpr_word(buf, 0x9ac02000u, 20, 20, 23);
+    emit_gpr_word(buf, 0x9ac02000u, 21, 21, 23);
+    emit_gpr_word(buf, 0xab00001fu, 31, 20, 21);              /* CMN X20, X21 */
+    emit_cset_w(buf, 0, 2 /* HS */);
+    emit_strb_w(buf, 0, 19, cf);
+    d_add = emit_b_deferred(buf);
+
+    patch_bcond(buf, to_logic1, 0, buf->size);                /* AND/OR/XOR/TEST: CF = 0 */
+    patch_bcond(buf, to_logic2, 9, buf->size);
+    emit_strb_w(buf, 31, 19, cf);
+    d_logic = emit_b_deferred(buf);
+
+    patch_b(buf, to_helper, buf->size);                       /* прочие виды — помощник */
+    emit_mov_reg(buf, 0, 19);
+    emit_call_helper_wmask(buf, (void*)hb_jit_helper_keep_cf, 0);
+
+    patch_cbz_x(buf, not_pending, 20, buf->size);
+    patch_bcond(buf, have_cf, 1, buf->size);
+    patch_bcond(buf, to_inc, 0, buf->size);
+    patch_bcond(buf, to_dec, 0, buf->size);
+    patch_b(buf, d_sub, buf->size);
+    patch_b(buf, d_add, buf->size);
+    patch_b(buf, d_logic, buf->size);
+    __atomic_add_fetch(&g_native_keep_cf_emitted, 1, __ATOMIC_RELAXED);
+}
 static bool emit_native_setcc(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
     const hb_ir_operand_t* d = &instr->dst;
     if (!is_plain_gpr_reg_operand(d) || d->size != HB_SIZE_8) return false;
@@ -24375,10 +24466,8 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
         } else
             out->host_off_overflow = true;
         /* Claude 25.09: см. hb_jit_helper_keep_cf. Пропущенная запись INC/DEC уходящую не затирает. */
-        if (!g_lazy_flags_skip && incdec_needs_cf_keep(block, i, instr_limit)) {
-            emit_mov_reg(out, 0, 19);
-            emit_call_helper_wmask(out, (void*)hb_jit_helper_keep_cf, 0);
-        }
+        if (!g_lazy_flags_skip && incdec_needs_cf_keep(block, i, instr_limit))
+            emit_keep_cf(out);                     /* Claude 26.09: без вызова, см. emit_keep_cf */
 
         /* ★★★★★★★ 05.09.2026 — БЛОКИРУЮЩАЯ RMW УХОДИТ В НЕДЕЛИМОГО ПОМОЩНИКА.
          *
