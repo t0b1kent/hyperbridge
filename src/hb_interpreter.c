@@ -983,14 +983,34 @@ static void write_scalar_compare_flags(hb_context_t* ctx, double lhs, double rhs
     }
 }
 
-static float select_sse_minmax_float(float lhs, float rhs, bool is_max) {
-    if (lhs != lhs || rhs != rhs) return rhs;
-    return is_max ? (lhs > rhs ? lhs : rhs) : (lhs < rhs ? lhs : rhs);
+/* SSE MIN/MAX selects a source bit pattern, not an arithmetic result.
+ * DAZ applies to BOTH inputs before selection; FTZ does not flush a copied
+ * subnormal. Use integer ordering so host DAZ/FZ cannot change the guest rule.
+ * Exception status remains outside this value-only fix, as in the baseline. */
+static uint64_t hb_sse_minmax_bits(uint64_t lhs, uint64_t rhs, bool is_max,
+                                   uint32_t mxcsr, unsigned width) {
+    uint64_t sign = width == 32 ? 0x80000000ULL : 0x8000000000000000ULL;
+    uint64_t exp = width == 32 ? 0x7f800000ULL : 0x7ff0000000000000ULL;
+    uint64_t frac = width == 32 ? 0x007fffffULL : 0x000fffffffffffffULL;
+    if (mxcsr & 0x40u) {
+        if ((lhs & exp) == 0) lhs &= sign;
+        if ((rhs & exp) == 0) rhs &= sign;
+    }
+    bool lhs_nan = (lhs & exp) == exp && (lhs & frac) != 0;
+    bool rhs_nan = (rhs & exp) == exp && (rhs & frac) != 0;
+    if (lhs_nan || rhs_nan) return rhs; /* Do not quiet a selected SNaN. */
+    if (((lhs | rhs) & ~sign) == 0) return rhs; /* +/-0 tie: second operand. */
+    bool less = ((lhs ^ rhs) & sign) ? (lhs & sign) != 0
+                                    : (lhs & sign) ? lhs > rhs : lhs < rhs;
+    return (is_max ? (!less && lhs != rhs) : less) ? lhs : rhs;
 }
-
-static double select_sse_minmax_double(double lhs, double rhs, bool is_max) {
-    if (lhs != lhs || rhs != rhs) return rhs;
-    return is_max ? (lhs > rhs ? lhs : rhs) : (lhs < rhs ? lhs : rhs);
+static float select_sse_minmax_float(float lhs, float rhs, bool is_max, uint32_t mxcsr) {
+    return hb_bits_to_float((uint32_t)hb_sse_minmax_bits(hb_float_to_bits(lhs),
+                             hb_float_to_bits(rhs), is_max, mxcsr, 32));
+}
+static double select_sse_minmax_double(double lhs, double rhs, bool is_max, uint32_t mxcsr) {
+    return hb_bits_to_double(hb_sse_minmax_bits(hb_double_to_bits(lhs),
+                             hb_double_to_bits(rhs), is_max, mxcsr, 64));
 }
 
 static bool hb_float_bits_is_nan(uint32_t bits) {
@@ -1074,7 +1094,7 @@ static bool hb_sse_arith_invalid_double(uint64_t lhs, uint64_t rhs, hb_ir_op_t o
 static uint32_t hb_sse_arith_float_bits(uint32_t lhs, uint32_t rhs, hb_ir_op_t op) {
     bool lhs_nan = hb_float_bits_is_nan(lhs), rhs_nan = hb_float_bits_is_nan(rhs);
     if (lhs_nan || rhs_nan) {
-        uint32_t chosen = lhs_nan && (!rhs_nan || ((lhs & 0x007fffffu) >= (rhs & 0x007fffffu))) ? lhs : rhs;
+        uint32_t chosen = lhs_nan ? lhs : rhs; /* SSE: first NaN operand, not x87 payload order. */
         return hb_quiet_float_nan_bits(chosen);
     }
     if (hb_sse_arith_invalid_float(lhs, rhs, op)) return 0xffc00000u;
@@ -1114,7 +1134,7 @@ static uint32_t hb_sse_add_float_bits_er(uint32_t lhs, uint32_t rhs, unsigned er
 static uint64_t hb_sse_arith_double_bits(uint64_t lhs, uint64_t rhs, hb_ir_op_t op) {
     bool lhs_nan = hb_double_bits_is_nan(lhs), rhs_nan = hb_double_bits_is_nan(rhs);
     if (lhs_nan || rhs_nan) {
-        uint64_t chosen = lhs_nan && (!rhs_nan || ((lhs & 0x000fffffffffffffULL) >= (rhs & 0x000fffffffffffffULL))) ? lhs : rhs;
+        uint64_t chosen = lhs_nan ? lhs : rhs; /* SSE: first NaN operand, not x87 payload order. */
         return hb_quiet_double_nan_bits(chosen);
     }
     if (hb_sse_arith_invalid_double(lhs, rhs, op)) return 0xfff8000000000000ULL;
@@ -10724,7 +10744,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
                     memcpy(&bbits, rhs + i * 4, sizeof(bbits));
                     cbits = hb_float_to_bits(select_sse_minmax_float(hb_bits_to_float(abits),
                                                                       hb_bits_to_float(bbits),
-                                                                      is_max));
+                                                                      is_max, ctx->mxcsr));
                     memcpy(out_bytes + i * 4, &cbits, sizeof(cbits));
                 } else {
                     uint64_t abits, bbits, cbits;
@@ -10732,7 +10752,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
                     memcpy(&bbits, rhs + i * 8, sizeof(bbits));
                     cbits = hb_double_to_bits(select_sse_minmax_double(hb_bits_to_double(abits),
                                                                        hb_bits_to_double(bbits),
-                                                                       is_max));
+                                                                       is_max, ctx->mxcsr));
                     memcpy(out_bytes + i * 8, &cbits, sizeof(cbits));
                 }
             }
