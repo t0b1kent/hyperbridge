@@ -16,12 +16,10 @@ Experimental. Measured facts as of 2026-09-26:
 
 - The engine builds as a static and a dynamic library on macOS 14+ (arm64) with
   `-Werror`, and ships with its unit and regression test suite (`make test`).
-- Test status of this snapshot: the main runner reports 516 passed and 0 failed.
-  That count includes two skips: one test needs a Wine source tree next to the
-  engine, and one covers an opt-in feature. All x87 suites pass except
-  `hb_x87_transcendental_guest_test`. That suite fails 7,680
-  of 10,245,570 checks, all of them FSCALE with an integer exponent of −32768 in
-  the x86 interpreter path. This is a known open defect.
+- Test status of this snapshot: `make test` passes completely. The main runner
+  reports 516 passed and 0 failed; that count includes two skips: one test needs
+  a Wine source tree next to the engine, and one covers an opt-in feature. All 42
+  x87 suites report 0 failures, and the Python suite runs 41 tests.
 - Inside MacRunner, with its fast JIT mode enabled, Hollow Knight (Unity/Mono,
   x86-64) reaches the language-selection screen in 53–57 seconds (four runs).
   With the JIT direct-memory path fully enabled (the default), the language
