@@ -14310,6 +14310,118 @@ uint64_t hb_codegen_native_sse_fp_emitted(void) {
     return __atomic_load_n(&g_native_sse_fp_emitted, __ATOMIC_RELAXED);
 }
 
+/* ═══ Claude 26.09.2026 — VEX.256 ПЕРЕМЕЩЕНИЯ ПАМЯТЬ<->YMM БЕЗ ПОМОЩНИКА (уровень 4) ═══
+ *
+ * ИЗМЕРЕНО (HK, 330 с, MACRUNNER_HB_INTERP_SHAPES после нативной SSE): из 155 млн оставшихся
+ * вызовов интерпретатора 69 % — `STORE m256 <- ymm` и `LOAD ymm <- m256` (VEX vmovups/vmovdqu,
+ * по виду memcpy библиотеки времени исполнения). Чтение — LDP Q + DMB ISHLD, как у 128 бит.
+ * Запись — НЕ сырая: Mono пишет и в «живые» страницы с метаданными RWX при отображении RX, и
+ * сырой STR обошёл бы переход W^X (разбор у emit_direct_mem128_store_from_x20_x22). Поэтому
+ * запись идёт под теневой картой прав (как скалярная): право есть на первом И последнем байте —
+ * DMB ISH (как release-забор проверенного помощника) + STP Q; нет — помощник-интерпретатор.
+ * VEX.256 обнуляет zmm_hi приёмника (биты 511:256) — как write_vec_reg_bytes.
+ * Гейт MACRUNNER_HB_NATIVE_YMM_MOVE, умолчание 1. */
+static int native_ymm_move_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = hb_jit_gate_flag( HB_GATE_HB_NATIVE_YMM_MOVE, 1 ) ? 1 : 0;
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_NATIVE_YMM_MOVE=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+static uint64_t g_native_ymm_moves_emitted;
+uint64_t hb_codegen_native_ymm_moves_emitted(void) {
+    return __atomic_load_n(&g_native_ymm_moves_emitted, __ATOMIC_RELAXED);
+}
+static bool is_ymm_reg_operand(const hb_ir_operand_t* op) {
+    return op && op->type == HB_OP_REG && op->reg >= HB_REG_XMM0 && op->reg <= HB_REG_XMM15 &&
+           op->size == HB_SIZE_256;
+}
+static bool direct_user_ymm_mem_allowed(hb_codegen_buffer_t* buf, const hb_ir_operand_t* op) {
+    hb_ir_operand_t as128;
+    if (!op || op->type != HB_OP_MEM || op->size != HB_SIZE_256) return false;
+    as128 = *op;
+    as128.size = HB_SIZE_128;          /* те же условия формы адреса, что у 128 бит */
+    return direct_user_xmm_mem_allowed(buf, &as128);
+}
+static void emit_ymm_q_pair(hb_codegen_buffer_t* buf, bool load, int rn) {
+    rn = hb_rm(buf, rn);                /* LDP|STP Q0, Q1, [Xn] */
+    emit_u32(buf, (load ? 0xad400000u : 0xad000000u) | (1u << 10) | ((uint32_t)rn << 5));
+}
+static uint32_t ymm_hi_off(hb_reg_t reg) {
+    return (uint32_t)(offsetof(hb_context_t, ymm_hi) + (size_t)(reg - HB_REG_XMM0) * 16u);
+}
+
+/* LOAD ymm <- m256. true — выпущено. */
+static bool emit_native_ymm_load(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    uint32_t zo;
+    if (!native_ymm_move_enabled() || instr->target != 0 || !instr->zero_ymm_upper ||
+        !is_ymm_reg_operand(&instr->dst) || !jit_direct_mem_codegen_enabled(buf) ||
+        diag_no_xmm_dload() || !direct_user_ymm_mem_allowed(buf, &instr->src1))
+        return false;
+    {
+        unsigned char prev_stack = hb_emit_mark_stack_access(&instr->src1);
+        emit_direct_mem_addr(buf, &instr->src1);
+        ea_materialize(buf);
+        emit_ymm_q_pair(buf, true, 21);
+        emit_dmb_ishld(buf);
+        hb_emit_restore_stack_access(prev_stack);
+    }
+    emit_str_q(buf, 0, 19, xmm_reg_off(buf, instr->dst.reg));
+    emit_str_q(buf, 1, 19, ymm_hi_off(instr->dst.reg));
+    zo = (uint32_t)(offsetof(hb_context_t, zmm_hi) + (size_t)(instr->dst.reg - HB_REG_XMM0) * 32u);
+    emit_str_x(buf, 31, 19, zo);
+    emit_str_x(buf, 31, 19, zo + 8u);
+    emit_str_x(buf, 31, 19, zo + 16u);
+    emit_str_x(buf, 31, 19, zo + 24u);
+    jit_native_mem_count(0);
+    __atomic_add_fetch(&g_native_ymm_moves_emitted, 1, __ATOMIC_RELAXED);
+    return true;
+}
+
+/* STORE m256 <- ymm. true — выпущено.
+ * x64: тождественное отображение, запись в страницу без права ловит MMU хозяина, отказ разбирается
+ * точным возобновлением — ровно тот довод, по которому прямые СКАЛЯРНЫЕ записи x64 идут сырыми
+ * (store_perm_checked_by_host_mmu). i386: хозяйская страница окна доступна на запись шире прав
+ * гостя, поэтому там — теневая карта прав на первом и последнем байте, промах — помощник. */
+static bool emit_native_ymm_store(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    const bool via_map = buf->arch == HB_ARCH_X86;
+    size_t miss_map = 0, miss_perm = 0, miss_map2 = 0, miss_perm2 = 0, to_direct = 0, done = 0;
+    if (!native_ymm_move_enabled() || instr->target != 0 || !is_ymm_reg_operand(&instr->src2) ||
+        !jit_direct_mem_codegen_enabled(buf) || diag_no_xmm_dstore() ||
+        !direct_user_ymm_mem_allowed(buf, &instr->src1))
+        return false;
+    if (via_map ? !perm_map_covers_arch(buf) : !store_perm_checked_by_host_mmu(buf)) return false;
+    {
+        unsigned char prev_stack = hb_emit_mark_stack_access(&instr->src1);
+        emit_direct_mem_addr(buf, &instr->src1);
+        ea_materialize(buf);
+        if (via_map) {
+            emit_perm_map_write_check(buf, &miss_map, &miss_perm);
+            emit_perm_map_write_check_off(buf, 22, 23, 31, &miss_map2, &miss_perm2);
+            to_direct = emit_b_deferred(buf);
+            patch_cbz_x(buf, miss_map, 22, buf->size);
+            patch_tbz_w(buf, miss_perm, buf->size);
+            patch_cbz_x(buf, miss_map2, 22, buf->size);
+            patch_tbz_w(buf, miss_perm2, buf->size);
+            emit_interp_ir_helper(buf, instr);      /* права нет или карты нет — точный путь */
+            done = emit_b_deferred(buf);
+            patch_b(buf, to_direct, buf->size);
+        }
+        emit_ldr_q(buf, 0, 19, xmm_reg_off(buf, instr->src2.reg));
+        emit_ldr_q(buf, 1, 19, ymm_hi_off(instr->src2.reg));
+        emit_dmb_ish(buf);                          /* release, как у hb_jit_helper_write_bytes_tso */
+        emit_ymm_q_pair(buf, false, 21);
+        if (jit_direct_store_fence_enabled()) emit_dmb_ish(buf);
+        if (via_map) patch_b(buf, done, buf->size);
+        hb_emit_restore_stack_access(prev_stack);
+    }
+    jit_native_mem_count(1);
+    __atomic_add_fetch(&g_native_ymm_moves_emitted, 1, __ATOMIC_RELAXED);
+    return true;
+}
+
 /* Claude 26.09.2026 — VEX.128 MOVD/MOVQ ОБЯЗАНЫ ОБНУЛИТЬ ВСЁ ВЫШЕ БИТА 127 ПРИЁМНИКА.
  * Разностный стенд на железе ARM64 (JIT против интерпретатора, 4000 случаев x64, 26.09): у
  * vmovd xmm0,ecx / vmovq xmm0,rcx / vmovq xmm0,xmm1 (F3 0F 7E) / vmovq xmm1,xmm0 (66 0F D6)
@@ -14784,6 +14896,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         case HB_IR_LOAD: {
             if (instr->src1.type != HB_OP_MEM) return HB_ERR_INTERNAL;
             perepis_shirin_vzvesti();
+            if (emit_native_ymm_load(buf, instr)) {          /* Claude 26.09: VEX.256 без помощника */
+                hb_emit_note_native_exit();
+                return HB_OK;
+            }
             /* Условие названо ИМЕНЕМ до `if`, а не разобрано в его теле: точка учёта внутри
              * составного условия называет строку, а не причину (сторож scripts/врущие-приборы.py,
              * вид В). Порядок вычисления и короткое замыкание сохранены полностью — `&&` остались
@@ -14798,6 +14914,9 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 emit_direct_mem_addr(buf, &instr->src1);
                 emit_direct_mem128_load_to_x20_x22(buf);
                 emit_store_x20_x22_to_xmm(buf, instr->dst.reg);
+                /* Claude 26.09: VEX.128 vmovups/vmovdqu xmm,[m] обязаны обнулить верх YMM/ZMM
+                 * (тот же класс, что у MOVD, 5df7992): выпуск писал 128 бит и верх не трогал. */
+                emit_zero_ymm_hi_if_vex(buf, instr);
                 /* Итерация 873: ВЕКТОРНЫЙ выход остался без пометки, когда её ставили общему
                  * (правка 383 закрыла только два места, оба — общие регистры). Из-за этого
                  * XMM-загрузка, вышедшая НАТИВНО, всё равно числилась помощником, если помощник
@@ -14891,6 +15010,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         case HB_IR_STORE: {
             if (instr->src1.type != HB_OP_MEM) return HB_ERR_INTERNAL;
             perepis_shirin_vzvesti();
+            if (emit_native_ymm_store(buf, instr)) {         /* Claude 26.09: VEX.256 под картой прав */
+                hb_emit_note_native_exit();
+                return HB_OK;
+            }
             {   /* Имя вместо разбора в теле — разбор у парной ветви чтения выше. */
             const bool vzyal_xmm128 =
                 jit_direct_mem_codegen_enabled(buf) &&
