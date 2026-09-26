@@ -2,6 +2,7 @@
 #include "hb_gates.h"
 #include "hb_decoder.h"
 #include "hb_zamok_pravilo.h"
+#include "hb_evex_disp8.h"
 #include "hb_vex_formy.h"
 #include "hb_ir.h"
 #include <string.h>
@@ -1652,11 +1653,15 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     if (out->op2.is_reg) out->op2.size = 64;
                     if (out->op3.is_reg) out->op3.size = 64;
                 } else {
-                    uint8_t lane = f->lane ? f->lane : 4;
-                    out->evex_broadcast = true;
-                    if (out->op1.is_mem) out->op1.size = lane;
-                    if (out->op2.is_mem) out->op2.size = lane;
-                    if (out->op3.is_mem) out->op3.size = lane;
+                    /* 26.09.2026 — РАССЫЛКУ ЗДЕСЬ НЕ ИСПОЛНЯЕТ НИКТО: лифтер i386
+                     * признака HB_EVEX_ARG_BROADCAST не ставит (он есть только в
+                     * hb_lift_x64.c), и интерпретатор читал ВЕСЬ вектор там, где
+                     * гость дал один элемент. Вдобавок ширина элемента бралась из
+                     * дорожки маски: у `*pd` (W1) выходило 4 вместо 8, у vpackssdw
+                     * 2 вместо 4 — сверка disp8*N против capstone дала 48 форм.
+                     * AVX-512 гостю не объявлен; отказ честнее неверного счёта.
+                     * Вернуть — вместе с признаком в лифтере и шириной 4 << W. */
+                    return HB_ERR_UNSUPPORTED_OPCODE;
                 }
             }
             if (f->imm8 && f->s3 != 1) {   /* см. оговорку выше: не читать дважды */
@@ -1664,6 +1669,9 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 out->has_imm8 = true;
                 out->imm8 = read_u8(d);
             }
+            /* disp8*N — после разметки и рассылки: размер операнда окончателен
+             * (hb_evex_disp8.h, общий текст с x64-ветвью). */
+            hb_evex_scale_disp8(out);
             return HB_OK;
         }
 

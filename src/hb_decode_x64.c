@@ -2,6 +2,7 @@
 #include "hb_unarnye_vex.h"
 #include "hb_decoder.h"
 #include "hb_zamok_pravilo.h"
+#include "hb_evex_disp8.h"
 #include "hb_ir.h"
 #include <string.h>
 #include <stdlib.h>
@@ -1198,6 +1199,8 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                     if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     {
                         uint8_t modrm2 = read_u8(d);
+                        /* b=1 при памяти — #UD (у регистра это {sae}, значение то же). */
+                        if (evex_b && (modrm2 >> 6) != 3) return HB_ERR_UNSUPPORTED_OPCODE;
                         out->opcode = (vex_pp == 2) ? HB_INS_VCVTTSS2USI
                                                     : HB_INS_VCVTTSD2USI;
                         out->writes_flags = false;
@@ -1226,6 +1229,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 else if (vex_opcode == 0x15 && vex_pp == 1 && vex_w) { mapped = HB_INS_UNPCKHPD; out->evex_mask_lane = 8; }
                 else if (vex_opcode == 0x70 && (vex_pp == 1 || vex_pp == 2 || vex_pp == 3) && !vex_w) {
                     uint8_t mask_lane = vex_pp == 1 ? 4 : 2;
+                    /* Бит b здесь не читался: `vpshufd` с памятью и b=1 — РАССЫЛКА
+                     * одного двойного слова, а лифтер PSHUFD её не несёт и прочёл бы
+                     * весь вектор. У `vpshufhw/lw` и у регистровых форм b=1 — #UD.
+                     * Отказ честнее молча неверного исполнения; AVX-512 гостю не
+                     * объявлен (hb_cpuid.h). Найдено сверкой disp8*N (hb_evex_disp8.h). */
+                    if (evex_b) return HB_ERR_UNSUPPORTED_OPCODE;
                     if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
                     uint8_t modrm = read_u8(d);
                     out->opcode = vex_pp == 1 ? HB_INS_PSHUFD :
@@ -6392,6 +6401,9 @@ static hb_result_t decode_x64_state(hb_dec_t* d, hb_decoded_t* out) {
         out->opcode = HB_INS_UNAVAILABLE_EXT;
         out->writes_flags = false;
     }
+    /* СЖАТОЕ СМЕЩЕНИЕ EVEX — послеобработка тем же приёмом: размеры операндов к
+     * этому месту окончательны (hb_evex_disp8.h). */
+    hb_evex_scale_disp8(out);
     memcpy(out->bytes, code, out->len > 15 ? 15 : out->len);
     return HB_OK;
 }
