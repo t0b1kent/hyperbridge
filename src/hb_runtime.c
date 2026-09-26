@@ -6652,6 +6652,7 @@ static unsigned persistent_cache_version(void) {
         /* Claude 26.09.2026: нативная SSE-арифметика меняет ВЫПУСК (вместо вызова помощника —
          * команды FP и медленный путь по NaN); руки A/B не должны делить записи. */
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_SSE_FP");
+        HB_KEY_GATE("MACRUNNER_HB_BT_PENDING_NATIVE");
         HB_KEY_GATE("MACRUNNER_HB_CTX_ARG_REUSE");
         HB_KEY_GATE("MACRUNNER_HB_CBZ_FOLD");
         /* Проверка масок записей помощника (лейн РЕГИСТРЫ, итерация 120) меняет ВЫПУСК:

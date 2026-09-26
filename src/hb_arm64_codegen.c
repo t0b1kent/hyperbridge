@@ -9235,6 +9235,18 @@ static bool emit_native_bit_scan(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
 
 static hb_result_t emit_interp_ir_helper(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr);
 
+static void emit_gpr_word(hb_codegen_buffer_t* buf, uint32_t base, int rd, int rn, int rm);
+/* Claude 26.09.2026: отложенные флаги у нативного BT без вызова помощника; =0 — прежний вызов. */
+static int bt_pending_native_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = hb_jit_gate_flag( HB_GATE_HB_BT_PENDING_NATIVE, 1 ) ? 1 : 0;
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_BT_PENDING_NATIVE=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+
 static bool emit_native_bit_test(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
     hb_ir_operand_t target, bitop;
     hb_size_t size;
@@ -9262,8 +9274,45 @@ static bool emit_native_bit_test(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                                       offsetof(hb_lazy_flags_t, pending)));
     emit_cmp_imm(buf, 20, 0);
     size_t flags_ready = emit_bcond_deferred(buf, 0); /* EQ -> native path. */
-    emit_interp_ir_helper(buf, instr);
-    size_t pending_done = emit_b_deferred(buf);
+    size_t pending_done = 0;
+    bool pending_via_helper = true;
+    if (bt_pending_native_enabled()) {
+        /* Claude 26.09.2026 — ОТЛОЖЕННЫЕ ФЛАГИ БЕЗ ВЫЗОВА (уровень 4). BT почти всегда идёт сразу
+         * за арифметикой, то есть при pending — и вся эта ветвь уходила помощнику: перепись HK
+         * (MACRUNNER_HB_INTERP_SHAPES) — ~19 % всех вызовов интерпретатора после нативной SSE.
+         * Интерпретатор здесь делает ровно три вещи: hb_lazy_flags_materialize_available(ZF) —
+         * ZF = (result, усечённый до ширины) == 0, если бит не в unsupported_mask и ещё не
+         * вычислен; затем CF; затем hb_lazy_flags_clear (вся запись — нули). SF/OF/PF/AF он не
+         * трогает — и мы не трогаем. Первое и третье — здесь, CF — общим путём ниже. */
+        const uint32_t lz = (uint32_t)offsetof(hb_context_t, lazy_flags);
+        size_t zf_known;
+        emit_ldr_w(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, unsupported_mask));
+        emit_ldr_w(buf, 22, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, materialized_mask));
+        emit_orr_reg(buf, 21, 21, 22);
+        emit_gpr_word(buf, 0x12000000u, 21, 21, 0);         /* AND W21, W21, #1 — бит ZF        */
+        zf_known = emit_cbnz_x_deferred(buf, 21);
+        emit_ldr_x(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, result));
+        emit_ldrb_w(buf, 22, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, width));
+        emit_gpr_word(buf, 0x531d7000u, 22, 22, 0);         /* LSL W22, W22, #3: ширина в битах */
+        emit_mov_imm_compact(buf, 23, 64);
+        emit_gpr_word(buf, 0x4b000000u, 22, 23, 22);        /* SUB W22, W23, W22                */
+        emit_gpr_word(buf, 0x9ac02000u, 21, 21, 22);        /* LSLV X21, X21, X22: верх вон     */
+        emit_cmp_imm(buf, 21, 0);
+        /* ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ теста (MACRUNNER_HB_TEST_BT_ZF_INVERT=1): NE вместо EQ — тест
+         * обязан это увидеть, иначе он не доказывает, что исполнялась именно эта ветвь. */
+        emit_cset_w(buf, 21, hb_jit_gate_flag( HB_GATE_HB_TEST_BT_ZF_INVERT, 0 ) ? 1 : 0);
+        emit_strb_w(buf, 21, 19, (uint32_t)(offsetof(hb_context_t, flags) + offsetof(hb_flags_t, zf)));
+        patch_cbnz_x(buf, zf_known, 21, buf->size);
+        emit_add_imm(buf, 22, 19, lz);                      /* hb_lazy_flags_clear              */
+        emit_stp_x(buf, 31, 31, 22, 0);
+        emit_stp_x(buf, 31, 31, 22, 16);
+        emit_stp_x(buf, 31, 31, 22, 32);
+        emit_stp_x(buf, 31, 31, 22, 48);
+        pending_via_helper = false;                         /* и дальше — общим путём           */
+    } else {
+        emit_interp_ir_helper(buf, instr);
+        pending_done = emit_b_deferred(buf);
+    }
     patch_bcond(buf, flags_ready, 0, buf->size);
 
     if (!emit_load_gpr_sized_to_reg(buf, &target, 20))
@@ -9287,7 +9336,7 @@ static bool emit_native_bit_test(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
     emit_store_flag_bool_from_w(buf, 22, offsetof(hb_flags_t, cf));
 
     if (instr->op == HB_IR_BT) {
-        patch_b(buf, pending_done, buf->size);
+        if (pending_via_helper) patch_b(buf, pending_done, buf->size);
         return true;
     }
 
@@ -9307,7 +9356,7 @@ static bool emit_native_bit_test(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
             return false;
     }
     emit_store_x20_to_gpr_sized(buf, &target);
-    patch_b(buf, pending_done, buf->size);
+    if (pending_via_helper) patch_b(buf, pending_done, buf->size);
     return true;
 }
 
