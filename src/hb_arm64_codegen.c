@@ -4084,7 +4084,7 @@ static void emit_block_counter_accounting(hb_codegen_buffer_t* buf, uint32_t ste
  * С гейтом ветвь провала получает СВОЙ полный эпилог (выгрузка + слот + возврат) вместо
  * перехода к общему — слотов становится два, по одному на цель. */
 static int jit_chain_two_slots_enabled(void) {
-    return hb_jit_gate_flag( HB_GATE_HB_CHAIN_TWO_SLOTS, 0);
+    return hb_jit_gate_flag( HB_GATE_HB_CHAIN_TWO_SLOTS, 1);   /* 27.09: умолчание 1, см. hb_runtime.c */
 }
 
 /* Щель ВТОРОЙ цели — семь слов НЕПОСРЕДСТВЕННО перед основной щелью, поэтому её адрес

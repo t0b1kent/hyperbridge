@@ -784,6 +784,7 @@ static __thread uint64_t t_findblock_max_n;
     X(CHAIN_SITE_CALLED,        "site_called") \
     X(CHAIN_SITE_PATCH_OFF,     "site_patch_off") \
     X(CHAIN_SITE_NO_ENTRY,      "site_no_entry") \
+    X(CHAIN_SITE_AFTER_RUN,     "site_after_run") \
     X(CHAIN_DECL_GATE,          "gate") \
     X(CHAIN_DECL_INVALID,       "invalid") \
     X(CHAIN_DECL_NOMETA,        "nometa") \
@@ -825,7 +826,10 @@ static __thread uint64_t t_findblock_max_n;
      * ведут в код, который вот-вот заменят, а отменить их уже нечем. Ветвь \
      * молчала: одно событие с двумя совершенно разными смыслами, и различить их \
      * было нельзя. Считаем ТОЛЬКО опасный смысл. */ \
-    X(CHAIN_DECL_NOUNCHAIN,      "РАСЦЕПИТЬ_НЕ_СМОГЛИ")
+    X(CHAIN_DECL_NOUNCHAIN,      "РАСЦЕПИТЬ_НЕ_СМОГЛИ") \
+    /* Claude 27.09.2026 — щель вела в трамплин ВЫСЕЛЕННОЙ записи той же цели: перешита. */ \
+    X(CHAIN_DECL_STALE,          "stale") \
+    X(CHAIN_DECL_STALE2,         "stale2")
 
 enum {
 #define HB_CHAIN_DECLINE_ENUM(imya, stroka) imya,
@@ -3944,7 +3948,19 @@ static int runtime_chain_direct_enabled(void) {
 }
 
 static int runtime_chain_two_slots_enabled(void) {
-    return runtime_gate_flag( HB_GATE_HB_CHAIN_TWO_SLOTS, 0);
+    /* 27.09.2026 — умолчание 1 по решению владельца: HK −12,5 % до сцены меню, −10,4 % до ролика,
+     * `make test` проходит с гейтом для всего набора. Другие игры не мерены — выключить: =0. */
+    return runtime_gate_flag( HB_GATE_HB_CHAIN_TWO_SLOTS, 1);
+}
+
+static int runtime_chain_after_run_enabled(void) {
+    return runtime_gate_flag( HB_GATE_HB_CHAIN_AFTER_RUN, 0);
+}
+
+/* Claude 27.09.2026 — ПЕРЕШИВКА МЁРТВОГО ТРАМПЛИНА (см. patch_block_tail). Умолчание 1; =0 возвращает
+ * прежнее «уже сшито с этой целью» по одному гостевому адресу — только для парного замера. */
+static int runtime_chain_restitch_enabled(void) {
+    return runtime_gate_flag( HB_GATE_HB_CHAIN_RESTITCH, 1);
 }
 
 static int runtime_indirect_ic_ret_enabled(void) {
@@ -5280,6 +5296,18 @@ static uint64_t smc_hash_current(hb_jit_runtime_t* rt, uint64_t start, size_t le
      * hb_memory_read на macOS копирует хозяйским memcpy и падает SIGBUS вне обработки отказов,
      * если регион заявлен шире, чем отображён. Слияние блоков растит span и попадает туда. */
     if (!hb_memory_can_read_span(rt->ctx->memory, start, len)) return 0;
+    /* ★ Claude 27.09.2026 — СВЕРКА БЕЗ ВЫЗОВА ЯДРА (гейт MACRUNNER_HB_SMC_DIRECT_HASH, умолчание 0).
+     * С aab4391 копия шла через hb_memory_read_nofault = mach_vm_read_overwrite: вызов ядра и 4 КБ копии на
+     * КАЖДЫЙ вход диспетчера в код из записываемой памяти (Mono JIT). Профиль HK на экране языка, главный
+     * поток: smc_reverify_entry 27,8-31,3 % всех отсчётов, из них mach_vm_read_overwrite 22,4-23,2 %.
+     * Страховка nofault нужна была от УСТАРЕВШЕЙ карты (SIGBUS 42 с); причину сняла та же правка —
+     * освобождения и MEM_DECOMMIT снимаются из карты по диапазону (hb_memory_unmap_range). Здесь участок уже
+     * проверен can_read_span; целиком в ОДНОЙ области — хешируем прямо по хозяйскому указателю, без копии.
+     * Через границу областей — прежний путь. */
+    if (runtime_gate_flag( HB_GATE_HB_SMC_DIRECT_HASH, 0)) {
+        const uint8_t* hp = (const uint8_t*)hb_memory_host_ptr(rt->ctx->memory, start, len, HB_PERM_READ);
+        if (hp) return smc_fnv1a(hp, len);
+    }
     if (hb_memory_read_nofault(rt->ctx->memory, start, bytes, len) != HB_OK) return 0;
     return smc_fnv1a(bytes, len);
 }
@@ -8817,11 +8845,90 @@ uint64_t hb_runtime_chain_tramp_misses(void) {
     return __atomic_load_n(&g_tramp_promah, __ATOMIC_RELAXED);
 }
 
+/* Claude 27.09.2026 — МЕСТА ПРОМАХОВ СТРАЖА (гейт MACRUNNER_HB_TRAMP_MISS_SITES, умолчание 0).
+ * Прибор ниже печатает одну выборку на степень двойки; чтобы выбрать следующую цель, нужна раскладка
+ * по парам «ждали/было». С гейтом CHAIN_TWO_SLOTS промахов на HK всё ещё больше 2^29, и одна пара
+ * (0x15eac3f87/0x15eac3f94) мажет с гейтом и без. Таблица без блокировок: при гонке возможен дубль
+ * строки — для раскладки это допустимо. Печать — верхние 20 на степенях двойки начиная с 2^26, с
+ * байтами гостевого кода по обоим адресам и последним родным адресом источника (X30, при BL). */
+#define HB_TMS_SLOTS 8192u
+static struct { uint64_t want, got, n, src; } g_tms[HB_TMS_SLOTS];
+static uint64_t g_tms_lost;
+static int tramp_miss_sites_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) cached = runtime_gate_flag( HB_GATE_HB_TRAMP_MISS_SITES, 0 );
+    return cached;
+}
+static void tms_note(uint64_t want, uint64_t got, uint64_t src) {
+    uint64_t h = ((want * 0x9e3779b97f4a7c15ull) ^ (got * 0xc2b2ae3d27d4eb4full)) >> 51;
+    unsigned k;
+    for (k = 0; k < 16; k++) {
+        unsigned i = (unsigned)((h + k) & (HB_TMS_SLOTS - 1u));
+        uint64_t w = __atomic_load_n(&g_tms[i].want, __ATOMIC_ACQUIRE);
+        if (w == 0) {
+            uint64_t zero = 0;
+            if (__atomic_compare_exchange_n(&g_tms[i].want, &zero, want, false,
+                                            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                __atomic_store_n(&g_tms[i].got, got, __ATOMIC_RELEASE);
+                w = want;
+            } else {
+                w = zero;
+            }
+        }
+        if (w == want && __atomic_load_n(&g_tms[i].got, __ATOMIC_ACQUIRE) == got) {
+            __atomic_add_fetch(&g_tms[i].n, 1, __ATOMIC_RELAXED);
+            if (src) __atomic_store_n(&g_tms[i].src, src, __ATOMIC_RELAXED);
+            return;
+        }
+    }
+    __atomic_add_fetch(&g_tms_lost, 1, __ATOMIC_RELAXED);
+}
+static void tms_print(hb_context_t* ctx, uint64_t total) {
+    unsigned top[20], nt = 0, i, j;
+    for (i = 0; i < HB_TMS_SLOTS; i++) {
+        uint64_t n = __atomic_load_n(&g_tms[i].n, __ATOMIC_RELAXED);
+        if (!n) continue;
+        if (nt < 20) top[nt++] = i;
+        else {
+            unsigned m = 0;
+            for (j = 1; j < nt; j++) if (g_tms[top[j]].n < g_tms[top[m]].n) m = j;
+            if (n > g_tms[top[m]].n) top[m] = i;
+        }
+    }
+    for (i = 0; i < nt; i++)
+        for (j = i + 1; j < nt; j++)
+            if (g_tms[top[j]].n > g_tms[top[i]].n) { unsigned t = top[i]; top[i] = top[j]; top[j] = t; }
+    fprintf(stderr, "macrunner-hb-tramp-miss-sites: total=%llu lost=%llu top=%u\n",
+            (unsigned long long)total, (unsigned long long)g_tms_lost, nt);
+    for (i = 0; i < nt; i++) {
+        uint8_t bw[16] = {0}, bg[16] = {0};
+        char hw[33], hg[33];
+        unsigned q;
+        if (ctx && ctx->memory) {
+            (void)hb_memory_read_nofault(ctx->memory, g_tms[top[i]].want, bw, sizeof(bw));
+            (void)hb_memory_read_nofault(ctx->memory, g_tms[top[i]].got, bg, sizeof(bg));
+        }
+        for (q = 0; q < 16; q++) { snprintf(hw + 2 * q, 3, "%02x", bw[q]); snprintf(hg + 2 * q, 3, "%02x", bg[q]); }
+        fprintf(stderr, "macrunner-hb-tramp-miss-site: #%u n=%llu (%.1f%%) ждали=%#llx было=%#llx src_native=%#llx "
+                        "код_ждали=%s код_было=%s\n",
+                i + 1, (unsigned long long)g_tms[top[i]].n,
+                total ? 100.0 * (double)g_tms[top[i]].n / (double)total : 0.0,
+                (unsigned long long)g_tms[top[i]].want, (unsigned long long)g_tms[top[i]].got,
+                (unsigned long long)g_tms[top[i]].src, hw, hg);
+    }
+    fflush(stderr);
+}
+
 static void tramp_snyat_svidetelya(hb_context_t* ctx)
 {
     uint64_t n;
     if (!ctx || !ctx->chain_mispredict) return;
     n = __atomic_add_fetch(&g_tramp_promah, 1, __ATOMIC_RELAXED);
+    if (tramp_miss_sites_enabled()) {
+        tms_note(ctx->chain_mispredict, ctx->chain_mispredict_pc,
+                 chain_src_link_enabled() ? ctx->chain_exit_src : 0);
+        if (n >= (1ull << 26) && (n & (n - 1)) == 0) tms_print(ctx, n);
+    }
     if (n <= 8 || (n & (n - 1)) == 0)   /* первые восемь и дальше кратно двум */
         fprintf(stderr, "macrunner-hb-трамплин-промах: n=%llu ждали=%#llx было=%#llx "
                         "pc_в_C=%#llx eip=%#x arch=%d\n",
@@ -8888,7 +8995,7 @@ static bool chain_tramp_layout(const uint8_t* dest, struct hb_chain_tramp_layout
     out->expect_lit = off;
     out->live_lit = off + 8;
     out->evict_bail = off + 16;
-    out->total = out->evict_bail + 6 * 4;
+    out->total = out->evict_bail + 7 * 4;   /* +1: свидетель источника на выходе выселения */
     return out->total <= HB_CHAIN_TRAMPOLINE_BYTES;
 }
 
@@ -8966,8 +9073,12 @@ static uint8_t* chain_trampoline_build_at(uint8_t* out, const uint8_t* at, uint8
                     arm64_ldr_x_literal(1, (ptrdiff_t)L.expect_lit - (ptrdiff_t)L.evict_bail));
     arm64_store_u32(NULL, bail + 4, arm64_str_x_off(1, 0,
                                      (uint32_t)offsetof(hb_context_t, pc)));
+    /* Claude 27.09.2026: свидетель источника и на выходе выселения — как у промаха. Без него источник,
+     * дошедший сюда ПО ЦЕПОЧКЕ, диспетчеру неизвестен, и мёртвую щель перешить нечем. */
+    arm64_store_u32(NULL, bail + 8, arm64_str_x_off(30, 0,
+                                     (uint32_t)offsetof(hb_context_t, chain_exit_src)));
     for (i = 0; i < 4; i++)
-        arm64_store_u32(NULL, bail + 8 + i * 4, epilogue[i]);
+        arm64_store_u32(NULL, bail + 12 + i * 4, epilogue[i]);
 
     __atomic_store_n((uint64_t*)(void*)(out + L.expect_lit), guest_addr, __ATOMIC_RELAXED);
     __atomic_store_n((uint64_t*)(void*)(out + L.live_lit), (uint64_t)(uintptr_t)live_entry,
@@ -9386,6 +9497,24 @@ static bool patch_block_tail(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
     }
     meta = block_cache_chain_meta(rt->block_cache, cur, true);
     if (!meta) { t_chain_decline[CHAIN_DECL_NOMETA]++; return false; }
+    /* ★ Claude 27.09.2026 — МЁРТВЫЙ ТРАМПЛИН ПОСЛЕ ВЫСЕЛЕНИЯ ЦЕЛИ.
+     * Щель сшита по ГОСТЕВОМУ адресу цели, а ведёт в трамплин конкретной ЗАПИСИ. Выселение (SMC, сброс
+     * диапазона, повторный перевод) переводит трамплин старой записи на выход в диспетчер, а новый перевод
+     * того же адреса получает НОВЫЙ трамплин; обход входящих рёбер (MACRUNNER_HB_UNCHAIN_WALK) в наборе
+     * выключен ради скорости. Проверка ниже сравнивала только гостевой адрес и отвечала «уже сшито» —
+     * щель вела в мёртвый трамплин навсегда, и КАЖДОЕ исполнение ребра шло через диспетчер.
+     * Перепись HK на экране языка (главный поток): already=26,1 млн при 160 тыс. сшивок; в прогоне с
+     * ~500 выселениями SMC на экране языка FPS упал с 41 до 35 и не вернулся. Сверяем трамплин щели с
+     * ТЕКУЩИМ трамплином цели и при расхождении перешиваем обычным путём ниже — за O(1) вместо обхода. */
+    if (meta->target_code && meta->guest_addr == next->guest_addr &&
+        runtime_chain_restitch_enabled()) {
+        uint8_t* live = chain_trampoline_for(rt, next);
+        if (live && live != meta->target_code) {
+            t_chain_decline[CHAIN_DECL_STALE]++;
+            meta->target_code = NULL;
+            meta->guest_addr = 0;
+        }
+    }
     if (meta->target_code) {
         t_chain_decline[CHAIN_DECL_ALREADY]++;
         /* Слот сцепления ОДИН на блок (четыре NOP перед эпилогом, см. entry_has_chain_slot).
@@ -9409,8 +9538,18 @@ static bool patch_block_tail(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
         if (runtime_chain_two_slots_enabled()) {
             /* Первая щель занята ЧУЖОЙ целью. У блока с условным переходом есть вторая —
              * её и займём, вместо того чтобы отказывать (что и делали 4,7 млн раз). */
-            if (meta->slot2_target_code)
+            if (meta->slot2_target_code) {
+                /* Та же мёртвая цель во второй щели: перешиваем её же словами (см. выше). */
+                if (meta->slot2_guest_addr == next->guest_addr && meta->slot2_patch_offset &&
+                    runtime_chain_restitch_enabled()) {
+                    uint8_t* live = chain_trampoline_for(rt, next);
+                    if (live && live != meta->slot2_target_code) {
+                        t_chain_decline[CHAIN_DECL_STALE2]++;
+                        return chain_patch_slot2(rt, cur, next, meta, meta->slot2_patch_offset);
+                    }
+                }
                 return meta->slot2_guest_addr == next->guest_addr;
+            }
             {
                 size_t off2 = entry_second_slot_offset(cur);
                 if (off2 && chain_patch_slot2(rt, cur, next, meta, off2))
@@ -14045,7 +14184,10 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
     if (rt) runtime_apply_pending_inval(rt);
     /* Порог разогрева считается здесь: через эту точку проходит КАЖДЫЙ вход в диспетчер,
      * в отличие от зондов, один из которых лежит на редкой ветви. */
-    __atomic_add_fetch(&g_dispatch_ticks, 1, __ATOMIC_RELAXED);
+    /* Claude 27.09.2026: счётчик читает ТОЛЬКО разогрев сцепления (chain_warmup_passed), а при
+     * MACRUNNER_HB_CHAIN_AFTER_N=0 (умолчание) тот отвечает «пройден», не глядя. Глобальный атомарный
+     * инкремент на каждом входе в диспетчер гонял строку кеша между ядрами (3+ занятых потока HK). */
+    if (runtime_chain_after_n()) __atomic_add_fetch(&g_dispatch_ticks, 1, __ATOMIC_RELAXED);
 
     /* По архитектуре ГОСТЯ — см. runtime_block_chain_enabled_for. */
     int block_chain = runtime_block_chain_enabled_for(rt && rt->ctx ? rt->ctx->arch
@@ -14323,7 +14465,7 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
              * -- chaining changes how many dispatcher entries there are, which is the whole point of
              * it -- but by (guest_addr, k-th occurrence of that address), which the comparison script
              * does. So the emitted line only needs the address and a global index. */
-            __atomic_add_fetch(&g_dispatch_ticks, 1, __ATOMIC_RELAXED);
+            if (runtime_chain_after_n()) __atomic_add_fetch(&g_dispatch_ticks, 1, __ATOMIC_RELAXED);
             if (trace_chain_edge_enabled() &&
                 (runtime_chain_edge_near() == 0 ||
                  cached->guest_addr == runtime_chain_edge_near())) {
@@ -14829,6 +14971,33 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             return HB_OK;
         }
         if (chain_accounting && run_block_delta > 1) {
+            /* Claude 27.09.2026 — СШИВКА ПОСЛЕ ЦЕПОЧКИ (гейт MACRUNNER_HB_CHAIN_AFTER_RUN, умолчание 0).
+             *
+             * Заход, исполнивший больше одного блока, уходил отсюда на следующий оборот, минуя место
+             * сшивки ниже: без свидетеля было неизвестно, КАКОЙ блок цепочки вышел, а `block` здесь —
+             * блок входа. Когда цепочки стали длинными (перепись HK с двумя щелями: в среднем 6,2 блока
+             * на вход), сюда пошли почти все выходы: 1,352 млрд входов в диспетчер и лишь 102 566
+             * попыток сшивки (site_called), вторая щель сшита 127 раз. Последний блок цепочки так и
+             * возвращался в диспетчер. Свидетель источника (chain_exit_src, при CHAIN_TWO_SLOTS) его
+             * называет — сшиваем его со следующим блоком тем же patch_block_tail, что и ниже: она сама
+             * отбрасывает несшиваемое (RET, косвенные, чужой кадр). */
+            if (runtime_chain_after_run_enabled() && chain_patch_enabled && ctx->chain_exit_src &&
+                chain_src_link_enabled()) {
+                hb_block_cache_entry_t* src_e = block_cache_find_exit_src(rt->block_cache,
+                                                                          ctx->chain_exit_src);
+                /* Claude 27.09.2026: источник на RET и прочих несшиваемых завершителях — отказ заведомый
+                 * (terminal=65,9 млн у главного потока HK на экране языка); второй поиск и вызов не делаем. */
+                if (src_e && !block_terminal_is_chainable(src_e->block)) {
+                    tls_chain_decline[CHAIN_DECL_TERMINAL]++;
+                    src_e = NULL;
+                }
+                hb_block_cache_entry_t* nx_e = src_e ? block_cache_find(rt->block_cache, ctx->pc) : NULL;
+                if (src_e && nx_e && nx_e->valid && nx_e->native_code) {
+                    if (chain_accounting) tls_chain_decline[CHAIN_SITE_AFTER_RUN]++;
+                    (void)patch_block_tail(rt, src_e, nx_e, func);
+                }
+            }
+            ctx->chain_exit_src = 0;
             continue;
         }
 
