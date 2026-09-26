@@ -297,8 +297,17 @@ static bool compute_flag(const hb_lazy_flags_t* lf, uint32_t bit) {
                 case HB_LAZY_FLAGS_SHL:
                     return (lf->count <= msb + 1) ? (((lhs >> (msb + 1 - lf->count)) & 1ULL) != 0) : false;
                 case HB_LAZY_FLAGS_SHR:
-                case HB_LAZY_FLAGS_SAR:
                     return ((lhs >> (lf->count - 1)) & 1ULL) != 0;
+                case HB_LAZY_FLAGS_SAR: {
+                    /* 26.09.2026 — ПОСЛЕДНИЙ ВЫДВИНУТЫЙ БИТ У SAR — ЗНАКОВЫЙ, и при счётчике
+                     * не меньше ширины тоже (у 8/16 бит маска 31 это допускает). Было
+                     * `lhs >> (count-1)` от значения БЕЗ расширения знака: за пределами
+                     * операнда нули, CF=0. Оракул Астры (HBFL0001, полный корпус):
+                     * `sar al, cl`, AL=0xFF, CL=9 — железо CF=1, мы 0, у обоих исполнителей. */
+                    int64_t slhs = (int64_t)(lhs << (63 - msb)) >> (63 - msb);
+                    unsigned k = (unsigned)(lf->count - 1) > 63 ? 63 : (unsigned)(lf->count - 1);
+                    return ((slhs >> k) & 1) != 0;
+                }
                 default:
                     return false;
             }
@@ -307,18 +316,19 @@ static bool compute_flag(const hb_lazy_flags_t* lf, uint32_t bit) {
                 case HB_LAZY_FLAGS_ADD:
                 case HB_LAZY_FLAGS_INC:   /* итерация 389: OF у INC считается как у ADD */
                     return ((lhs ^ res) & (rhs ^ res) & sign) != 0;
-                case HB_LAZY_FLAGS_ADC: {
-                    uint64_t erhs = trunc_val(rhs + (lf->count ? 1 : 0), sz);
-                    return ((lhs ^ res) & (erhs ^ res) & sign) != 0;
-                }
+                /* 26.09.2026 — OF у ADC и SBB считается по ИСХОДНОМУ rhs, как у ADD и SUB: перенос
+                 * входит через результат. Прежний `erhs = rhs + CF` при rhs = 0x7F…F и CF=1
+                 * переворачивал знак правого операнда. Оракул Астры (HBFL0001, полный корпус):
+                 * `adc al, dl` 0 + 0x7F + 1 = 0x80 — железо OF=1, мы 0; `sbb al, dl` 0 - 0x7F - 1
+                 * = 0x80 — железо OF=0, мы 1. У обоих исполнителей: помощник у них общий. */
+                case HB_LAZY_FLAGS_ADC:
+                    return ((lhs ^ res) & (rhs ^ res) & sign) != 0;
                 case HB_LAZY_FLAGS_SUB:
                 case HB_LAZY_FLAGS_DEC:   /* итерация 389: OF у DEC считается как у SUB */
                 case HB_LAZY_FLAGS_CMP:
                     return ((lhs ^ rhs) & (lhs ^ res) & sign) != 0;
-                case HB_LAZY_FLAGS_SBB: {
-                    uint64_t erhs = trunc_val(rhs + (lf->count ? 1 : 0), sz);
-                    return ((lhs ^ erhs) & (lhs ^ res) & sign) != 0;
-                }
+                case HB_LAZY_FLAGS_SBB:
+                    return ((lhs ^ rhs) & (lhs ^ res) & sign) != 0;
                 case HB_LAZY_FLAGS_AND:
                 case HB_LAZY_FLAGS_OR:
                 case HB_LAZY_FLAGS_XOR:
@@ -636,11 +646,17 @@ uint64_t hb_flags_exec_binop(hb_context_t* ctx, hb_ir_op_t op,
             uint64_t tlhs = trunc_val(lhs, size);
             uint64_t raw_count = rhs & ((size == HB_SIZE_64) ? 0x3FULL : 0x1FULL);
             count = raw_count % width;
-            if (count == 0) {
+            /* 26.09.2026 — ФЛАГИ НЕ ТРОГАЕТ ТОЛЬКО НУЛЕВОЙ МАСКИРОВАННЫЙ СЧЁТЧИК. У 8/16 бит
+             * счётчик 8/16/24 даёт тот же результат, но CF обязан стать крайним битом
+             * результата. Было `count % width == 0` -> ранний выход. Оракул Астры (HBFL0001):
+             * `ror al, cl`, AL=0, CL=8, CF=1 на входе — железо CF=0, мы 1. */
+            if (raw_count == 0) {
                 write_reg_value_sized_offset(ctx, dst_reg, tlhs, size, dst_reg_offset);
                 return tlhs;
             }
-            if (op == HB_IR_ROL) {
+            if (count == 0) {
+                result = tlhs;
+            } else if (op == HB_IR_ROL) {
                 result = ((tlhs << count) | (tlhs >> (width - count))) & mask;
             } else {
                 result = ((tlhs >> count) | (tlhs << (width - count))) & mask;
@@ -860,14 +876,15 @@ hb_result_t hb_flags_exec_binop_operand(hb_context_t* ctx, hb_ir_op_t op,
             uint64_t tlhs = trunc_val(lhs, dst->size);
             uint64_t raw_count = rhs & ((dst->size == HB_SIZE_64) ? 0x3FULL : 0x1FULL);
             count = raw_count % width;
-            if (count == 0) {
+            if (raw_count == 0) {   /* см. регистровый путь выше: CF трогает любой ненулевой */
                 result = tlhs;
                 r = hb_flags_write_operand_value(ctx, dst, result);
                 if (r != HB_OK) return r;
                 if (out) *out = result;
                 return HB_OK;
             }
-            if (op == HB_IR_ROL) result = ((tlhs << count) | (tlhs >> (width - count))) & mask;
+            if (count == 0) result = tlhs;
+            else if (op == HB_IR_ROL) result = ((tlhs << count) | (tlhs >> (width - count))) & mask;
             else result = ((tlhs >> count) | (tlhs << (width - count))) & mask;
             r = hb_flags_write_operand_value(ctx, dst, result);
             if (r != HB_OK) return r;

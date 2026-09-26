@@ -6700,9 +6700,14 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
             unsigned count = (unsigned)(raw_count & (width == 64 ? 0x3fU : 0x1fU));
             unsigned ring = width + 1;
             if (width <= 16) count %= ring;
-            if (count == 0) return HB_OK;
-
             value = trunc_to_size(value, size);
+            /* 26.09.2026 — СЧЁТЧИК 0 ТОЖЕ ПИШЕТ ПРИЁМНИК, флаги не трогает. Для r32 это
+             * обнуляет верх регистра, как у SHL/SHR/SAR/ROL/ROR/SHLD/SHRD в hb_flags.c.
+             * Было `return HB_OK` без записи: аппаратный оракул Астры (HBFL0001,
+             * flags-smoke) — 260 из 19 588 случаев `rcl/rcr r32, cl` при CL&31 == 0
+             * у ОБОИХ исполнителей: rax=dadabeef00000000 против 0. */
+            if (count == 0) return write_operand_value(ctx, &instr->dst, value);
+
             uint64_t value_mask = mask_for_size(size);
             unsigned __int128 ring_mask = (((unsigned __int128)1) << ring) - 1;
             unsigned __int128 combined = (((unsigned __int128)(ctx->flags.cf ? 1 : 0)) << width) | value;
