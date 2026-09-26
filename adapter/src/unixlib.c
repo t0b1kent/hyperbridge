@@ -2126,8 +2126,14 @@ static NTSTATUS unix_notify_memory_free_impl( void *args )
     if (!params->is_post || params->status || !params->size) return STATUS_SUCCESS;
     if (ensure_process()) return STATUS_NO_MEMORY;
     base = page_floor( (hb_gva_t)(uintptr_t)params->addr );
-    if (!hb_memory_find_region( process_memory, base )) return STATUS_SUCCESS;
-    return status_from_hb( hb_memory_unmap( process_memory, base ) );
+    /* 26.09.2026 — ПО ДИАПАЗОНУ, а не по точной базе: освобождение части области, со смещённой
+     * базой или MEM_DECOMMIT прежде оставляли её в карте HB читаемой (hb_memory_unmap_range). */
+    {
+        hb_result_t r = hb_memory_unmap_range( process_memory, base,
+                                               page_span( (hb_gva_t)(uintptr_t)params->addr,
+                                                          params->size ) );
+        return r == HB_ERR_NOT_FOUND ? STATUS_SUCCESS : status_from_hb( r );
+    }
 }
 
 __attribute__((visibility("default"))) void macrunner_xtajit64_notify_memory_free_unix( void *addr,
@@ -2149,6 +2155,7 @@ static NTSTATUS unix_notify_unmap_view_impl( void *args )
 {
     const struct xtajit64_memory_params *params = args;
     hb_gva_t base;
+    uint64_t gone_lo = 0, gone_hi = 0;   /* границы вида от Wine (пре-уведомление), если есть */
 
     if (!params) return STATUS_INVALID_PARAMETER;
     /* Размер вида здесь не приходит — сброс всего, как прежде.
@@ -2200,6 +2207,8 @@ static NTSTATUS unix_notify_unmap_view_impl( void *args )
             }
             __atomic_add_fetch( &unmap_by_query, 1, __ATOMIC_RELAXED );
             publish_cache_range(HB_CACHE_UNMAP, params->is_post, params->status, lo, hi - lo);
+            gone_lo = pbase;
+            gone_hi = pbase + psize;
             goto unmapped_published;
         }
         if (view && view->size)
@@ -2219,6 +2228,13 @@ unmapped_published:
     if (!params->is_post || params->status) return STATUS_SUCCESS;
     if (ensure_process()) return STATUS_NO_MEMORY;
     base = page_floor( (hb_gva_t)(uintptr_t)params->addr );
+    /* 26.09.2026 — вид образа после смены прав по секциям разрезан на несколько областей, и
+     * снятие по точной базе убирало только первую. Границы вида известны — снимаем их целиком. */
+    if (gone_hi > gone_lo)
+    {
+        hb_result_t r = hb_memory_unmap_range( process_memory, gone_lo, (size_t)(gone_hi - gone_lo) );
+        return r == HB_ERR_NOT_FOUND ? STATUS_SUCCESS : status_from_hb( r );
+    }
     if (!hb_memory_find_region( process_memory, base )) return STATUS_SUCCESS;
     return status_from_hb( hb_memory_unmap( process_memory, base ) );
 }

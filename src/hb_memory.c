@@ -3628,6 +3628,44 @@ hb_result_t hb_memory_unmap(hb_memory_t* mem, hb_gva_t base) {
     return HB_ERR_NOT_FOUND;
 }
 
+/* СНЯТИЕ ПО ДИАПАЗОНУ, 26.09.2026.
+ *
+ * hb_memory_unmap снимает лишь область с базой РОВНО base. Освобождение части области, со
+ * смещённой базой или MEM_DECOMMIT оставляли её в таблице читаемой, и быстрый путь чтения на
+ * macOS копировал хозяйским memcpy по уже снятой странице — SIGBUS в libsystem_platform мимо
+ * обработки гостевых отказов (HK, 42-я секунда, см. hb_memory_read_nofault). Здесь области
+ * режутся по краям и снимается всё внутри — тот же приём, что у hb_memory_guest32_unmap.
+ * Собственную подложку (allocated) снимаем сами: region_free её не трогает. */
+hb_result_t hb_memory_unmap_range(hb_memory_t* mem, hb_gva_t base, size_t size) {
+    hb_gva_t start, top;
+    hb_result_t res;
+    bool touched_exec = false, any = false;
+    hb_region_t* r;
+
+    if (!mem || !size) return HB_ERR_INVALID_ARG;
+    start = page_floor_gva(base);
+    top = page_ceil_gva(base + (hb_gva_t)size);
+    if (top <= start) return HB_ERR_INVALID_ARG;
+    res = split_region_at(mem, start);
+    if (res != HB_OK) return res;
+    res = split_region_at(mem, top);
+    if (res != HB_OK) return res;
+    r = mem->regions;
+    while (r) {
+        hb_region_t* next = r->next;
+        if (r->base >= start && r->base < top) {
+            if (r->perm & HB_PERM_EXEC) touched_exec = true;
+            hb_record_map((uint64_t)r->base, (uint64_t)r->size, (uint32_t)r->perm, HB_REC_MAP_GONE);
+            if (r->allocated && r->host_base) munmap(r->host_base, r->size);
+            remove_region_node(mem, r);
+            any = true;
+        }
+        r = next;
+    }
+    if (touched_exec) bump_generation(mem, NULL);
+    return any ? HB_OK : HB_ERR_NOT_FOUND;
+}
+
 /*
  * Applying a protection change to every region inside [start, top).
  *
@@ -4350,6 +4388,46 @@ static hb_result_t hb_memory_read_inner(hb_memory_t* mem, hb_gva_t addr, void* o
     if (dv_hit) fprintf(stderr, "macrunner-hb-dv-read-mem: -> identity(fallback) val=0x%llx\n", (unsigned long long)(size==8?*(const uint64_t*)out:0));
     hb_copy_width(out, (void*)(uintptr_t)addr, size);
     return HB_OK;
+}
+
+/* ЧТЕНИЕ ДЛЯ НУЖД ТРАНСЛЯТОРА, 26.09.2026 — отказ хоста здесь не гостевой отказ, а «не читается».
+ *
+ * Быстрый путь hb_memory_read на macOS копирует хозяйским memcpy по гостевому адресу. Если
+ * таблица регионов шире отображения (устаревшая запись после освобождения — снятие шло только
+ * по точной базе, см. hb_memory_unmap_range), memcpy падает SIGBUS в libsystem_platform, мимо
+ * обработки гостевых отказов. hb_memory_can_read_span смотрит в ТУ ЖЕ таблицу и этого не видит.
+ * Замер: HK, 2 из 5 прогонов оборвались на 42-й секунде: _platform_memmove <- hb_memory_read_inner,
+ * 206 байт по 0x727a1b0000 (Wine: MEM_FREE; mach: prot=0) -> c0000005 без гостевого кадра ->
+ * c00000bb -> UnityCrashHandler64.exe. Ядерная копия отвечает ошибкой вместо сигнала; вызовов
+ * мало: сверка отпечатка — редкий путь, ключ кеша — раз на перевод блока. */
+hb_result_t hb_memory_read_nofault(hb_memory_t* mem, hb_gva_t addr, void* out, size_t size) {
+#ifdef __APPLE__
+    uint8_t* dst = out;
+    hb_gva_t cur;
+    size_t remaining = size;
+    if (!mem || !out) return HB_ERR_INVALID_ARG;
+    if (!size) return HB_OK;
+    if (!normalize_guest32_mirror_addr(mem, &addr, size)) return HB_ERR_MEMORY_FAULT;
+    if (!hb_memory_can_read_span(mem, addr, size)) return HB_ERR_MEMORY_FAULT;
+    cur = addr;
+    while (remaining) {
+        hb_region_t* r = hb_memory_find_region(mem, cur);
+        size_t chunk;
+        hb_result_t rr;
+        if (!r || cur < r->base || cur >= r->base + r->size) return HB_ERR_MEMORY_FAULT;
+        chunk = (size_t)(r->base + r->size - cur);
+        if (chunk > remaining) chunk = remaining;
+        rr = mach_copy_from_host(dst, r->host_base ? region_host_ptr(r, cur)
+                                                   : (const void*)(uintptr_t)cur, chunk);
+        if (rr != HB_OK) return rr;
+        cur += chunk;
+        dst += chunk;
+        remaining -= chunk;
+    }
+    return HB_OK;
+#else
+    return hb_memory_read(mem, addr, out, size);
+#endif
 }
 
 __thread uint64_t hb_memory_watch_guest_pc, hb_memory_watch_guest_esp, hb_memory_watch_guest_ecx, hb_memory_watch_guest_edi, hb_memory_watch_guest_edx;

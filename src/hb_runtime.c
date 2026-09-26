@@ -5238,7 +5238,7 @@ static uint64_t smc_hash_current(hb_jit_runtime_t* rt, uint64_t start, size_t le
      * hb_memory_read на macOS копирует хозяйским memcpy и падает SIGBUS вне обработки отказов,
      * если регион заявлен шире, чем отображён. Слияние блоков растит span и попадает туда. */
     if (!hb_memory_can_read_span(rt->ctx->memory, start, len)) return 0;
-    if (hb_memory_read(rt->ctx->memory, start, bytes, len) != HB_OK) return 0;
+    if (hb_memory_read_nofault(rt->ctx->memory, start, bytes, len) != HB_OK) return 0;
     return smc_fnv1a(bytes, len);
 }
 
@@ -6863,7 +6863,7 @@ static hb_result_t persistent_cache_key_for_block(hb_jit_runtime_t* rt,
      * читается целиком, блок просто не кешируется. */
     if (!hb_memory_can_read_span(rt->ctx->memory, start, len))
         return HB_ERR_UNSUPPORTED_FEATURE;
-    r = hb_memory_read(rt->ctx->memory, start, bytes, len);
+    r = hb_memory_read_nofault(rt->ctx->memory, start, bytes, len);
     if (r != HB_OK) return r;
     r = hb_cache_key_compute(bytes, len, rt->ctx->arch, persistent_cache_version(), key);
     if (r != HB_OK) return r;
@@ -7505,7 +7505,7 @@ static void trace_jit_helper_fault_operand(const hb_context_t* ctx, const hb_ir_
     if (!trace_runtime_mem_addr(ctx, instr, op, &addr)) return;
     read_size = op->size && op->size < sizeof(value) ? op->size : sizeof(value);
     if (ctx->memory && read_size)
-        read = hb_memory_read(ctx->memory, addr, &value, read_size);
+        read = hb_memory_read_nofault(ctx->memory, addr, &value, read_size);
     fprintf(stderr,
             "macrunner-hb-jit-helper-fail-mem: guest=%p role=%s addr=%p size=%u "
             "read=%s value=%p base=%u index=%u scale=%u disp=%lld\n",
@@ -12668,7 +12668,7 @@ static bool unity_sort_comparator_ready(hb_context_t* ctx,
         return false;
     if (equal_addr != cmp->guest_addr + 0x06 || less_addr != cmp->guest_addr + 0x0d)
         return false;
-    if (hb_memory_read(ctx->memory, cmp->guest_addr, bytes, sizeof(bytes)) != HB_OK)
+    if (hb_memory_read_nofault(ctx->memory, cmp->guest_addr, bytes, sizeof(bytes)) != HB_OK)
         return false;
     return memcmp(bytes, unity_cmp_bytes, sizeof(bytes)) == 0;
 }

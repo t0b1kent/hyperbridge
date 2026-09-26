@@ -154,6 +154,8 @@ hb_result_t hb_memory_map_private(hb_memory_t* mem, hb_gva_t base, size_t size, 
  * authoritative, fully covered region.  This never changes host VM protection. */
 hb_result_t hb_memory_sync_live_range(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm);
 hb_result_t hb_memory_unmap(hb_memory_t* mem, hb_gva_t base);
+/* Снять всё, что лежит в [base, base+size): области режутся по краям. HB_ERR_NOT_FOUND — нечего. */
+hb_result_t hb_memory_unmap_range(hb_memory_t* mem, hb_gva_t base, size_t size);
 hb_result_t hb_memory_protect(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm);
 
 hb_result_t hb_memory_guest32_reserve(hb_memory_t* mem);
@@ -171,6 +173,9 @@ uint64_t hb_memory_generation(const hb_memory_t* mem);
 uint64_t hb_memory_region_generation(hb_memory_t* mem, hb_gva_t addr);
 
 hb_result_t hb_memory_read(hb_memory_t* mem, hb_gva_t addr, void* out, size_t size);
+/* Чтение для нужд транслятора (отпечаток SMC, ключ кеша, сверка образцов): отказ хоста -> ошибка,
+ * а не сигнал. Для гостевых обращений — hb_memory_read. См. hb_memory.c. */
+hb_result_t hb_memory_read_nofault(hb_memory_t* mem, hb_gva_t addr, void* out, size_t size);
 hb_result_t hb_memory_write(hb_memory_t* mem, hb_gva_t addr, const void* in, size_t size);
 void* hb_memory_host_ptr(hb_memory_t* mem, hb_gva_t addr, size_t size, hb_perm_t perm);
 
