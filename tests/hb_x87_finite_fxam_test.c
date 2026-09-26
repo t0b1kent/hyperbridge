@@ -29,8 +29,9 @@ typedef struct {hb_context_t *ctx;hb_decoder_t *decoder;hb_ir_func_t *func;hb_in
 static const sample_t normals[]={
     {"positive_five_quarters",R(0x3fff,0xa000000000000000,0x3ff4000000000000,0),0x0400,0x0400},
     {"negative_five_quarters",R(0xbfff,0xa000000000000000,0xbff4000000000000,0),0x0600,0x0600},
-    {"positive_binary64_subnormal_preview",R(0x3bcd,0x8000000000000000,0x0000000000000001,0),0x0400,0x4400},
-    {"negative_binary64_subnormal_preview",R(0xbbcd,0x8000000000000000,0x8000000000000001,0),0x0600,0x4600},
+    /* 26.09.2026: денормаль double — нормальное число в 80-битном регистре; и без кеша класс «нормальное». */
+    {"positive_binary64_subnormal_preview",R(0x3bcd,0x8000000000000000,0x0000000000000001,0),0x0400,0x0400},
+    {"negative_binary64_subnormal_preview",R(0xbbcd,0x8000000000000000,0x8000000000000001,0),0x0600,0x0600},
     {"positive_power_minus1200",R(0x3b4f,0x8000000000000000,0x0000000000000000,0),0x0400,0x4000},
     {"negative_power_minus1200",R(0xbb4f,0x8000000000000000,0x8000000000000000,0),0x0600,0x4200},
     {"positive_power_plus1200",R(0x44af,0x8000000000000000,0x7ff0000000000000,0),0x0400,0x0500},
@@ -53,8 +54,10 @@ static const sample_t uncached[]={
     {"uncached_negative_infinity",R(0x44af,0x8000000000000000,0xfff0000000000000,2),0x0700,0x0700},
     {"uncached_positive_quiet_nan",R(0xc4af,0x8000000000000000,0x7ff8000000000000,2),0x0100,0x0100},
     {"uncached_negative_quiet_nan",R(0x44af,0x8000000000000000,0xfff8000000000000,2),0x0300,0x0300},
-    {"uncached_positive_minimum_subnormal",R(0xc4af,0x8000000000000000,0x0000000000000001,2),0x4400,0x4400},
-    {"uncached_negative_minimum_subnormal",R(0x44af,0x8000000000000000,0x8000000000000001,2),0x4600,0x4600},
+    /* 26.09.2026 — область РАСШИРЕНА: x87 нормализует денормальный double при загрузке, в регистре
+     * нормальное число, класс FXAM «нормальное» (как тег 00 у tag_from_f64 и tag_by_content). */
+    {"uncached_positive_minimum_subnormal",R(0xc4af,0x8000000000000000,0x0000000000000001,2),0x0400,0x0400},
+    {"uncached_negative_minimum_subnormal",R(0x44af,0x8000000000000000,0x8000000000000001,2),0x0600,0x0600},
 };
 /* These rows intentionally retain the old preview classifications. In
  * particular, raw denormal/pseudo/unsupported classification is not expanded. */

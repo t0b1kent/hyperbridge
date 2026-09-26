@@ -74,12 +74,18 @@ static void set_condition_bits(hb_x87_state_t* x87, unsigned c0, unsigned c1,
  * fpclassify is the canonical way to determine the class of a double — keeps
  * the rule centralized rather than re-deriving it at every store site.
  */
+/* Claude 26.09.2026 — ДЕНОРМАЛЬ double В РЕГИСТРЕ x87 НОРМАЛЬНА. Тег считается по 80-битному
+ * содержимому, а у расширенного формата порядок доходит до −16382: любое денормализованное double
+ * (≥ 2^-1074) в регистре — обычное число, тег 00. Прежнее FP_SUBNORMAL -> 10 давало FSCALE 1.0 на
+ * −32768 при округлении хоста вверх (результат 2^-1074) тег «особое» — 7 680 отказов
+ * hb_x87_transcendental_guest_test (ДОЛГ HB-X87-FSCALE). Настоящая денормаль 80 бит в double не
+ * представима (уходит в ноль), поэтому здесь её не бывает. */
 static uint16_t tag_from_f64(double value) {
     switch (fpclassify(value)) {
         case FP_ZERO:      return 0x1u;  /* 01 = zero */
         case FP_NAN:       /* fallthrough */
-        case FP_INFINITE:  /* fallthrough */
-        case FP_SUBNORMAL: return 0x2u;  /* 10 = special */
+        case FP_INFINITE:  return 0x2u;  /* 10 = special */
+        case FP_SUBNORMAL: /* fallthrough: нормальное число в 80-битном регистре */
         case FP_NORMAL:    /* fallthrough */
         default:           return 0x0u;  /* 00 = valid */
     }
@@ -185,7 +191,8 @@ hb_result_t hb_x87_fxam(hb_x87_state_t* x87) {
             case FP_NAN:       c3 = 0u; c2 = 0u; c0 = 1u; break;
             case FP_INFINITE:  c3 = 0u; c2 = 1u; c0 = 1u; break;
             case FP_ZERO:      c3 = 1u; c2 = 0u; c0 = 0u; break;
-            case FP_SUBNORMAL: c3 = 1u; c2 = 1u; c0 = 0u; break;
+            /* Claude 26.09: денормаль double в 80-битном регистре нормальна — как у tag_from_f64. */
+            case FP_SUBNORMAL: /* fallthrough */
             case FP_NORMAL:    c3 = 0u; c2 = 1u; c0 = 0u; break;
             default:           c3 = 0u; c2 = 0u; c0 = 0u; break;
         }

@@ -343,8 +343,11 @@ static void seed(fixture_t *f,const sample_t *s,unsigned top,unsigned pc,unsigne
     c->flags=(hb_flags_t){.cf=true,.pf=true,.af=true,.zf=true,.of=true};memset(&c->lazy_flags,0,sizeof(c->lazy_flags));c->mxcsr=0x5fa1;c->pc=CODE;c->last_result=HB_OK;c->last_fault_kind=HB_FAULT_KIND_NONE;c->last_fault_addr_valid=0;c->step_limit=8;c->block_limit=2;
     c->fs_base=0x11110000;c->gs_base=0x22220000;c->seg_cs=0x33;c->seg_ds=0x2b;c->seg_es=0x31;c->seg_fs=0x53;c->seg_gs=0x61;c->seg_ss=0x69;
 }
+/* 26.09.2026: денормаль double в 80-битном регистре x87 — нормальное число (x87 нормализует
+ * источник при загрузке), архитектурный тег 00. Прежнее exp==0 -> 2 повторяло ошибку движка
+ * tag_from_f64 и расходилось с hb_x87_transcendental_guest_test (FSCALE до 2^-1074). */
 static unsigned preview_tag(uint64_t bits)
-{uint64_t mag=bits&UINT64_C(0x7fffffffffffffff);unsigned exp=(unsigned)(mag>>52);return !mag?1u:(exp==0||exp==0x7ff)?2u:0u;}
+{uint64_t mag=bits&UINT64_C(0x7fffffffffffffff);unsigned exp=(unsigned)(mag>>52);return !mag?1u:(exp==0x7ff)?2u:0u;}
 static void check_state(fixture_t *f,const hb_context_t *before,const answer_t *answer,int admitted,int empty,int memory_fault)
 {
     hb_context_t expected;memcpy(&expected,before,sizeof(expected));hb_x87_state_t *x=hb_context_x87(f->ctx),*e=hb_context_x87(&expected);
