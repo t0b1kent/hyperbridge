@@ -2137,6 +2137,7 @@ static void block_cache_destroy(hb_block_cache_t* cache) {
     free(cache->used_slots);
     free(cache->chain_meta);
     free(cache->entries);
+    free(cache->nend_map);
     free(cache);
 }
 
@@ -2704,6 +2705,45 @@ static hb_block_cache_entry_t* block_cache_find(hb_block_cache_t* cache, uint64_
     return NULL;
 }
 
+/* ═══ Claude 26.09.2026 — ИСТОЧНИК ВЫХОДА ЗА O(1) ═══
+ * Свидетель выхода стоит на ФИКСИРОВАННОМ месте от конца кода блока (основная щель — последние
+ * 32 байта перед концом, вторая — 28 байт перед ней): ADR и BL основной щели дают конец−24, BL
+ * второй — конец−32. Поэтому ключ — конец кода. block_cache_find_native_pc перебирает ВЕСЬ кеш:
+ * первая редакция звала его на каждом входе в диспетчер, и HK стал медленнее в восемь раз. */
+#define HB_NEND_BITS 18u
+static int chain_src_link_enabled(void);
+static uint32_t nend_hash(uint64_t end) {
+    return (uint32_t)(((end >> 2) * 0x9e3779b97f4a7c15ull) >> (64u - HB_NEND_BITS));
+}
+static void nend_note(hb_block_cache_t* cache, size_t idx) {
+    hb_block_cache_entry_t* e;
+    if (!cache || idx >= cache->size || !chain_src_link_enabled()) return;
+    if (!cache->nend_map) {
+        cache->nend_map = calloc((size_t)1 << HB_NEND_BITS, sizeof(uint32_t));
+        if (!cache->nend_map) return;
+        cache->nend_mask = (1u << HB_NEND_BITS) - 1u;
+    }
+    e = &cache->entries[idx];
+    if (!e->native_code || !e->native_size) return;
+    cache->nend_map[nend_hash((uint64_t)(uintptr_t)(e->native_code + e->native_size))] = (uint32_t)idx + 1u;
+}
+static hb_block_cache_entry_t* block_cache_find_exit_src(hb_block_cache_t* cache, uint64_t witness) {
+    static const uint32_t delta[2] = { 24u, 32u };
+    unsigned k;
+    if (!cache || !cache->nend_map || !witness) return NULL;
+    for (k = 0; k < 2; k++) {
+        const uint64_t end = witness + delta[k];
+        const uint32_t v = cache->nend_map[nend_hash(end)];
+        hb_block_cache_entry_t* e;
+        if (!v || (size_t)(v - 1u) >= cache->size) continue;
+        e = &cache->entries[v - 1u];
+        if (e->valid && e->native_code && e->native_size &&
+            (uint64_t)(uintptr_t)(e->native_code + e->native_size) == end)
+            return e;
+    }
+    return NULL;
+}
+
 /* A chained block may fault after leaving the entry protected by the guard.
  * Resolve its actual owner after siglongjmp, outside signal context. */
 static hb_block_cache_entry_t* block_cache_find_native_pc(hb_block_cache_t* cache,
@@ -2917,6 +2957,7 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
             cache->entries[probe].fused = fused;
             cache->entries[probe].valid = true;
             cache->count++;
+            nend_note(cache, probe);          /* Claude 26.09: источник выхода, см. nend_note */
             /* MacRunner 2026-08-09 — ЗАНЯТОСТЬ КЕША БЛОКОВ ПО КАЖДОМУ КЕШУ.
              *
              * Счётчики `count`/`used_count` в структуре уже были (с 22.06, для быстрого
@@ -2998,6 +3039,7 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
             cache->entries[probe].block = block;
             cache->entries[probe].owns_block = owns_block || keep_existing_owner;
             cache->entries[probe].fused = fused;
+            nend_note(cache, probe);          /* Claude 26.09: новый код — новый конец */
             smc_track_entry(rt, &cache->entries[probe], block);
             /* Участок, где начинается блок (и его пролёт SMC), — в множество кода. */
             code_granules_mark(rt, addr, addr + 1u);
@@ -8514,8 +8556,11 @@ static bool block_terminal_is_chainable(const hb_ir_block_t* block) {
  * the chain at a new successor); the `meta->target_code` early return upstream is what keeps it from
  * happening needlessly. */
 /* Слова щели второй цели. `cmp` и `b` берём из готовых помощников ниже по файлу
- * (arm64_cmp_x, arm64_b_to) — здесь только те две команды, которых там не было. */
-#define HB_CHAIN_SLOT2_WORDS 6u
+ * (arm64_cmp_x, arm64_b_to) — здесь только те две команды, которых там не было.
+ * Claude 26.09: семь слов, а не шесть — третье `movk x21,#,lsl32`: цель до 48 бит. Гостевой код x64
+ * (HK: 0x1_7ffd_ea40, 0x7ffd…) лежит выше 4 ГБ, и шестисловная щель не брала его НИКОГДА: вторая
+ * цель Jcc возвращалась через стража трамплина — 639 млн промахов за 390 с (37,6 % входов). */
+#define HB_CHAIN_SLOT2_WORDS 7u
 
 static uint32_t arm64_movz_x(int rd, uint16_t imm16, unsigned shift16) {
     return 0xd2800000u | ((uint32_t)shift16 << 21) | ((uint32_t)imm16 << 5) | (uint32_t)rd;
@@ -8619,7 +8664,7 @@ static bool chain_patch_direct_edge(hb_jit_runtime_t* rt, hb_block_cache_entry_t
 
 /* MacRunner 25.08.2026 — ЩЕЛЬ ВТОРОЙ ЦЕЛИ: адрес ВЫЧИСЛЯЕТСЯ, а не ищется.
  * Кодогенератор кладёт её пятью словами НЕПОСРЕДСТВЕННО перед основной щелью, а основная
- * стоит в последних 32 байтах — значит вторая начинается на `native_size - 52`. Поиск по
+ * стоит в последних 32 байтах — значит вторая начинается на `native_size - 60` (семь слов, 26.09). Поиск по
  * образцу (первая попытка) был и дорог, и бесполезен: горячие условные переходы выпускают
  * сплавы, и своего эпилога у ветви провала не было вовсе. */
 static bool entry_chain_slot_at(const hb_block_cache_entry_t* entry, size_t pos);
@@ -8658,6 +8703,10 @@ static bool entry_has_chain_slot(const hb_block_cache_entry_t* entry, size_t* of
 }
 
 /* Тот же образец, но по произвольной позиции — общий для обеих щелей. */
+/* Claude 26.09: хвост щели при свидетеле выхода — ADR X16,#0 / STR X16,[X19,#chain_exit_src]. */
+static uint32_t chain_exit_src_str_word(void) {
+    return 0xf9000000u | ((uint32_t)(offsetof(hb_context_t, chain_exit_src) / 8u) << 10) | (19u << 5) | 16u;
+}
 static bool entry_chain_slot_at(const hb_block_cache_entry_t* entry, size_t pos) {
     static const uint32_t arm64_nop = 0xd503201fu;
     static const uint32_t arm64_mov_x0_x19 = 0xaa1303e0u;
@@ -8672,10 +8721,14 @@ static bool entry_chain_slot_at(const hb_block_cache_entry_t* entry, size_t pos)
     for (size_t i = 0; i < 4; i++)
         memcpy(&w[i], entry->native_code + pos + i * 4, sizeof(w[i]));
 
-    pristine = (w[0] == arm64_nop && w[1] == arm64_nop && w[2] == arm64_nop && w[3] == arm64_nop);
-    /* B is 0b000101<imm26>; the trampoline branch is unconditional and always in range by construction. */
-    patched = (w[0] == arm64_mov_x0_x19 && (w[1] & 0xfc000000u) == 0x14000000u &&
-               w[2] == arm64_nop && w[3] == arm64_nop);
+    {   /* хвост: два NOP либо свидетель выхода (ADR+STR), см. chain_exit_src */
+        const bool tail = (w[2] == arm64_nop && w[3] == arm64_nop) ||
+                          (w[2] == 0x10000010u && w[3] == chain_exit_src_str_word());
+        pristine = (w[0] == arm64_nop && w[1] == arm64_nop && tail);
+        /* B (000101) или BL (100101) — BL при свидетеле, чтобы страж трамплина знал источник. */
+        patched = (w[0] == arm64_mov_x0_x19 && ((w[1] & 0xfc000000u) == 0x14000000u ||
+                                              (w[1] & 0xfc000000u) == 0x94000000u) && tail);
+    }
     if (!pristine && !patched) return false;
 
     for (size_t i = 0; i < 4; i++) {
@@ -8695,6 +8748,19 @@ static bool arm64_branch_reaches(const uint8_t* from, const uint8_t* to) {
 static uint32_t arm64_b_to(const uint8_t* from, const uint8_t* to) {
     intptr_t off = (intptr_t)(to - from);
     return 0x14000000u | (uint32_t)(((off / 4) & 0x03ffffffu));
+}
+/* Claude 26.09 — переход щели с записью X30: страж трамплина кладёт X30 в ctx->chain_exit_src
+ * на промахе, и диспетчер узнаёт ИСТОЧНИК. Блок, вошедший по сшивке, LR из X30 не читает: его
+ * эпилог восстанавливает LR из кадра первого блока. Бережливый кадр возвращается по X30 — там BL
+ * запрещён, остаётся B. */
+static uint32_t arm64_bl_to(const uint8_t* from, const uint8_t* to) {
+    return arm64_b_to(from, to) | 0x80000000u;
+}
+static int chain_src_link_enabled(void) {
+    const char* lean = hb_gate( HB_GATE_HB_LEAN_FRAME );
+    const char* remap = hb_gate( HB_GATE_HB_LEAN_REMAP_ONLY );
+    if ((lean && *lean && *lean != '0') || (remap && *remap && *remap != '0')) return 0;
+    return runtime_chain_two_slots_enabled();
 }
 
 static uint32_t arm64_mov_reg_u32(int rd, int rn) {
@@ -8745,6 +8811,12 @@ static uint32_t arm64_mov_reg_u32(int rd, int rn) {
  * холодном пути (hb_context.h, chain_mispredict); здесь он только снимается.
  * Ноль промахов при ненулевом PATCHED означает, что прошитая ветвь НЕ
  * ДОСТИГАЕТСЯ — это и есть то различение, которого не было. */
+/* Claude 26.09 — для тестов сцепления: промахов стража трамплина с начала процесса (сшитое ребро
+ * привело не туда, и блок вернулся в диспетчер). */
+uint64_t hb_runtime_chain_tramp_misses(void) {
+    return __atomic_load_n(&g_tramp_promah, __ATOMIC_RELAXED);
+}
+
 static void tramp_snyat_svidetelya(hb_context_t* ctx)
 {
     uint64_t n;
@@ -8811,7 +8883,7 @@ static bool chain_tramp_layout(const uint8_t* dest, struct hb_chain_tramp_layout
 
     /* guard (6 instrs) then the mispredict epilogue (4 instrs) */
     out->mispredict = 6 * 4;
-    off = out->mispredict + 6 * 4;   /* +2: свидетель промаха, см. hb_context.h */
+    off = out->mispredict + 7 * 4;   /* +3: свидетели промаха и источника, см. hb_context.h */
     while ((((uintptr_t)dest + off) & 7u) != 0) off += 4;
     out->expect_lit = off;
     out->live_lit = off + 8;
@@ -8880,9 +8952,12 @@ static uint8_t* chain_trampoline_build_at(uint8_t* out, const uint8_t* at, uint8
                                     (uint32_t)offsetof(hb_context_t, chain_mispredict)));
     arm64_store_u32(NULL, mis + 4, arm64_str_x_off(16, 0,
                                     (uint32_t)offsetof(hb_context_t, chain_mispredict_pc)));
+    /* Claude 26.09: X30 — адрес за BL в щели ИСТОЧНИКА (при B — мусор, тогда диспетчер поле не читает). */
+    arm64_store_u32(NULL, mis + 8, arm64_str_x_off(30, 0,
+                                    (uint32_t)offsetof(hb_context_t, chain_exit_src)));
     for (i = 0; i < 4; i++)
-        arm64_store_u32(NULL, mis + 8 + i * 4, epilogue[i]);
-    memset(out + L.mispredict + 24, 0, L.expect_lit - (L.mispredict + 24)); /* alignment padding */
+        arm64_store_u32(NULL, mis + 12 + i * 4, epilogue[i]);
+    memset(out + L.mispredict + 28, 0, L.expect_lit - (L.mispredict + 28)); /* alignment padding */
 
     /* Eviction bail-out: reached only because eviction flipped live_lit to point here, in which case
      * the guard has already confirmed ctx->pc == guest_addr; the store keeps that true for a resumed
@@ -9082,14 +9157,14 @@ static bool chain_patch_slot2(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
 
     if (!rt || !cur || !next || !meta || !off) return false;
     ga = next->guest_addr;
-    if (ga > 0xffffffffull) return false;      /* в две команды помещается только 32-битная цель */
+    if (ga > 0xffffffffffffull) return false;  /* три команды: цель до 48 бит (x64 — выше 4 ГБ) */
 
     target = chain_trampoline_for(rt, next);
     if (!target) return false;
 
     p = cur->native_code + off;
     /* Переход — последнее слово щели, от него и считаем досягаемость. */
-    if (!arm64_branch_reaches(p + 5u * 4u, target)) return false;
+    if (!arm64_branch_reaches(p + 6u * 4u, target)) return false;
 
     /* Арена открывается на запись и закрывается обратно — писать в неё вне этой скобки
      * нельзя (проверено падениями 5/5 на прошлых заплатах). */
@@ -9100,11 +9175,15 @@ static bool chain_patch_slot2(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
      * безобидная арифметика: прыгнуть в полузаполненную щель невозможно. */
     arm64_store_u32(rt->jit_mem, p + 0,  arm64_movz_x(21, (uint16_t)(ga & 0xffffu), 0));
     arm64_store_u32(rt->jit_mem, p + 4,  arm64_movk_x(21, (uint16_t)((ga >> 16) & 0xffffu), 1));
-    arm64_store_u32(rt->jit_mem, p + 8,  arm64_cmp_x(20, 21));
-    arm64_store_u32(rt->jit_mem, p + 16, arm64_mov_reg_u32(0, 19));   /* MOV X0, X19 — трамплин ждёт ctx */
-    arm64_store_u32(rt->jit_mem, p + 20, arm64_b_to(p + 20, target));
-    block_cache_clear_icache(rt->jit_mem, p + 16, 2 * sizeof(uint32_t));
-    arm64_store_u32(rt->jit_mem, p + 12, arm64_bne_skip_two());       /* последней — сама развилка */
+    arm64_store_u32(rt->jit_mem, p + 8,  arm64_movk_x(21, (uint16_t)((ga >> 32) & 0xffffu), 2));
+    arm64_store_u32(rt->jit_mem, p + 12, arm64_cmp_x(20, 21));
+    arm64_store_u32(rt->jit_mem, p + 20, arm64_mov_reg_u32(0, 19));   /* MOV X0, X19 — трамплин ждёт ctx */
+    arm64_store_u32(rt->jit_mem, p + 24, chain_src_link_enabled() ? arm64_bl_to(p + 24, target)
+                                                                   : arm64_b_to(p + 24, target));
+    block_cache_clear_icache(rt->jit_mem, p + 20, 2 * sizeof(uint32_t));
+    /* Пока развилка — NOP, поток проваливается в MOV+B и уходит в трамплин второй цели БЕЗ
+     * сравнения; страж трамплина это ловит и возвращает в диспетчер (промах, не порча). */
+    arm64_store_u32(rt->jit_mem, p + 16, arm64_bne_skip_two());       /* последней — сама развилка */
     block_cache_clear_icache(rt->jit_mem, p, HB_CHAIN_SLOT2_BYTES);
     if (hb_jit_buffer_make_executable(rt->jit_mem) != HB_OK) return false;
 
@@ -9545,7 +9624,8 @@ static bool patch_block_tail(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
     }
     arm64_store_u32(rt->jit_mem, patch, arm64_mov_reg_u32(0, 19)); /* MOV X0, X19 (ctx) */
     arm64_store_u32(rt->jit_mem, patch + sizeof(uint32_t),
-                    arm64_b_to(patch + sizeof(uint32_t), target));
+                    chain_src_link_enabled() ? arm64_bl_to(patch + sizeof(uint32_t), target)
+                                             : arm64_b_to(patch + sizeof(uint32_t), target));
     block_cache_clear_icache(rt->jit_mem, patch, 2 * sizeof(uint32_t));
     ok = hb_jit_buffer_make_executable(rt->jit_mem) == HB_OK;
     if (!ok) { t_chain_decline[CHAIN_DECL_XPROT]++; return false; }
@@ -14065,6 +14145,9 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
     }
 
     while (1) {
+        /* Свидетель источника выхода живёт один оборот: выход, до места сшивки не дошедший, не должен
+         * приписаться чужой диспетчеризации (Claude 26.09, см. hb_context.h chain_exit_src). */
+        if (ctx->chain_exit_src) ctx->chain_exit_src = 0;
         /* ═══ СРОК: предел прогона в шкале накопительного счётчика ═══
          *
          * Предел задан в местных steps/blocks_executed, а выпущенный код ведёт
@@ -14862,8 +14945,20 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                 else if (!cached || !next_cached) tls_chain_decline[CHAIN_SITE_NO_ENTRY]++;
                 else tls_chain_decline[CHAIN_SITE_CALLED]++;
             }
-            if (chain_patch_enabled && cached && next_cached)
-                (void)patch_block_tail(rt, cached, next_cached, func);
+            {   /* Claude 26.09 — ТОЧНЫЙ ИСТОЧНИК ВЫХОДА. `cached` — блок, с которого начался заход; при
+                 * сцеплении выход бывает из ПОСЛЕДНЕГО блока цепочки, и его адрес оставил свидетель
+                 * (несшитая щель — ADR+STR, промах стража — X30 после BL). Прежде сшивка шла к `cached`:
+                 * перепись HK — 352 млн «already» из 352 млн попыток, столько же промахов стража. */
+                hb_block_cache_entry_t* chain_src = cached;
+                if (ctx->chain_exit_src && chain_src_link_enabled()) {
+                    hb_block_cache_entry_t* s_ = block_cache_find_exit_src(rt->block_cache,
+                                                                           ctx->chain_exit_src);
+                    if (s_) chain_src = s_;
+                }
+                ctx->chain_exit_src = 0;
+                if (chain_patch_enabled && chain_src && next_cached)
+                    (void)patch_block_tail(rt, chain_src, next_cached, func);
+            }
             if (indirect_ic_enabled &&
                 (terminal->op == HB_IR_JMP || terminal->op == HB_IR_CALL) &&
                 terminal->src1.type != HB_OP_NONE)

@@ -4087,16 +4087,17 @@ static int jit_chain_two_slots_enabled(void) {
     return hb_jit_gate_flag( HB_GATE_HB_CHAIN_TWO_SLOTS, 0);
 }
 
-/* Щель ВТОРОЙ цели — пять слов НЕПОСРЕДСТВЕННО перед основной щелью, поэтому её адрес
- * вычисляется, а не ищется: `native_size - 32 - 20`. Рантайм вписывает сюда
- *     movz x21,#lo16 / movk x21,#hi16,lsl16 / cmp x20,x21 / b.ne +2 / b трамплин
+/* Щель ВТОРОЙ цели — семь слов НЕПОСРЕДСТВЕННО перед основной щелью, поэтому её адрес
+ * вычисляется, а не ищется: `native_size - 32 - 28`. Рантайм вписывает сюда
+ *     movz x21,#lo16 / movk x21,#,lsl16 / movk x21,#,lsl32 / cmp x20,x21 / b.ne +12 / mov x0,x19 / b трамплин
+ * (Claude 26.09: было шесть слов и 32-битная цель — код x64 выше 4 ГБ не сшивался никогда.)
  * — `x20` к этому месту уже содержит `ctx->pc` (его кладёт эпилог при сцеплении), так что
  * проверка стоит ровно одно сравнение. Работает для ЛЮБОГО завершителя, включая сплавы:
  * финальный эпилог у всех блоков один. */
-#define HB_CHAIN_SLOT2_WORDS 6u
+#define HB_CHAIN_SLOT2_WORDS 7u
 
 /* Щель второй цели нужна ТОЛЬКО в том эпилоге, который окажется последним в буфере:
- * рантайм ищет основную щель по `native_size - 32`, а вторую по `-52`, то есть видит
+ * рантайм ищет основную щель по `native_size - 32`, а вторую по `-60`, то есть видит
  * ровно один хвост. Промежуточные эпилоги (ранние выходы, отказы помощников) щель бы
  * только раздували — в первом заходе блок рос втрое. */
 static int g_cg_want_slot2;
@@ -4108,12 +4109,22 @@ static void emit_block_chain_slot2(hb_codegen_buffer_t* buf) {
     for (i = 0; i < HB_CHAIN_SLOT2_WORDS; i++) emit_nop(buf);
 }
 
+static int lean_frame_enabled(void);
 static void emit_block_chain_slot(hb_codegen_buffer_t* buf) {
     if (!jit_block_chain_enabled_for(buf)) return;
     emit_nop(buf);
     emit_nop(buf);
-    emit_nop(buf);
-    emit_nop(buf);
+    if (jit_chain_two_slots_enabled() && !lean_frame_enabled()) {
+        /* Claude 26.09 — СВИДЕТЕЛЬ ВЫХОДА. Пока щель не сшита, два последних слова кладут адрес
+         * своего блока в ctx->chain_exit_src: диспетчер сшивает ИМЕННО его, а не блок, с которого
+         * начался заход. Сшитая щель уходит BL-ом раньше, эти слова не исполняются. */
+        const uint32_t off = (uint32_t)offsetof(hb_context_t, chain_exit_src);
+        emit_u32(buf, 0x10000010u);                                               /* ADR X16, #0 */
+        emit_u32(buf, 0xf9000000u | ((off / 8u) << 10) | (19u << 5) | 16u);       /* STR X16, [X19, #src] */
+    } else {
+        emit_nop(buf);
+        emit_nop(buf);
+    }
 }
 
 /* MacRunner 2026-07-30 — a chain slot belongs ONLY to a block's final, normal-path epilogue.

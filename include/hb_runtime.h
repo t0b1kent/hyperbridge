@@ -188,6 +188,11 @@ typedef struct {
      * Порядок причин становится взаимно исключающим, а не «одно из двух». */
     uint32_t census_id;
     uint32_t reset_gen;
+    /* Claude 26.09 — «конец родного кода блока → номер записи + 1» для точного источника выхода
+     * в диспетчер (MACRUNNER_HB_CHAIN_TWO_SLOTS=1). Прямая адресация без чистки: попадание сверяется
+     * с живой записью (конец её кода обязан совпасть), устаревшее просто не находится. */
+    uint32_t* nend_map;
+    uint32_t nend_mask;
 } hb_block_cache_t;
 
 #define HB_BLOCK_L1_BITS 14u   /* 16384 слотов; умолчание выбрано замером на настоящих адресах */
@@ -261,6 +266,8 @@ typedef struct {
 hb_jit_runtime_t* hb_jit_runtime_create(hb_context_t* ctx);
 void hb_runtime_init_environment(void);
 void hb_jit_runtime_destroy(hb_jit_runtime_t* rt);
+/* Промахи стража трамплина сцепления с начала процесса (для тестов сцепления). */
+uint64_t hb_runtime_chain_tramp_misses(void);
 /* MacRunner: reset a runtime for reuse by another callback on the same thread
  * (per-thread pool) instead of destroy+recreate per callback. Eagerly frees the
  * block_cache's owned blocks + clears it, rewinds the jit arena bump pointer, and

@@ -558,6 +558,12 @@ struct hb_context {
      * Setters preserve these counters; context initialization resets them. */
     uint64_t exec_access_native_entries; /* Observer accepted; emitted body entered. */
     uint64_t exec_access_helper_entries; /* Interpreter-backed EXEC wrapper attempts. */
+    /* Claude 26.09 — СВИДЕТЕЛЬ ИСТОЧНИКА ВЫХОДА В ДИСПЕТЧЕР (при MACRUNNER_HB_CHAIN_TWO_SLOTS=1).
+     * Родной адрес ВНУТРИ блока, из которого вышли: несшитая щель пишет его сама (ADR+STR), промах
+     * стража трамплина — из X30 (в щели BL вместо B). Без него место сшивки приписывало выход блоку,
+     * с которого начался заход, а не последнему блоку цепочки, и тот не сшивался никогда.
+     * Дописано в КОНЕЦ: смещения прежних полей зашиты в выпущенный код. */
+    uint64_t chain_exit_src;
 };
 
 /* Природа отказа исполнения (`ctx->last_fault_kind`). Ноль — «не заполнено». */
