@@ -14484,6 +14484,229 @@ static bool emit_native_ymm_store(hb_codegen_buffer_t* buf, const hb_ir_instr_t*
     return true;
 }
 
+/* ═══ Claude 26.09.2026 — УСЛОВИЕ ПЕРЕХОДА ИЗ ОТЛОЖЕННЫХ ФЛАГОВ БЕЗ ВЫЗОВА (уровень 4) ═══
+ *
+ * Общий путь Jcc звал hb_jit_helper_eval_cond_lazy на КАЖДЫЙ переход, который не слит с
+ * производителем флагов в том же блоке (прежняя перепись: 243 млн вызовов за 288 с HK; профиль
+ * 26.09 после нативной SSE: eval_cond_lazy + hb_lazy_flags_materialize 16 % рабочего потока).
+ * Теперь условие считается на месте:
+ *   запись не отложена — из шести байтов ctx->flags;
+ *   CMP/SUB — операнды записи, прижатые влево сдвигом 64-8*ширина, SUBS: после него
+ *             x86 B/AE/A/BE = ARM LO/HS/HI/LS (CF x86 = заём = НЕ C), знаковые — прямо;
+ *   ADD     — ADDS тех же операндов: перенос в том же смысле, B/AE = HS/LO; A и BE одним
+ *             условием не выражаются — для них ADD идёт помощнику;
+ *   AND/OR/XOR/TEST — TST прижатого результата: CF=OF=0, так B=0, AE=1, A=NE, BE=EQ, O=0, NO=1;
+ *   прочие виды (INC/DEC — CF берётся из прошлого, сдвиги, ADC/SBB) и P/NP — прежний помощник.
+ * Совпадает с hb_flags_eval_cond по значению условия; отличие одно: помощник попутно
+ * материализует флаги в ctx->flags (кеш), здесь запись остаётся отложенной — наблюдаемого
+ * различия нет, итог тот же при любом последующем чтении. Гейт MACRUNNER_HB_NATIVE_LAZY_COND. */
+static int native_lazy_cond_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        cached = hb_jit_gate_flag( HB_GATE_HB_NATIVE_LAZY_COND, 1 ) ? 1 : 0;
+        fprintf(stderr, "macrunner-gate: MACRUNNER_HB_NATIVE_LAZY_COND=%d\n", cached);
+        fflush(stderr);
+    }
+    return cached;
+}
+/* ARM-условие после SUBS (0) / ADDS (1) / TST (2) для x86 cc: -1 — не выражается,
+ * 16 — всегда 0, 17 — всегда 1. */
+static int lazy_arm_cond(int producer, hb_cc_t cc) {
+    switch (cc) {
+        case HB_CC_E:  return 0;
+        case HB_CC_NE: return 1;
+        case HB_CC_S:  return 4;
+        case HB_CC_NS: return 5;
+        case HB_CC_G:  return 12;
+        case HB_CC_GE: return 10;
+        case HB_CC_L:  return 11;
+        case HB_CC_LE: return 13;
+        case HB_CC_O:  return producer == 2 ? 16 : 6;
+        case HB_CC_NO: return producer == 2 ? 17 : 7;
+        case HB_CC_B:  return producer == 0 ? 3 : producer == 1 ? 2 : 16;
+        case HB_CC_AE: return producer == 0 ? 2 : producer == 1 ? 3 : 17;
+        case HB_CC_A:  return producer == 0 ? 8 : producer == 1 ? -1 : 1;
+        case HB_CC_BE: return producer == 0 ? 9 : producer == 1 ? -1 : 0;
+        default:       return -1;
+    }
+}
+static void emit_w0_from_arm_cond(hb_codegen_buffer_t* buf, int c) {
+    if (c == 16) emit_mov_imm_compact(buf, 0, 0);
+    else if (c == 17) emit_mov_imm_compact(buf, 0, 1);
+    else emit_cset_w(buf, 0, c);
+}
+/* W0 = условие из шести байтов ctx->flags (запись не отложена). */
+static void emit_flags_cond_to_w0(hb_codegen_buffer_t* buf, hb_cc_t cc) {
+    const uint32_t fl = (uint32_t)offsetof(hb_context_t, flags);
+    const uint32_t zf = fl + (uint32_t)offsetof(hb_flags_t, zf), sf = fl + (uint32_t)offsetof(hb_flags_t, sf);
+    const uint32_t cf = fl + (uint32_t)offsetof(hb_flags_t, cf), of = fl + (uint32_t)offsetof(hb_flags_t, of);
+    int invert = 0;
+    switch (cc) {
+        case HB_CC_E: case HB_CC_NE: emit_ldrb_w(buf, 0, 19, zf); invert = cc == HB_CC_NE; break;
+        case HB_CC_S: case HB_CC_NS: emit_ldrb_w(buf, 0, 19, sf); invert = cc == HB_CC_NS; break;
+        case HB_CC_O: case HB_CC_NO: emit_ldrb_w(buf, 0, 19, of); invert = cc == HB_CC_NO; break;
+        case HB_CC_B: case HB_CC_AE: emit_ldrb_w(buf, 0, 19, cf); invert = cc == HB_CC_AE; break;
+        case HB_CC_A: case HB_CC_BE:
+            emit_ldrb_w(buf, 0, 19, cf); emit_ldrb_w(buf, 20, 19, zf);
+            emit_gpr_word(buf, 0x2a000000u, 0, 0, 20);          /* ORR W0, W0, W20 */
+            invert = cc == HB_CC_A; break;
+        case HB_CC_L: case HB_CC_GE:
+            emit_ldrb_w(buf, 0, 19, sf); emit_ldrb_w(buf, 20, 19, of);
+            emit_gpr_word(buf, 0x4a000000u, 0, 0, 20);          /* EOR W0, W0, W20 */
+            invert = cc == HB_CC_GE; break;
+        case HB_CC_G: case HB_CC_LE:
+            emit_ldrb_w(buf, 0, 19, sf); emit_ldrb_w(buf, 20, 19, of);
+            emit_gpr_word(buf, 0x4a000000u, 0, 0, 20);          /* SF^OF */
+            emit_ldrb_w(buf, 20, 19, zf);
+            emit_gpr_word(buf, 0x2a000000u, 0, 0, 20);          /* | ZF */
+            invert = cc == HB_CC_G; break;
+        default: emit_mov_imm_compact(buf, 0, 0); break;
+    }
+    if (invert) emit_gpr_word(buf, 0x52000000u, 0, 0, 0);       /* EOR W0, W0, #1 */
+}
+static uint64_t g_native_lazy_cond_emitted;
+uint64_t hb_codegen_native_lazy_cond_emitted(void) {
+    return __atomic_load_n(&g_native_lazy_cond_emitted, __ATOMIC_RELAXED);
+}
+/* x86-условие cc -> X0 (0/1). false — cc не поддержан (P/NP) или гейт снят: вызывающий
+ * выпускает прежний вызов сам. Внутри — медленная ветвь с тем же помощником для прочих видов. */
+static bool emit_native_cond_to_w0(hb_codegen_buffer_t* buf, hb_cc_t cc) {
+    const uint32_t lz = (uint32_t)offsetof(hb_context_t, lazy_flags);
+    const int c_add = lazy_arm_cond(1, cc);
+    size_t not_pending, to_sub1, to_sub2, to_logic1, to_logic2, to_add = 0, to_helper, to_helper_m;
+    size_t d_sub, d_logic, d_add = 0, d_flags;
+    if (!native_lazy_cond_enabled() || (unsigned)cc > (unsigned)HB_CC_NO) return false;
+    emit_ldrb_w(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, pending));
+    not_pending = emit_cbz_x_deferred(buf, 20);
+    /* ★ Часть флагов уже лежит в ctx->flags поверх записи (materialized_mask): так пишет родной
+     * BMI — вид AND, а CF (от ИСТОЧНИКА) и AF кладёт сразу. Из операндов записи такой CF не
+     * получить (для AND вышло бы CF=0: blsr+jb шёл бы не туда), поэтому любая материализованная
+     * запись — помощнику, он маску смотрит. Обычно маска нулевая: её обнуляет каждая заметка. */
+    emit_ldr_w(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, materialized_mask));
+    to_helper_m = emit_cbnz_x_deferred(buf, 20);
+    emit_ldr_w(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, kind));
+    emit_ldrb_w(buf, 22, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, width));
+    emit_gpr_word(buf, 0x531d7000u, 22, 22, 0);              /* LSL W22, W22, #3: ширина в битах */
+    emit_mov_imm_compact(buf, 23, 64);
+    emit_gpr_word(buf, 0x4b000000u, 23, 23, 22);             /* SUB W23, W23, W22: сдвиг прижатия */
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_CMP);
+    to_sub1 = emit_bcond_deferred(buf, 0 /* EQ */);
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_SUB);
+    to_sub2 = emit_bcond_deferred(buf, 0);
+    emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_TEST);
+    to_logic1 = emit_bcond_deferred(buf, 0);
+    emit_gpr_word(buf, 0x51000000u | ((uint32_t)HB_LAZY_FLAGS_AND << 10), 20, 21, 0);   /* SUB W20, W21, #AND */
+    emit_cmp_imm(buf, 20, (uint32_t)(HB_LAZY_FLAGS_XOR - HB_LAZY_FLAGS_AND));
+    to_logic2 = emit_bcond_deferred(buf, 9 /* LS: AND..XOR */);
+    if (c_add >= 0) {
+        emit_cmp_imm(buf, 21, HB_LAZY_FLAGS_ADD);
+        to_add = emit_bcond_deferred(buf, 0);
+    }
+    to_helper = emit_b_deferred(buf);
+
+    patch_bcond(buf, to_sub1, 0, buf->size);                  /* CMP/SUB */
+    patch_bcond(buf, to_sub2, 0, buf->size);
+    emit_ldr_x(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, lhs));
+    emit_ldr_x(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, rhs));
+    emit_gpr_word(buf, 0x9ac02000u, 20, 20, 23);              /* LSLV X20, X20, X23 */
+    emit_gpr_word(buf, 0x9ac02000u, 21, 21, 23);
+    emit_gpr_word(buf, 0xeb00001fu, 31, 20, 21);              /* CMP X20, X21 */
+    {   /* ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ теста (MACRUNNER_HB_TEST_LAZY_COND_FLIP=1): LO и HS меняются местами
+         * — перенос в смысле ADD вместо заёма SUB; тест обязан это увидеть. */
+        int c0 = lazy_arm_cond(0, cc);
+        if (hb_jit_gate_flag( HB_GATE_HB_TEST_LAZY_COND_FLIP, 0 ) && (c0 == 2 || c0 == 3)) c0 ^= 1;
+        emit_w0_from_arm_cond(buf, c0);
+    }
+    d_sub = emit_b_deferred(buf);
+
+    patch_bcond(buf, to_logic1, 0, buf->size);                /* AND/OR/XOR/TEST */
+    patch_bcond(buf, to_logic2, 9, buf->size);
+    emit_ldr_x(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, result));
+    emit_gpr_word(buf, 0x9ac02000u, 20, 20, 23);
+    emit_gpr_word(buf, 0xea00001fu, 31, 20, 20);              /* TST X20, X20 */
+    emit_w0_from_arm_cond(buf, lazy_arm_cond(2, cc));
+    d_logic = emit_b_deferred(buf);
+
+    if (c_add >= 0) {                                          /* ADD */
+        patch_bcond(buf, to_add, 0, buf->size);
+        emit_ldr_x(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, lhs));
+        emit_ldr_x(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, rhs));
+        emit_gpr_word(buf, 0x9ac02000u, 20, 20, 23);
+        emit_gpr_word(buf, 0x9ac02000u, 21, 21, 23);
+        emit_gpr_word(buf, 0xab00001fu, 31, 20, 21);          /* CMN X20, X21 */
+        emit_w0_from_arm_cond(buf, c_add);
+        d_add = emit_b_deferred(buf);
+    }
+
+    patch_cbz_x(buf, not_pending, 20, buf->size);             /* запись не отложена */
+    emit_flags_cond_to_w0(buf, cc);
+    d_flags = emit_b_deferred(buf);
+
+    patch_b(buf, to_helper, buf->size);                       /* прочие виды — помощник */
+    patch_cbnz_x(buf, to_helper_m, 20, buf->size);
+    emit_mov_reg(buf, 0, 19);
+    emit_mov_imm64(buf, 1, (uint64_t)cc);
+    emit_call_helper_wmask(buf, hb_sra_helper_target((void*)hb_jit_helper_eval_cond_lazy,
+                                                     (void*)hb_jit_helper_eval_cond_lazy_verify), 0u);
+    emit_return_if_helper_failed(buf);
+
+    patch_b(buf, d_sub, buf->size);
+    patch_b(buf, d_logic, buf->size);
+    if (c_add >= 0) patch_b(buf, d_add, buf->size);
+    patch_b(buf, d_flags, buf->size);
+    __atomic_add_fetch(&g_native_lazy_cond_emitted, 1, __ATOMIC_RELAXED);
+    return true;
+}
+
+/* ═══ Claude 26.09.2026 — CMOVcc и SETcc БЕЗ ВЫЗОВА (уровень 4, продолжение) ═══
+ * Профиль HK после родного Jcc (sample на 250 с): из 334 собственных отсчётов
+ * hb_lazy_flags_materialize 179 шли через hb_jit_helper_exec_cmovcc_lazy/_operand_lazy.
+ * Условие — emit_native_cond_to_w0 (тот же разбор вида записи), выбор — CSEL, запись — прежним
+ * emit_store_x20_to_gpr_sized, то есть семантика помощника: приёмник пишется ВСЕГДА (32 бита
+ * обнуляют верх и при ложном условии, 16 — сохраняют старшие), источник — регистр целиком или
+ * непосредственное, усечённые по ширине приёмника. Память в источнике и AH/BH — прежний помощник. */
+static uint64_t g_native_cmov_setcc_emitted;
+uint64_t hb_codegen_native_cmov_setcc_emitted(void) {
+    return __atomic_load_n(&g_native_cmov_setcc_emitted, __ATOMIC_RELAXED);
+}
+static bool emit_native_cmovcc(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    const hb_ir_operand_t* d = &instr->dst;
+    const hb_ir_operand_t* s = &instr->src1;
+    hb_ir_operand_t src;
+    if (!is_plain_gpr_reg_operand(d)) return false;
+    if (d->size != HB_SIZE_16 && d->size != HB_SIZE_32 && d->size != HB_SIZE_64) return false;
+    if (d->size == HB_SIZE_64 && buf->arch == HB_ARCH_X86) return false;
+    if (s->type == HB_OP_REG) {
+        if (!is_plain_gpr_reg_operand(s)) return false;
+    } else if (s->type != HB_OP_IMM) {
+        return false;
+    }
+    /* Всё проверено ДО выпуска: после условия отказываться уже нельзя. */
+    if (!emit_native_cond_to_w0(buf, instr->cc)) return false;
+    if (s->type == HB_OP_REG) {
+        src = *s;
+        src.size = d->size;                         /* помощник усекает по ширине приёмника */
+        (void)emit_load_gpr_sized_to_reg(buf, &src, 21);
+    } else {
+        emit_mov_imm64(buf, 21, (uint64_t)s->imm);
+    }
+    (void)emit_load_gpr_sized_to_reg(buf, d, 20);
+    emit_cmp_imm(buf, 0, 0);
+    emit_gpr_word(buf, 0x9a801000u, 20, 21, 20);    /* CSEL X20, X21, X20, NE */
+    emit_store_x20_to_gpr_sized(buf, d);
+    __atomic_add_fetch(&g_native_cmov_setcc_emitted, 1, __ATOMIC_RELAXED);
+    return true;
+}
+static bool emit_native_setcc(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    const hb_ir_operand_t* d = &instr->dst;
+    if (!is_plain_gpr_reg_operand(d) || d->size != HB_SIZE_8) return false;
+    if (!emit_native_cond_to_w0(buf, instr->cc)) return false;
+    emit_mov_reg(buf, 20, 0);
+    emit_store_x20_to_gpr_sized(buf, d);            /* STRB: как write_reg_value_sized(.., 8) */
+    __atomic_add_fetch(&g_native_cmov_setcc_emitted, 1, __ATOMIC_RELAXED);
+    return true;
+}
+
 /* Claude 26.09.2026 — VEX.128 MOVD/MOVQ ОБЯЗАНЫ ОБНУЛИТЬ ВСЁ ВЫШЕ БИТА 127 ПРИЁМНИКА.
  * Разностный стенд на железе ARM64 (JIT против интерпретатора, 4000 случаев x64, 26.09): у
  * vmovd xmm0,ecx / vmovq xmm0,rcx / vmovq xmm0,xmm1 (F3 0F 7E) / vmovq xmm1,xmm0 (66 0F D6)
@@ -15327,12 +15550,14 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
              * Target path starts at offset 28 from b.cond.
              * b at offset 24 must skip 24 bytes to land after target path.
              */
-            emit_mov_reg(buf, 0, 19);
-            emit_mov_imm64(buf, 1, (uint64_t)instr->cc);
-            emit_call_helper_wmask(buf, hb_sra_helper_target((void*)hb_jit_helper_eval_cond_lazy,
-                                                       (void*)hb_jit_helper_eval_cond_lazy_verify),
-                                                       0u);
-            emit_return_if_helper_failed(buf);
+            if (!emit_native_cond_to_w0(buf, instr->cc)) {   /* Claude 26.09: без вызова */
+                emit_mov_reg(buf, 0, 19);
+                emit_mov_imm64(buf, 1, (uint64_t)instr->cc);
+                emit_call_helper_wmask(buf, hb_sra_helper_target((void*)hb_jit_helper_eval_cond_lazy,
+                                                           (void*)hb_jit_helper_eval_cond_lazy_verify),
+                                                           0u);
+                emit_return_if_helper_failed(buf);
+            }
             emit_cmp_imm(buf, 0, 0);
             /* ЕДИНИЦА, часть Б: цель ВНУТРИ этой же единицы -> настоящий b.cond на метку.
              * Ни записи ctx->pc, ни возврата в диспетчер: провал просто продолжает выпуск
@@ -15426,6 +15651,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 emit_return_if_helper_failed(buf);
                 return HB_OK;
             }
+            if (emit_native_setcc(buf, instr)) return HB_OK;
             emit_mov_reg(buf, 0, 19);
             emit_mov_imm64(buf, 1, (uint64_t)instr->cc);
             emit_mov_imm64(buf, 2, (uint64_t)instr->dst.reg);
@@ -15449,6 +15675,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 emit_return_if_helper_failed(buf);
                 return HB_OK;
             }
+            if (emit_native_cmovcc(buf, instr)) return HB_OK;
             emit_mov_reg(buf, 0, 19);
             emit_mov_imm64(buf, 1, (uint64_t)instr->cc);
             emit_mov_imm64(buf, 2, (uint64_t)instr->dst.reg);
