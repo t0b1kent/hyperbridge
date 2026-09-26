@@ -389,10 +389,13 @@ test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPM
 	! HB_LAZY_COND_QUICK=2 MACRUNNER_HB_TEST_LAZY_COND_FLIP=1 ./$(LAZY_COND_NATIVE_TEST_BIN) > /dev/null 2>&1
 	! HB_LAZY_COND_QUICK=2 MACRUNNER_HB_NATIVE_LAZY_COND=0 ./$(LAZY_COND_NATIVE_TEST_BIN) > /dev/null 2>&1
 	@echo "Running hardware SSE oracle (x86 answers; the JIT must never be worse than the interpreter)..."
+	mkdir -p tests/hb_sse_oracle/out
 	for c in tests/hb_sse_oracle/corpus/smoke.cases tests/hb_sse_oracle/corpus/regressions.cases; do \
 	  for fp in 1 0; do \
 	    HB_DIFF_IDENTITY=1 HB_DIFF_LIVE_FALLBACK=0 MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_MXCSR_FPCR=$$fp \
-	      ./$(SSE_ORACLE_RUNNER_BIN) < $$c 2>/dev/null | python3 tests/hb_sse_oracle/jit_not_worse.py || exit 1; \
+	      ./$(SSE_ORACLE_RUNNER_BIN) < $$c 2>tests/hb_sse_oracle/out/runner.stderr > tests/hb_sse_oracle/out/runner.stdout; \
+	      rc=$$?; python3 tests/hb_sse_oracle/jit_not_worse.py < tests/hb_sse_oracle/out/runner.stdout || { \
+	        echo "runner exit=$$rc corpus=$$c FPCR=$$fp; stderr tail:"; tail -5 tests/hb_sse_oracle/out/runner.stderr; exit 1; }; \
 	  done; \
 	done
 	@echo "Running Python test suite..."

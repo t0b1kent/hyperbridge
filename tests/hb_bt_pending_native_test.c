@@ -53,6 +53,10 @@ int main(void) {
         hb_memory_sync_live_range(mj, (hb_gva_t)(uintptr_t)stack, 65536, rw) != HB_OK) {
         printf("ОТКАЗ ОСНАСТКИ: учёт памяти\n"); return 2;
     }
+    /* Одна среда JIT на весь тест: hb_runtime_run заводит и сносит её (арена 128 МБ) на КАЖДЫЙ
+     * случай — это ~4,5 мс на случай. Каждая форма на своей странице, выпуск переиспользуется. */
+    hb_jit_runtime_t* rt = hb_jit_runtime_create(cj);
+    if (!rt) { printf("ОТКАЗ ОСНАСТКИ: среда JIT\n"); return 2; }
     for (unsigned f = 0; f < NFORMS; f++) {
         uint8_t* at = code + 16384 * f;
         uint64_t base = (uint64_t)(uintptr_t)at;
@@ -88,7 +92,7 @@ int main(void) {
                             c->lazy_flags.materialized_mask = (masks & 2u) ? HB_FLAG_BIT_ZF : 0;
                         }
                         memset(&o[k], 0, sizeof(o[k]));
-                        r[k] = hb_runtime_run(c, func, k ? HB_BACKEND_JIT : HB_BACKEND_INTERP, &o[k]);
+                        r[k] = k ? hb_jit_runtime_run(rt, func, &o[k]) : hb_runtime_run(c, func, HB_BACKEND_INTERP, &o[k]);
                     }
                     cases++;
                     if (r[0] != r[1] || o[0].result != o[1].result || ci->pc != cj->pc ||
@@ -107,8 +111,9 @@ int main(void) {
                 }
             }
         }
-        hb_ir_func_destroy(func);
+        /* func не освобождается: среда JIT держит выпуск по адресу гостя до конца теста. */
     }
+    hb_jit_runtime_destroy(rt);
     printf("случаев=%lu расхождений=%lu\nTOTAL_BAD=%lu\n", cases, bad, bad);
     return bad ? 1 : 0;
 }

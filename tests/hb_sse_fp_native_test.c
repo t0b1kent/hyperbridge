@@ -134,6 +134,10 @@ int main(void) {
         !alloc_live(mi, data, 16384, rw) || !alloc_live(mj, data, 16384, rw)) {
         printf("ОТКАЗ ОСНАСТКИ: учёт памяти\n"); return 2;
     }
+    /* Одна среда JIT на весь тест: hb_runtime_run заводит и сносит её (арена 128 МБ) на КАЖДЫЙ
+     * случай — это ~4,5 мс на случай. Каждая форма на своей странице, выпуск переиспользуется. */
+    hb_jit_runtime_t* rt = hb_jit_runtime_create(cj);
+    if (!rt) { printf("ОТКАЗ ОСНАСТКИ: среда JIT\n"); return 2; }
     for (unsigned f = 0; f < NFORMS; f++) {
         const struct form* fm = &FORMS[f];
         uint8_t* at = code + 16384 * f;            /* у каждой формы своя страница: без SMC-выселений */
@@ -169,7 +173,7 @@ int main(void) {
                 if (strstr(fm->name, "cvtsi2") && !fm->mem)          /* целый источник — из rax */
                     ci->regs.x64.rax = cj->regs.x64.rax = x1[0];
                 hb_result_t ri = hb_runtime_run(ci, func, HB_BACKEND_INTERP, &oi);
-                hb_result_t rj = hb_runtime_run(cj, func, HB_BACKEND_JIT, &oj);
+                hb_result_t rj = hb_jit_runtime_run(rt, func, &oj);
                 cases++;
                 int diff = ri != rj || oi.result != oj.result || ci->pc != cj->pc ||
                            memcmp(ci->regs.x64.xmm, cj->regs.x64.xmm, sizeof(uint64_t) * 8) != 0 ||
@@ -193,10 +197,11 @@ int main(void) {
         }
         if (hb_codegen_native_sse_fp_emitted() == native_before)
             printf("НЕ НАТИВНО: %s — выпуск ушёл помощнику (совпадение проверено, скорость нет)\n", fm->name);
-        hb_ir_func_destroy(func);
+        /* func не освобождается: среда JIT держит выпуск по адресу гостя до конца теста. */
     }
+    hb_jit_runtime_destroy(rt);
     extern uint64_t hb_codegen_native_sse_fp_emitted(void);
-    printf("случаев=%lu расхождений=%lu нативных выпусков=%llu медленный_путь=%s\n", cases, bad,
+    printf("случаев=%lu расхождений=%lu нативных выпусков (по формам)=%llu медленный_путь=%s\n", cases, bad,
            (unsigned long long)hb_codegen_native_sse_fp_emitted(), no_slow ? "СНЯТ (контроль)" : "есть");
     if (hb_codegen_native_sse_fp_emitted() == 0) { printf("НАРУШЕНИЕ: нативный выпуск не состоялся ни разу\n"); bad++; }
     printf("TOTAL_BAD=%lu\n", bad);
