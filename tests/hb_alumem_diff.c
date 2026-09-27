@@ -17,6 +17,7 @@
 #include "hb_memory.h"
 #include "hb_runtime.h"
 #include "hb_flags.h"
+extern uint64_t hb_codegen_static_lazy_cond_emitted(void) __attribute__((weak));
 
 static uint64_t rng = 0x9e3779b97f4a7c15ull;
 static uint64_t rnd(void) { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return rng; }
@@ -74,7 +75,24 @@ static snap_t run(const uint8_t* code, size_t len, const uint64_t in[4], uint64_
     if (d && hb_lift_func_x64(d, &f) == HB_OK && f && !f->has_unsupported) {
         hb_exec_result_t r; memset(&r, 0, sizeof r);
         hb_result_t xr = jit ? hb_jit_runtime_run(rt, f, &r) : hb_runtime_run(c, f, HB_BACKEND_INTERP, &r);
-        s.ok = xr == HB_OK && !r.faulted && c->pc == (uint64_t)(uintptr_t)g_code + len;
+        /* Продолжение (Claude 28.09): вызов исполняет один блок; если pc остался ВНУТРИ куска (Jcc посередине),
+         * поднять функцию с этого места и исполнить дальше — как рабочий цикл hb_lock_race. */
+        const uint64_t lo = (uint64_t)(uintptr_t)g_code, end = lo + len;
+        for (int hop = 0; hop < 8 && xr == HB_OK && !r.faulted && c->pc > lo && c->pc < end; hop++) {
+            hb_decoder_t* d2 = hb_decoder_create(HB_ARCH_X64, g_code + (c->pc - lo), (size_t)(end - c->pc), c->pc);
+            hb_ir_func_t* f2 = NULL;
+            if (!d2 || hb_lift_func_x64(d2, &f2) != HB_OK || !f2 || f2->has_unsupported) {
+                if (d2) hb_decoder_destroy(d2);
+                if (f2) hb_ir_func_destroy(f2);
+                xr = HB_ERR_INTERNAL;
+                break;
+            }
+            hb_decoder_destroy(d2);
+            memset(&r, 0, sizeof r);
+            xr = jit ? hb_jit_runtime_run(rt, f2, &r) : hb_runtime_run(c, f2, HB_BACKEND_INTERP, &r);
+            hb_ir_func_destroy(f2);
+        }
+        s.ok = xr == HB_OK && !r.faulted && c->pc == end;
     }
     if (d) hb_decoder_destroy(d);
     s.rax = c->regs.x64.rax; s.rcx = c->regs.x64.rcx; s.rdx = c->regs.x64.rdx; s.rdi = c->regs.x64.rdi;
@@ -475,6 +493,95 @@ int main(void) {
                 }
             }
         fprintf(stderr, "SECTION selfbase cases=%lu mismatch=%lu run_fail=%lu\n", total - sec_total, bad - sec_bad, nok - sec_nok);
+    }
+    /* Сдвиги (Claude 27.09.2026, MACRUNNER_HB_NATIVE_SHIFT): SHL/SHR/SAR r, imm8 (C0/C1), r, 1 (D0/D1),
+     * r, cl (D2/D3); 8/16/32/64 бита, r = rax/rcx/rdx (у формы с CL и r = rcx счётчик — сам операнд).
+     * Счётчик 0..255: маскирование до 5/6 бит, счётчик больше ширины у 8/16 бит, счётчик 0 (флаги не
+     * трогаются, приёмник пишется). Сверка RAX RCX RDX и всех шести флагов. */
+    {
+        unsigned long sec_total = total, sec_bad = bad, sec_nok = nok;
+        const int hsz[] = { 8, 16, 32, 64 };
+        const int digit[] = { 4, 5, 7 };                     /* shl, shr, sar */
+        for (int oi = 0; oi < 3; oi++)
+            for (unsigned si = 0; si < 4; si++)
+                for (int form = 0; form < 3; form++)        /* 0 imm8, 1 на 1, 2 на CL */
+                    for (int it = 0; it < 300; it++) {
+                        uint8_t code[8], mem[64];
+                        size_t n = 0;
+                        int reg = (int)(rnd() % 3);
+                        unsigned cnt = (unsigned)(rnd() & 3 ? rnd() % 40 : rnd() % 256);
+                        uint64_t in[4] = { edge(), edge(), edge(), (uint64_t)(uintptr_t)(g_data + 64) };
+                        for (int k = 0; k < 64; k++) mem[k] = (uint8_t)rnd();
+                        if (form == 2 && reg != 1) in[1] = (in[1] & ~0xffull) | cnt;
+                        if (hsz[si] == 16) code[n++] = 0x66;
+                        if (hsz[si] == 64) code[n++] = 0x48;
+                        if (form == 0) code[n++] = hsz[si] == 8 ? 0xc0 : 0xc1;
+                        else if (form == 1) code[n++] = hsz[si] == 8 ? 0xd0 : 0xd1;
+                        else code[n++] = hsz[si] == 8 ? 0xd2 : 0xd3;
+                        code[n++] = (uint8_t)(0xc0 | (digit[oi] << 3) | reg);
+                        if (form == 0) code[n++] = (uint8_t)cnt;
+                        uint64_t fl = rnd() & 0x8d5;
+                        snap_t a = run(code, n, in, fl, mem, 0);
+                        snap_t b = run(code, n, in, fl, mem, 1);
+                        total++;
+                        if (!a.ok || !b.ok) { nok++; continue; }
+                        if (a.rax != b.rax || a.rcx != b.rcx || a.rdx != b.rdx || ((a.fl ^ b.fl) & 0x8d5)) {
+                            bad++;
+                            if (bad - sec_bad <= 12)
+                                fprintf(stderr, "MISMATCH shift op=%d/%d form=%d reg=%d cnt=%u: rax %llx/%llx rcx %llx/%llx rdx %llx/%llx fl %llx/%llx\n",
+                                        oi, hsz[si], form, reg, cnt, (unsigned long long)a.rax, (unsigned long long)b.rax,
+                                        (unsigned long long)a.rcx, (unsigned long long)b.rcx, (unsigned long long)a.rdx,
+                                        (unsigned long long)b.rdx, (unsigned long long)a.fl, (unsigned long long)b.fl);
+                        }
+                    }
+        fprintf(stderr, "SECTION shift cases=%lu mismatch=%lu run_fail=%lu\n", total - sec_total, bad - sec_bad, nok - sec_nok);
+    }
+    /* Производитель флагов и условие В ОДНОМ блоке (Claude 28.09.2026, MACRUNNER_HB_STATIC_LAZY_COND): CMP/SUB/ADD/
+     * AND/OR/XOR/TEST r,r (rax ? rcx), 8/16/32/64 бита; потребитель — SETcc dl, CMOVcc rdx,rcx или Jcc через
+     * `mov dl,1` на `mov cl,3`; все 16 условий; половина случаев с `mov r8,r9` между ними (отметка наследуется). Тест
+     * hb_lazy_cond_native_test кладёт запись руками и такой пары не содержит. */
+    {
+        unsigned long sec_total = total, sec_bad = bad, sec_nok = nok;
+        uint64_t st0 = hb_codegen_static_lazy_cond_emitted ? hb_codegen_static_lazy_cond_emitted() : 0;
+        const uint8_t popc[7] = { 0x39, 0x29, 0x01, 0x21, 0x09, 0x31, 0x85 };   /* cmp sub add and or xor test (r/m, r) */
+        const int psz[4] = { 8, 16, 32, 64 };
+        for (int pi = 0; pi < 7; pi++)
+            for (int si = 0; si < 4; si++)
+                for (int cc = 0; cc < 16; cc++)
+                    for (int form = 0; form < 3; form++)            /* 0 SETcc, 1 CMOVcc, 2 Jcc */
+                        for (int it = 0; it < 12; it++) {
+                            uint8_t code[24], mem[64];
+                            size_t n = 0;
+                            int gap = it & 1;
+                            if (psz[si] == 16) code[n++] = 0x66;
+                            if (psz[si] == 64) code[n++] = 0x48;
+                            code[n++] = psz[si] == 8 ? (uint8_t)(popc[pi] - 1) : popc[pi];
+                            code[n++] = 0xc8;                              /* modrm 11 001 000: op rax/eax/ax/al, rcx */
+                            if (gap) { code[n++] = 0x4d; code[n++] = 0x89; code[n++] = 0xc8; }   /* mov r8, r9 */
+                            if (form == 0) { code[n++] = 0x0f; code[n++] = (uint8_t)(0x90 | cc); code[n++] = 0xc2; }
+                            else if (form == 1) { code[n++] = 0x48; code[n++] = 0x0f; code[n++] = (uint8_t)(0x40 | cc); code[n++] = 0xd1; }
+                            else { code[n++] = (uint8_t)(0x70 | cc); code[n++] = 0x02; code[n++] = 0xb2; code[n++] = 0x01; code[n++] = 0xb1; code[n++] = 0x03; }   /* цель — mov cl,3 внутри куска */
+                            uint64_t in[4] = { edge(), edge(), edge(), (uint64_t)(uintptr_t)(g_data + 64) };
+                            if (rnd() & 1) in[1] = in[0];                   /* равенство */
+                            else if (rnd() & 1) in[1] = in[0] + (rnd() & 1 ? 1 : (uint64_t)-1);
+                            for (int k = 0; k < 64; k++) mem[k] = (uint8_t)rnd();
+                            uint64_t fl = rnd() & 0x8d5;
+                            snap_t a = run(code, n, in, fl, mem, 0);
+                            snap_t b = run(code, n, in, fl, mem, 1);
+                            total++;
+                            if (!a.ok || !b.ok) { nok++; if (nok - sec_nok <= 5) fprintf(stderr, "RUN FAIL pair p=%d/%d cc=%d form=%d\n", pi, psz[si], cc, form); continue; }
+                            if (a.rax != b.rax || a.rcx != b.rcx || a.rdx != b.rdx || ((a.fl ^ b.fl) & 0x8d5)) {
+                                bad++;
+                                if (bad - sec_bad <= 12)
+                                    fprintf(stderr, "MISMATCH pair p=%d/%d cc=%d form=%d gap=%d: rax %llx/%llx rdx %llx/%llx fl %llx/%llx\n",
+                                            pi, psz[si], cc, form, gap, (unsigned long long)a.rax, (unsigned long long)b.rax,
+                                            (unsigned long long)a.rdx, (unsigned long long)b.rdx,
+                                            (unsigned long long)a.fl, (unsigned long long)b.fl);
+                            }
+                        }
+        fprintf(stderr, "SECTION pair cases=%lu mismatch=%lu run_fail=%lu static_cond_emitted=%llu\n", total - sec_total,
+                bad - sec_bad, nok - sec_nok,
+                (unsigned long long)((hb_codegen_static_lazy_cond_emitted ? hb_codegen_static_lazy_cond_emitted() : 0) - st0));
     }
     printf("{\"cases\":%lu,\"mismatch\":%lu,\"run_fail\":%lu}\n", total, bad, nok);
     return (bad || nok) ? 1 : 0;

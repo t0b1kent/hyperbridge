@@ -6843,6 +6843,41 @@ static unsigned persistent_cache_version(void) {
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_SIMD_INT");
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_SIMD_FP");
         HB_KEY_GATE("MACRUNNER_HB_TEST_SIMD_FLIP");
+        /* Claude 28.09.2026 — ГЕЙТЫ ВЫПУСКА 26-28.09, КОТОРЫХ В КЛЮЧЕ НЕ БЫЛО (нашёл агент SIMD: 11 штук, плюс
+         * новые). Все меняют выпущенный код; руки A/B на общем корне кеша иначе читали бы трансляции друг друга.
+         * FLIP-гейты — отрицательные контроли тестов: их записям в общем кеше не место. */
+        HB_KEY_GATE("MACRUNNER_HB_CMP_MEM_NATIVE");
+        HB_KEY_GATE("MACRUNNER_HB_ALU_MEM_NATIVE");
+        HB_KEY_GATE("MACRUNNER_HB_IMUL_NATIVE");
+        HB_KEY_GATE("MACRUNNER_HB_CMOV_MEM_NATIVE");
+        HB_KEY_GATE("MACRUNNER_HB_NEG_NATIVE");
+        HB_KEY_GATE("MACRUNNER_HB_LSE_ATOMICS");
+        HB_KEY_GATE("MACRUNNER_HB_LSE_XCHG");
+        HB_KEY_GATE("MACRUNNER_HB_NATIVE_SEG_LOAD");
+        HB_KEY_GATE("MACRUNNER_HB_NATIVE_MULDIV");
+        HB_KEY_GATE("MACRUNNER_HB_SELF_BASE_NATIVE");
+        HB_KEY_GATE("MACRUNNER_HB_LOAD_ALIGN_NATIVE");
+        HB_KEY_GATE("MACRUNNER_HB_NATIVE_XMM_STORE");
+        HB_KEY_GATE("MACRUNNER_HB_NATIVE_SHIFT");
+        HB_KEY_GATE("MACRUNNER_HB_STATIC_LAZY_COND");
+        HB_KEY_GATE("MACRUNNER_HB_TSO_RSP_RELAXED");
+        HB_KEY_GATE("MACRUNNER_HB_TSO_STACK_RELAXED");
+        HB_KEY_GATE("MACRUNNER_HB_TRUE_LDAR_ALIGNED");
+        HB_KEY_GATE("MACRUNNER_HB_LDAPR_RCPC");
+        HB_KEY_GATE("MACRUNNER_HB_NO_DEADLINE_CHECKS");
+        HB_KEY_GATE("MACRUNNER_HB_STACK_STLR_GUARD");
+        HB_KEY_GATE("MACRUNNER_HB_XMM_STORE_STLR");
+        HB_KEY_GATE("MACRUNNER_HB_NATIVE_FASTPATH_INLINE");
+        HB_KEY_GATE("MACRUNNER_HB_CALLRET");
+        HB_KEY_GATE("MACRUNNER_HB_TEST_MEM_NATIVE_FLIP");
+        HB_KEY_GATE("MACRUNNER_HB_TEST_LAZY_COND_FLIP");
+        HB_KEY_GATE("MACRUNNER_HB_TEST_STATIC_COND_FLIP");
+        {   /* L1_TABLE_BITS — число (маска и сдвиг зашиты в пробу таблицы): троичного состояния мало, 14 и 16
+             * дали бы один ключ. В ключ идёт само значение. */
+            const char* v_ = hb_env("MACRUNNER_HB_L1_TABLE_BITS");
+            for (; v_ && *v_; ++v_) mix = (mix ^ (uint64_t)(unsigned char)*v_) * HB_KEY_FNV_PRIME;
+            mix = (mix ^ 0x4c31u) * HB_KEY_FNV_PRIME;
+        }
         HB_KEY_GATE("MACRUNNER_HB_BT_PENDING_NATIVE");
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_YMM_MOVE");
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_LAZY_COND");

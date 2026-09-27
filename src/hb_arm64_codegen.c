@@ -758,6 +758,19 @@ static int tso_stack_relaxed(void) {
     return hb_jit_gate_flag( HB_GATE_HB_TSO_STACK_RELAXED, 0);
 }
 
+/* ★ Claude 27.09.2026 — ПОРЯДОК СНИМАЕТСЯ ТОЛЬКО С RSP, КАК У FEX (гейт MACRUNNER_HB_TSO_RSP_RELAXED, умолчание 0).
+ *
+ * FEX не упорядочивает под TSO обращения с базой RSP и только их (FEXCore OpcodeDispatcher.h,
+ * IsNonTSOReg: `Access == DEFAULT && Reg == REG_RSP`; применяется к базе и индексу адреса). RBP он
+ * упорядочивает: в коде без указателя кадра RBP — обычный регистр и может держать указатель на общие
+ * данные. Наш MACRUNNER_HB_TSO_STACK_RELAXED снимает порядок и с RBP, а PUSH/POP/CALL/RET не трогает
+ * вовсе (их прямой путь признака не ставит). Здесь правило FEX: база RSP плюс неявные обращения к стеку
+ * PUSH/POP/CALL/RET. Признак 2 = RSP, 1 = RBP. Риск тот же, что у FEX: адрес переменной на стеке,
+ * отданный другому потоку, перестаёт упорядочиваться. */
+static int tso_rsp_relaxed(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_TSO_RSP_RELAXED, 0);
+}
+
 static _Thread_local unsigned char g_hb_emit_stack_access;
 static unsigned long long macrunner_hb_tso_stack_relaxed_emitted;
 
@@ -772,7 +785,7 @@ static bool hb_operand_is_stack_based(const hb_ir_operand_t* op) {
  * (адресная арифметика внутри) не теряли признак. */
 static unsigned char hb_emit_mark_stack_access(const hb_ir_operand_t* op) {
     unsigned char prev = g_hb_emit_stack_access;
-    g_hb_emit_stack_access = hb_operand_is_stack_based(op) ? 1u : 0u;
+    g_hb_emit_stack_access = hb_operand_is_stack_based(op) ? (op->mem.base == HB_REG_RSP ? 2u : 1u) : 0u;
     return prev;
 }
 
@@ -794,8 +807,8 @@ static void hb_emit_restore_stack_access(unsigned char prev) {
  * послабление действительно выпущено. */
 static bool hb_tso_relax_this_access(void) {
     if (!g_hb_emit_stack_access) return false;
-    if (!tso_stack_relaxed()) return false;
-    return true;
+    if (tso_stack_relaxed()) return true;
+    return g_hb_emit_stack_access == 2u && tso_rsp_relaxed();   /* правило FEX: только RSP */
 }
 
 /* Учесть выпущенное послабление. Зовётся ТОЛЬКО когда оно правда выпущено. */
@@ -1954,9 +1967,20 @@ static void emit_mov_imm_compact(hb_codegen_buffer_t* buf, int rd, uint64_t val)
     emit_mov_imm64_compact(buf, rd, val);
 }
 
+/* ★ Claude 28.09.2026 — ЧТО ЛЕЖИТ В ЛЕНИВОЙ ЗАПИСИ НА КОНЦЕ ВЫПУЩЕННОГО КОДА (для MACRUNNER_HB_STATIC_LAZY_COND).
+ * valid=1: в этой точке выпуска запись отложена (pending=1), вида kind, ширины width, materialized_mask=0 —
+ * на ВСЕХ путях, сходящихся сюда. Ставит emit_note_lazy_header; снимают: любой вызов C (emit_blr — помощник
+ * может записать, материализовать или очистить запись), снятие отложенности, заметка с материализованными
+ * битами (BMI), пролог, начало команды, пишущей флаги, и цель внутреннего перехода слитой единицы. */
+typedef struct { unsigned char valid; hb_lazy_flags_kind_t kind; hb_size_t width; } cg_note_state_t;
+static _Thread_local cg_note_state_t g_cg_note_cur;
+static _Thread_local unsigned char g_cg_note_join[256];   /* = CG_MERGE_MAX_INSTR */
+static _Thread_local uint64_t g_cg_note_guest;            /* гостевой адрес текущей команды — для сверки */
+
 static void emit_blr(hb_codegen_buffer_t* buf, int rn) {
     rn = hb_rm(buf, rn);
     buf->emitted_call = 1;   /* a frameless block must contain no call: BLR clobbers x30 */
+    g_cg_note_cur.valid = 0;
 
     sra_note_call(buf);
     emit_u32(buf, 0xd63f0000 | (rn << 5));
@@ -4036,6 +4060,7 @@ static void emit_prologue(hb_codegen_buffer_t* buf) {
         }
     }
     emit_mov_reg(buf, 19, 0); /* MOV X19, X0 (ctx) */
+    g_cg_note_cur.valid = 0;   /* Claude 28.09: о записи на входе в блок ничего не известно */
     /* ★ Закрепить базу окна гостя в X24 — ТОЛЬКО ЗДЕСЬ, после того как x19 стал ctx.
      * Первая попытка ставила загрузку в начале emit_prologue, за 22 строки до
      * `MOV X19, X0`, — читалось из мусора, и приёмка ВИСЛА. Разбор у
@@ -4071,15 +4096,29 @@ static void emit_srok_vyhod(hb_codegen_buffer_t* buf, int schetchik,
  *
  * Сравнение — единственное, что делает выпущенный код: понятий «прогон»,
  * «бюджет» и «предел» здесь нет, срок приведён к шкале счётчика диспетчером. */
+/* ★ Claude 28.09.2026 — СЧЁТЧИКИ БЕЗ ПРОВЕРКИ СРОКА (гейт MACRUNNER_HB_NO_DEADLINE_CHECKS, умолчание 0).
+ *
+ * Срок нужен только тому, кто задал предел шагов или блоков (тесты, стенды). В игре пределов нет
+ * (оба срока UINT64_MAX, разбор выше), а две проверки — это 2 загрузки, 2 сравнения и 2 перехода на
+ * КАЖДЫЙ исполненный блок. Счётчики остаются: по их приращению диспетчер узнаёт длину цепочки
+ * (run_block_delta — сшивка после цепочки) и число шагов (адаптер смотрит steps_executed). С гейтом
+ * предел соблюдается только на входах в диспетчер, не внутри цепочки: для прогонов, где предел задан,
+ * гейт не ставить. */
+static int no_deadline_checks_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_NO_DEADLINE_CHECKS, 0);
+}
+
 static void emit_block_counter_accounting(hb_codegen_buffer_t* buf, uint32_t steps) {
     if (!jit_block_chain_enabled_for(buf)) return;
 
     emit_ldr_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, block_count));
-    emit_srok_vyhod(buf, 20, (uint32_t)offsetof(hb_context_t, block_deadline),
-                    HB_ERR_BLOCK_LIMIT);
+    if (!no_deadline_checks_enabled())
+        emit_srok_vyhod(buf, 20, (uint32_t)offsetof(hb_context_t, block_deadline),
+                        HB_ERR_BLOCK_LIMIT);
     emit_ldr_x(buf, 22, 19, (uint32_t)offsetof(hb_context_t, step_count));
-    emit_srok_vyhod(buf, 22, (uint32_t)offsetof(hb_context_t, step_deadline),
-                    HB_ERR_STEP_LIMIT);
+    if (!no_deadline_checks_enabled())
+        emit_srok_vyhod(buf, 22, (uint32_t)offsetof(hb_context_t, step_deadline),
+                        HB_ERR_STEP_LIMIT);
     /* оба среза пройдены — списываем оба счётчика */
     emit_add_imm(buf, 20, 20, 1);
     emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, block_count));
@@ -6105,6 +6144,7 @@ static void emit_note_lazy_header(hb_codegen_buffer_t* buf, int header_reg, int 
     emit_mov_imm_compact(buf, width_reg, (uint64_t)width);
     emit_stp_x(buf, header_reg, width_reg, 19,
                lazy_off + (uint32_t)offsetof(hb_lazy_flags_t, pending));
+    g_cg_note_cur.valid = 1; g_cg_note_cur.kind = kind; g_cg_note_cur.width = width;   /* Claude 28.09 */
 }
 
 /* ★ ДВЕ ЗАПИСИ МАСОК СВОДЯТСЯ В ОДНУ ПАРУ — лейн РЕГИСТРЫ, итерация 133.
@@ -8198,9 +8238,35 @@ static int native_xmm_store_enabled(void) {
     return hb_jit_gate_flag( HB_GATE_HB_NATIVE_XMM_STORE, 0);
 }
 
+/* ★ Claude 28.09.2026 — 128-БИТНАЯ ЗАПИСЬ ДВУМЯ STLR НА ВЫРОВНЕННОМ АДРЕСЕ (гейт MACRUNNER_HB_XMM_STORE_STLR, умолчание 0).
+ *
+ * Та же мысль, что у MACRUNNER_HB_STACK_STLR_GUARD (запись вершины стека): полный DMB ISH перед STP
+ * заменяется освобождающими записями, когда адрес выровнен на 8 — две STLR по половинам, вторая
+ * упорядочена за первой. Порядок x86-TSO тот же (release на каждой половине); 16-байтовой неделимости
+ * x86 у MOVUPS не обещает. Невыровненный адрес — прежняя пара DMB ISH + STP. */
+static int xmm_store_stlr_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_XMM_STORE_STLR, 0);
+}
+
 static void emit_direct_mem128_store_from_x20_x22(hb_codegen_buffer_t* buf) {
     if (native_xmm_store_enabled() && buf->arch == HB_ARCH_X64 && store_perm_checked_by_host_mmu(buf)) {
         ea_materialize(buf);
+        if (xmm_store_stlr_enabled() && !tso_relaxed_stores() && !hb_tso_relax_this_access()) {
+            int is_tbz = 0;
+            size_t aligned = emit_align_guard_deferred(buf, 7u, &is_tbz);
+            size_t done;
+            emit_dmb_ish(buf);                           /* невыровненный: прежняя пара */
+            emit_stp_x(buf, 20, 22, 21, 0);
+            done = emit_b_deferred(buf);
+            patch_align_guard(buf, aligned, is_tbz, buf->size);
+            emit_stlr_from_reg_ex(buf, 20, 21, HB_SIZE_64, true);        /* STLR X20, [X21] */
+            emit_add_imm(buf, 16, 21, 8);
+            emit_stlr_from_reg_ex(buf, 22, 16, HB_SIZE_64, true);        /* STLR X22, [X21+8] */
+            patch_b(buf, done, buf->size);
+            if (jit_direct_store_fence_enabled()) emit_dmb_ish(buf);
+            jit_native_mem_count(1);
+            return;
+        }
         emit_dmb_ish(buf);
         emit_stp_x(buf, 20, 22, 21, 0);              /* STP X20, X22, [X21] */
         if (jit_direct_store_fence_enabled()) emit_dmb_ish(buf);
@@ -8775,10 +8841,36 @@ static bool emit_native_punpck_qdq(hb_codegen_buffer_t* buf, const hb_ir_instr_t
     return true;
 }
 
+/* ★ Claude 28.09.2026 — PUSH/CALL: STLR НА ВЫРОВНЕННОЙ ВЕРШИНЕ (гейт MACRUNNER_HB_STACK_STLR_GUARD, умолчание 0).
+ *
+ * Выравнивание RSP при выпуске не доказано, поэтому запись вершины шла ветвью «гранул не исключён»:
+ * DMB ISH + STR — ПОЛНЫЙ барьер на каждом PUSH и каждом CALL (выпуск `push rbp; ...` — emitdump 28.09).
+ * Замер 03.09 на установщике GTA VC: stlr 29-32 тыс. строк журнала, dmb ish + str — 5,4-6 тыс. Вершина
+ * стека x64 выровнена на 8 практически всегда, и тогда годна настоящая STLR — та же семантика
+ * освобождения, барьер слабее. Проверка TST+B.EQ; невыровненная вершина — прежняя пара. Модель памяти
+ * не меняется (в отличие от MACRUNNER_HB_TSO_RSP_RELAXED). */
+static int stack_stlr_guard_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_STACK_STLR_GUARD, 0);
+}
+
 static void emit_native_stack_push_x20(hb_codegen_buffer_t* buf) {
+    unsigned char prev_stack = g_hb_emit_stack_access;
     emit_ldr_x(buf, 21, 19, (uint32_t)reg_off(buf, HB_REG_RSP));
     emit_sub_imm(buf, 21, 21, 8);
-    emit_stlr_from_reg(buf, 20, 21, HB_SIZE_64);
+    g_hb_emit_stack_access = 2u;                 /* Claude 27.09: неявная запись по RSP (PUSH/CALL) */
+    if (stack_stlr_guard_enabled() && !tso_relaxed_stores() && !hb_tso_relax_this_access()) {
+        int is_tbz = 0;
+        size_t aligned = emit_align_guard_deferred(buf, 7u, &is_tbz);
+        size_t done;
+        emit_stlr_from_reg_ex(buf, 20, 21, HB_SIZE_64, false);      /* невыровненная вершина: DMB ISH + STR */
+        done = emit_b_deferred(buf);
+        patch_align_guard(buf, aligned, is_tbz, buf->size);
+        emit_stlr_from_reg_ex(buf, 20, 21, HB_SIZE_64, true);       /* выровненная: STLR */
+        patch_b(buf, done, buf->size);
+    } else {
+        emit_stlr_from_reg(buf, 20, 21, HB_SIZE_64);
+    }
+    g_hb_emit_stack_access = prev_stack;
     emit_str_x(buf, 21, 19, (uint32_t)reg_off(buf, HB_REG_RSP));
 }
 
@@ -8912,7 +9004,12 @@ static bool emit_native_pop(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr
     if (!is_plain_gpr_reg_operand(&instr->dst) || instr->dst.size != HB_SIZE_64)
         return false;
     emit_ldr_x(buf, 21, 19, (uint32_t)reg_off(buf, HB_REG_RSP));
-    emit_ldar_to_reg(buf, 20, 21, HB_SIZE_64);
+    {   /* Claude 27.09: неявное чтение по RSP (POP) */
+        unsigned char prev_stack = g_hb_emit_stack_access;
+        g_hb_emit_stack_access = 2u;
+        emit_ldar_to_reg(buf, 20, 21, HB_SIZE_64);
+        g_hb_emit_stack_access = prev_stack;
+    }
     emit_add_imm(buf, 21, 21, 8);
     emit_str_x(buf, 21, 19, (uint32_t)reg_off(buf, HB_REG_RSP));
     emit_store_x20_to_gpr_sized(buf, &instr->dst);
@@ -8970,7 +9067,12 @@ static bool emit_native_ret(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr
         return false;
     }
     emit_ldr_x(buf, 21, 19, (uint32_t)reg_off(buf, HB_REG_RSP));
-    emit_ldar_to_reg(buf, 20, 21, HB_SIZE_64);
+    {   /* Claude 27.09: неявное чтение по RSP (RET) */
+        unsigned char prev_stack = g_hb_emit_stack_access;
+        g_hb_emit_stack_access = 2u;
+        emit_ldar_to_reg(buf, 20, 21, HB_SIZE_64);
+        g_hb_emit_stack_access = prev_stack;
+    }
     emit_add_imm(buf, 21, 21, 8);
     if (adjust) emit_add_imm(buf, 21, 21, (uint32_t)adjust);
     emit_str_x(buf, 21, 19, (uint32_t)reg_off(buf, HB_REG_RSP));
@@ -9448,6 +9550,7 @@ static bool emit_native_bswap(hb_codegen_buffer_t* buf, const hb_ir_instr_t* ins
 static void emit_clear_lazy_flags_pending(hb_codegen_buffer_t* buf) {
     emit_strb_w(buf, 31, 19, (uint32_t)(offsetof(hb_context_t, lazy_flags) +
                                         offsetof(hb_lazy_flags_t, pending)));
+    g_cg_note_cur.valid = 0;   /* Claude 28.09 */
 }
 
 static void emit_store_flag_bool_from_w(hb_codegen_buffer_t* buf, int wreg, size_t flag_off) {
@@ -10331,6 +10434,7 @@ static void emit_note_lazy_logic_from_x22(hb_codegen_buffer_t* buf, hb_size_t wi
     emit_str_x(buf, 16, 19, lazy_off + (uint32_t)offsetof(hb_lazy_flags_t, valid_mask));
     emit_mov_imm_compact(buf, 16, (uint64_t)materialized);
     emit_str_w(buf, 16, 19, lazy_off + (uint32_t)offsetof(hb_lazy_flags_t, materialized_mask));
+    if (materialized) g_cg_note_cur.valid = 0;   /* Claude 28.09: часть флагов не из операндов записи */
 }
 
 static bool emit_native_bmi(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
@@ -14882,6 +14986,77 @@ static uint64_t g_native_lazy_cond_emitted;
 uint64_t hb_codegen_native_lazy_cond_emitted(void) {
     return __atomic_load_n(&g_native_lazy_cond_emitted, __ATOMIC_RELAXED);
 }
+/* ★ Claude 28.09.2026 — ВИД ЗАПИСИ ИЗВЕСТЕН ПРИ ВЫПУСКЕ (гейт MACRUNNER_HB_STATIC_LAZY_COND, умолчание 0).
+ *
+ * Разбор ниже узнаёт вид и ширину записи во время исполнения: две загрузки, сравнения вида, переходы — около
+ * 20 команд на Jcc/SETcc/CMOVcc, даже когда условие стоит СРАЗУ за своим CMP (выпуск `cmp rax,r8; jl`:
+ * 172 слова на 5 команд x86, из них ~25 — этот разбор). Но если предыдущая команда выпустила заметку сама,
+ * вид и ширина известны уже при выпуске (g_cg_note_cur, правила — у его объявления). Тогда из записи берутся
+ * только операнды, сдвиг прижатия — непосредственный, и условие то же, что у разбора: CMP/SUB — SUBS,
+ * ADD — ADDS, AND/OR/XOR/TEST — TST результата; прочие виды и невыразимые условия — общим путём. */
+/* Печать расхождения статического условия с разбором (режим сверки MACRUNNER_HB_STATIC_LAZY_COND=2). */
+void hb_jit_helper_static_cond_mismatch(hb_context_t* ctx, uint64_t info, uint64_t guest);
+void hb_jit_helper_static_cond_mismatch(hb_context_t* ctx, uint64_t info, uint64_t guest) {
+    static unsigned long n;
+    const unsigned char* pad;
+    if (!ctx) return;
+    pad = (const unsigned char*)&ctx->lazy_flags;
+    if (++n <= 40 || (n & 0xfffu) == 0) {
+        fprintf(stderr, "macrunner-hb-static-cond-mismatch: n=%lu guest=%#llx cc=%u vid_vypuska=%u shirina_vypuska=%u "
+                        "pending=%d vid=%d shirina=%u mat=%#x lhs=%#llx rhs=%#llx res=%#llx static=%u razbor=%u\n",
+                n, (unsigned long long)guest, (unsigned)(info & 0xffu), (unsigned)((info >> 8) & 0xffu),
+                (unsigned)((info >> 16) & 0xffu), (int)ctx->lazy_flags.pending, (int)ctx->lazy_flags.kind,
+                (unsigned)ctx->lazy_flags.width, (unsigned)ctx->lazy_flags.materialized_mask,
+                (unsigned long long)ctx->lazy_flags.lhs, (unsigned long long)ctx->lazy_flags.rhs,
+                (unsigned long long)ctx->lazy_flags.result, (unsigned)pad[61], (unsigned)pad[62]);
+        fflush(stderr);
+    }
+}
+
+static uint64_t g_static_lazy_cond_emitted;
+uint64_t hb_codegen_static_lazy_cond_emitted(void) {
+    return __atomic_load_n(&g_static_lazy_cond_emitted, __ATOMIC_RELAXED);
+}
+static int static_lazy_cond_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_STATIC_LAZY_COND, 0);
+}
+static void emit_lsl_imm_x(hb_codegen_buffer_t* buf, int rd, int rn, unsigned sh) {
+    uint32_t d = (uint32_t)hb_rm(buf, rd), n = (uint32_t)hb_rm(buf, rn);
+    emit_u32(buf, 0xd3400000u | (((64u - sh) & 63u) << 16) | ((63u - sh) << 10) | (n << 5) | d);   /* LSL */
+}
+static bool emit_static_cond_to_w0(hb_codegen_buffer_t* buf, hb_cc_t cc) {
+    const uint32_t lz = (uint32_t)offsetof(hb_context_t, lazy_flags);
+    const hb_lazy_flags_kind_t k = g_cg_note_cur.kind;
+    const unsigned bytes = (unsigned)g_cg_note_cur.width;
+    unsigned sh;
+    int c;
+    if (bytes != 1u && bytes != 2u && bytes != 4u && bytes != 8u) return false;
+    sh = 64u - 8u * bytes;
+    if (k == HB_LAZY_FLAGS_CMP || k == HB_LAZY_FLAGS_SUB || k == HB_LAZY_FLAGS_ADD) {
+        const int producer = k == HB_LAZY_FLAGS_ADD ? 1 : 0;
+        c = lazy_arm_cond(producer, cc);
+        if (c < 0 || c > 15) return false;
+        if (producer == 0 && hb_jit_gate_flag( HB_GATE_HB_TEST_LAZY_COND_FLIP, 0 ) && (c == 2 || c == 3)) c ^= 1;
+        emit_ldr_x(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, lhs));
+        emit_ldr_x(buf, 21, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, rhs));
+        if (sh) { emit_lsl_imm_x(buf, 20, 20, sh); emit_lsl_imm_x(buf, 21, 21, sh); }
+        emit_gpr_word(buf, producer ? 0xab00001fu : 0xeb00001fu, 31, 20, 21);   /* CMN / CMP X20, X21 */
+        emit_w0_from_arm_cond(buf, c);
+        return true;
+    }
+    if (k == HB_LAZY_FLAGS_AND || k == HB_LAZY_FLAGS_OR || k == HB_LAZY_FLAGS_XOR || k == HB_LAZY_FLAGS_TEST) {
+        c = lazy_arm_cond(2, cc);
+        if (c < 0) return false;
+        if (c == 16 || c == 17) { emit_w0_from_arm_cond(buf, c); return true; }
+        emit_ldr_x(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, result));
+        if (sh) emit_lsl_imm_x(buf, 20, 20, sh);
+        emit_gpr_word(buf, 0xea00001fu, 31, 20, 20);                               /* TST X20, X20 */
+        emit_w0_from_arm_cond(buf, c);
+        return true;
+    }
+    return false;
+}
+
 /* x86-условие cc -> X0 (0/1). false — cc не поддержан (P/NP) или гейт снят: вызывающий
  * выпускает прежний вызов сам. Внутри — медленная ветвь с тем же помощником для прочих видов. */
 static bool emit_native_cond_to_w0(hb_codegen_buffer_t* buf, hb_cc_t cc) {
@@ -14890,6 +15065,26 @@ static bool emit_native_cond_to_w0(hb_codegen_buffer_t* buf, hb_cc_t cc) {
     size_t not_pending, to_sub1, to_sub2, to_logic1, to_logic2, to_add = 0, to_helper, to_helper_m;
     size_t d_sub, d_logic, d_add = 0, d_flags;
     if (!native_lazy_cond_enabled() || (unsigned)cc > (unsigned)HB_CC_NO) return false;
+    int static_verify = 0;
+    uint64_t static_info = 0;
+    if (static_lazy_cond_enabled() && g_cg_note_cur.valid) {
+        const hb_lazy_flags_kind_t k0 = g_cg_note_cur.kind;
+        const hb_size_t w0_size = g_cg_note_cur.width;
+        if (emit_static_cond_to_w0(buf, cc)) {
+            __atomic_add_fetch(&g_static_lazy_cond_emitted, 1, __ATOMIC_RELAXED);
+            if (static_lazy_cond_enabled() != 2) {
+                /* отрицательный контроль теста — ТОЛЬКО этого пути: условие наоборот */
+                if (hb_jit_gate_flag( HB_GATE_HB_TEST_STATIC_COND_FLIP, 0 ))
+                    emit_gpr_word(buf, 0x52000000u, 0, 0, 0);                            /* EOR W0, W0, #1 */
+                return true;
+            }
+            /* MACRUNNER_HB_STATIC_LAZY_COND=2 — СВЕРКА в игре: статический итог в набивку записи (байт 61),
+             * ниже прежний разбор; расхождение — холодный вызов с печатью, дальше идёт итог разбора. */
+            emit_strb_w(buf, 0, 19, lz + 61u);
+            static_verify = 1;
+            static_info = (uint64_t)cc | ((uint64_t)k0 << 8) | ((uint64_t)w0_size << 16);
+        }
+    }
     emit_ldrb_w(buf, 20, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, pending));
     not_pending = emit_cbz_x_deferred(buf, 20);
     /* ★ Часть флагов уже лежит в ctx->flags поверх записи (materialized_mask): так пишет родной
@@ -14968,6 +15163,19 @@ static bool emit_native_cond_to_w0(hb_codegen_buffer_t* buf, hb_cc_t cc) {
     patch_b(buf, d_logic, buf->size);
     if (c_add >= 0) patch_b(buf, d_add, buf->size);
     patch_b(buf, d_flags, buf->size);
+    if (static_verify) {
+        size_t same;
+        emit_ldrb_w(buf, 16, 19, lz + 61u);
+        emit_gpr_word(buf, 0x6b00001fu, 31, 0, 16);                                     /* CMP W0, W16 */
+        same = emit_bcond_deferred(buf, 0);                                             /* EQ */
+        emit_strb_w(buf, 0, 19, lz + 62u);                    /* итог разбора переживёт вызов */
+        emit_mov_reg(buf, 0, 19);
+        emit_mov_imm64(buf, 1, static_info);
+        emit_mov_imm64(buf, 2, g_cg_note_guest);
+        emit_call_helper(buf, (void*)hb_jit_helper_static_cond_mismatch);
+        emit_ldrb_w(buf, 0, 19, lz + 62u);
+        patch_bcond(buf, same, 0, buf->size);
+    }
     __atomic_add_fetch(&g_native_lazy_cond_emitted, 1, __ATOMIC_RELAXED);
     return true;
 }
@@ -15559,6 +15767,103 @@ static hb_result_t emit_muldiv_native(hb_codegen_buffer_t* buf, const hb_ir_inst
     return HB_OK;
 }
 
+/* ★ Claude 27.09.2026 — SHL/SHR/SAR БЕЗ ПОМОЩНИКА (гейт MACRUNNER_HB_NATIVE_SHIFT, умолчание 0).
+ *
+ * Все сдвиги шли через hb_jit_helper_exec_binop_lazy -> hb_flags_exec_binop, даже `shl eax, 5` на простом
+ * регистре. Профиль HK в меню (sample 20 мс, прогон fPr1): у второго по нагрузке потока около 30 % занятого
+ * времени — этот помощник вместе с hb_flags_exec_binop / hb_lazy_flags_note / чтением и записью регистров,
+ * у главного около 4 %. Перепись помощников (TRACE_HELPER_OPS) его не видит: он не получает instr.
+ *
+ * Выпуск повторяет помощник дословно: счётчик = rhs & 31 (& 63 у 64 бит); при нуле приёмнику пишется
+ * исходное значение, флаги не трогаются; иначе результат на ширине операнда (SAR — от знакорасширенного)
+ * и ленивая запись того же вида SHL/SHR/SAR с теми же lhs, rhs, result, count. rhs регистрового счётчика
+ * читается на ширине ОПЕРАЦИИ, как в hb_flags_exec_binop. Только при MACRUNNER_HB_SHIFT_UNDEF_FLAGS=1
+ * (умолчание): тогда маска годности от счётчика не зависит. ROL/ROR (материализуют флаги) — прежним путём. */
+static int native_shift_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_NATIVE_SHIFT, 0);
+}
+
+static bool native_shift_ok(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    if (!native_shift_enabled() || buf->arch != HB_ARCH_X64) return false;
+    if (instr->op != HB_IR_SHL && instr->op != HB_IR_SHR && instr->op != HB_IR_SAR) return false;
+    if (instr->preserve_cf || !cg_shift_undef_flags_enabled()) return false;
+    if (!is_plain_gpr_reg_operand(&instr->dst) || !is_plain_gpr_reg_operand(&instr->src1)) return false;
+    if (instr->dst.size != instr->src1.size) return false;
+    if (instr->dst.size != HB_SIZE_8 && instr->dst.size != HB_SIZE_16 &&
+        instr->dst.size != HB_SIZE_32 && instr->dst.size != HB_SIZE_64) return false;
+    if (instr->src2.type == HB_OP_REG) return is_plain_gpr_reg_operand(&instr->src2);
+    return instr->src2.type == HB_OP_IMM;
+}
+
+/* Та же запись, что emit_note_lazy_from_x20_x21_x22, но со счётчиком: x20 lhs, x21 rhs, x22 result, x23 count. */
+static void emit_note_lazy_shift_x20_x23(hb_codegen_buffer_t* buf, hb_lazy_flags_kind_t kind, hb_size_t width) {
+    uint32_t lazy_off = (uint32_t)offsetof(hb_context_t, lazy_flags);
+    if (g_lazy_flags_skip) return;
+    emit_stp_x(buf, 20, 21, 19, lazy_off + (uint32_t)offsetof(hb_lazy_flags_t, lhs));
+    emit_stp_x(buf, 22, 23, 19, lazy_off + (uint32_t)offsetof(hb_lazy_flags_t, result));   /* result, count */
+    emit_note_lazy_header(buf, 16, 17, kind, width);
+    emit_note_lazy_masks_k(buf, 16, lazy_valid_mask_for_kind(kind), kind);
+}
+
+static hb_result_t emit_native_shift(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    const hb_size_t sz = instr->dst.size;
+    const uint32_t cmask = sz == HB_SIZE_64 ? 63u : 31u;
+    const uint32_t msb = sz == HB_SIZE_8 ? 7u : sz == HB_SIZE_16 ? 15u : sz == HB_SIZE_32 ? 31u : 63u;
+    const hb_lazy_flags_kind_t kind = instr->op == HB_IR_SHL ? HB_LAZY_FLAGS_SHL :
+                                      instr->op == HB_IR_SHR ? HB_LAZY_FLAGS_SHR : HB_LAZY_FLAGS_SAR;
+    size_t zero_branch = 0;
+    uint32_t r20, r21, r22, r23;
+    if (!emit_load_gpr_sized_to_reg(buf, &instr->src1, 20)) return HB_ERR_INTERNAL;   /* lhs, верх нулевой */
+    if (instr->src2.type == HB_OP_IMM) {
+        uint32_t c = (uint32_t)((uint64_t)instr->src2.imm & cmask);
+        if (c == 0) {                              /* флаги не трогаются, приёмник = исходное */
+            emit_store_x20_to_gpr_sized(buf, &instr->dst);
+            hb_emit_note_native_exit();
+            return HB_OK;
+        }
+        emit_mov_imm_compact(buf, 21, (uint64_t)instr->src2.imm);   /* rhs — как у помощника, без маски */
+        emit_mov_imm_compact(buf, 23, c);
+        r20 = (uint32_t)hb_rm(buf, 20); r22 = (uint32_t)hb_rm(buf, 22);
+        if (instr->op == HB_IR_SHL) {
+            emit_u32(buf, 0xd3400000u | (((64u - c) & 63u) << 16) | ((63u - c) << 10) | (r20 << 5) | r22);   /* LSL */
+        } else if (instr->op == HB_IR_SHR) {
+            emit_u32(buf, 0xd340fc00u | (c << 16) | (r20 << 5) | r22);                                        /* LSR */
+        } else {
+            emit_sbfm(buf, 22, 20, msb);
+            emit_u32(buf, 0x9340fc00u | (c << 16) | (r22 << 5) | r22);                                        /* ASR */
+        }
+    } else {
+        hb_ir_operand_t cnt = hb_ir_reg(instr->src2.reg, sz);                /* rhs на ширине операции */
+        if (!emit_load_gpr_sized_to_reg(buf, &cnt, 21)) return HB_ERR_INTERNAL;
+        r20 = (uint32_t)hb_rm(buf, 20); r21 = (uint32_t)hb_rm(buf, 21);
+        r22 = (uint32_t)hb_rm(buf, 22); r23 = (uint32_t)hb_rm(buf, 23);
+        emit_u32(buf, (cmask == 63u ? 0x92401400u : 0x92401000u) | (r21 << 5) | r23);        /* AND x23, x21, #mask */
+        zero_branch = emit_cbz_x_deferred(buf, 23);
+        if (instr->op == HB_IR_SHL) {
+            emit_u32(buf, 0x9ac02000u | (r23 << 16) | (r20 << 5) | r22);                      /* LSLV */
+        } else if (instr->op == HB_IR_SHR) {
+            emit_u32(buf, 0x9ac02400u | (r23 << 16) | (r20 << 5) | r22);                      /* LSRV */
+        } else {
+            emit_sbfm(buf, 22, 20, msb);
+            emit_u32(buf, 0x9ac02800u | (r23 << 16) | (r22 << 5) | r22);                      /* ASRV */
+        }
+    }
+    emit_mask_x_reg_to_size(buf, 22, 16, sz);
+    if (hb_jit_gate_flag( HB_GATE_HB_TEST_MEM_NATIVE_FLIP, 0))
+        emit_add_imm(buf, 22, 22, 1);                    /* отрицательный контроль разностного теста */
+    emit_note_lazy_shift_x20_x23(buf, kind, sz);
+    emit_mov_reg(buf, 20, 22);
+    emit_store_x20_to_gpr_sized(buf, &instr->dst);
+    if (zero_branch) {
+        size_t done = emit_b_deferred(buf);
+        patch_cbz_x(buf, zero_branch, 23, buf->size);
+        emit_store_x20_to_gpr_sized(buf, &instr->dst);   /* счётчик 0: x20 ещё держит исходное */
+        patch_b(buf, done, buf->size);
+    }
+    hb_emit_note_native_exit();
+    return HB_OK;
+}
+
 /* ★ Claude 27.09.2026 — CMOVcc r, [m] БЕЗ ПОМОЩНИКА (гейт MACRUNNER_HB_CMOV_MEM_NATIVE). Перепись HK в меню:
  * `cmovs ecx,[rsp+60h]` — 336 млн вызовов hb_jit_helper_exec_cmovcc_operand_lazy на одном рабочем потоке.
  * x86 читает память ВСЕГДА, и при ложном условии тоже (отказ доступа обязан случиться), а r32 обнуляет верх
@@ -15945,6 +16250,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 emit_return_if_helper_failed(buf);
                 return HB_OK;
             }
+            if (native_shift_ok(buf, instr)) return emit_native_shift(buf, instr);   /* Claude 27.09 */
             uint64_t src2_type = 0;
             uint64_t src2_value = 0;
             if (instr->src2.type == HB_OP_REG) {
@@ -25325,8 +25631,28 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
                     armed, block->instr_count); fflush(stderr); } }
     }
     g_cg_last_instrs = instr_limit;
+    /* Claude 28.09: цели внутренних переходов слитой единицы — точки слияния путей, запись там неизвестна. */
+    g_cg_note_cur.valid = 0;
+    if (g_cg_merge_block == block) {
+        memset(g_cg_note_join, 0, sizeof(g_cg_note_join));
+        for (size_t j = 0; j < instr_limit && j < CG_MERGE_MAX_INSTR; j++) {
+            size_t tj = 0;
+            if ((block->instrs[j].op == HB_IR_Jcc || block->instrs[j].op == HB_IR_JMP) &&
+                cg_merge_target_index(block, block->instrs[j].target, &tj) && tj < CG_MERGE_MAX_INSTR)
+                g_cg_note_join[tj] = 1;
+        }
+    }
     { size_t emit_size_before = out ? out->size : 0;
     for (size_t i = 0; i < instr_limit; i++) {
+        /* Claude 28.09 (MACRUNNER_HB_STATIC_LAZY_COND): команда, пишущая флаги, начинает с «запись неизвестна»
+         * (известной её сделает только выпущенная ею заметка); читающие и не трогающие флаги — наследуют. */
+        switch (block->instrs[i].op) {
+            case HB_IR_MOV: case HB_IR_LOAD: case HB_IR_STORE: case HB_IR_LEA:
+            case HB_IR_Jcc: case HB_IR_SETcc: case HB_IR_CMOVcc: break;
+            default: g_cg_note_cur.valid = 0; break;
+        }
+        if (g_cg_merge_block == block && i < CG_MERGE_MAX_INSTR && g_cg_note_join[i]) g_cg_note_cur.valid = 0;
+        g_cg_note_guest = block->instrs[i].guest_addr;
         if (g_cg_merge_block == block && out && i < CG_MERGE_MAX_INSTR)
             g_cg_merge_off[i] = out->size;
         /* Решение о живости флагов принимается ЗДЕСЬ: тут известны блок и номер команды,
