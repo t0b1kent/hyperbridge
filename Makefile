@@ -295,6 +295,11 @@ test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPM
 	MACRUNNER_HB_MEM_SEGV_JIT_DOOR=1 ./$(TEST_BIN)
 	@echo "Running IMUL flag regression test..."
 	./$(IMUL_FLAGS_TEST_BIN)
+	@echo "Running native memory-operand differential test (JIT vs interpreter)..."
+	$(NATIVE_MEM_GATES) ./$(ALUMEM_DIFF_TEST_BIN)
+	@echo "Running LOCK RMW race test (LSE and helper)..."
+	MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_LSE_ATOMICS=1 ./$(LOCK_RACE_TEST_BIN)
+	MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_LSE_ATOMICS=0 ./$(LOCK_RACE_TEST_BIN)
 	./$(BIT_STRING_TEST_BIN)
 	./$(SEGMENT_ADDRESS_TEST_BIN)
 	./$(ABI_X64_STATE_TEST_BIN)
@@ -476,6 +481,22 @@ $(ABI_NATIVE_V1_TEST_BIN): tests/hb_abi_native_v1_test.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
 
 test: $(WINEMETAL_COMPUTE_TEST_BIN)
+
+# Native memory-operand lowering (CMP/TEST/ALU/IMUL/CMOVcc/NOT/NEG/LOCK) against the interpreter,
+# and LOCK RMW atomicity under 4 threads (NOLOCK=1 is its negative control).
+ALUMEM_DIFF_TEST_BIN = tests/hb_alumem_diff
+LOCK_RACE_TEST_BIN = tests/hb_lock_race
+NATIVE_MEM_GATES = MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_LSE_ATOMICS=1 MACRUNNER_HB_NATIVE_NOT=1 \
+	MACRUNNER_HB_CMP_MEM_NATIVE=1 MACRUNNER_HB_ALU_MEM_NATIVE=1 MACRUNNER_HB_IMUL_NATIVE=1 \
+	MACRUNNER_HB_CMOV_MEM_NATIVE=1 MACRUNNER_HB_NEG_NATIVE=1
+
+test: $(ALUMEM_DIFF_TEST_BIN) $(LOCK_RACE_TEST_BIN)
+
+$(ALUMEM_DIFF_TEST_BIN): tests/hb_alumem_diff.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+$(LOCK_RACE_TEST_BIN): tests/hb_lock_race.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -lpthread -o $@
 
 .PHONY: winemetal-compute-v1-test clean-winemetal-compute-v1-test
 winemetal-compute-v1-test: $(WINEMETAL_COMPUTE_TEST_BIN)

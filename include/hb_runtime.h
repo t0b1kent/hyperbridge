@@ -261,6 +261,11 @@ typedef struct {
     uintptr_t run_frame[16];
     int run_frames;
     int run_frames_lost;
+    /* Claude 27.09.2026 — таблица переходов потока (MACRUNNER_HB_L1_TABLE), см. hb_context_t.l1_table.
+     * Дописано В КОНЕЦ. */
+    uint64_t* l1_table;
+    uint64_t* callret_stack;     /* Claude 27.09.2026 — кольцо теневого стека вызовов (MACRUNNER_HB_CALLRET) */
+    uint64_t callret_sp_saved;   /* вершина кольца между прогонами этой среды */
 }hb_jit_runtime_t;
 
 hb_jit_runtime_t* hb_jit_runtime_create(hb_context_t* ctx);
