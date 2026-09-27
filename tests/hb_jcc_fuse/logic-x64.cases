@@ -1,0 +1,2402 @@
+# Корпус ЛОГИЧЕСКИЙ ПРОИЗВОДИТЕЛЬ + все 16 условий — лейн ФЛАГИ-ЖИВОСТЬ 07.09.2026.
+# ПОРОЖДЁН tools/flagi/porodit-korpus-logika.py — править порождатель, не файл.
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jo +2
+0x1 b000b1004885c87002
+0xdeadbeef b000b1004885c87002
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jno +2
+0x1 b000b1004885c87102
+0xdeadbeef b000b1004885c87102
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jb +2
+0x1 b000b1004885c87202
+0xdeadbeef b000b1004885c87202
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jae +2
+0x1 b000b1004885c87302
+0xdeadbeef b000b1004885c87302
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; je +2
+0x1 b000b1004885c87402
+0xdeadbeef b000b1004885c87402
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jne +2
+0x1 b000b1004885c87502
+0xdeadbeef b000b1004885c87502
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jbe +2
+0x1 b000b1004885c87602
+0xdeadbeef b000b1004885c87602
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; ja +2
+0x1 b000b1004885c87702
+0xdeadbeef b000b1004885c87702
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; js +2
+0x1 b000b1004885c87802
+0xdeadbeef b000b1004885c87802
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jns +2
+0x1 b000b1004885c87902
+0xdeadbeef b000b1004885c87902
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jp +2
+0x1 b000b1004885c87a02
+0xdeadbeef b000b1004885c87a02
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jnp +2
+0x1 b000b1004885c87b02
+0xdeadbeef b000b1004885c87b02
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jl +2
+0x1 b000b1004885c87c02
+0xdeadbeef b000b1004885c87c02
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jge +2
+0x1 b000b1004885c87d02
+0xdeadbeef b000b1004885c87d02
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jle +2
+0x1 b000b1004885c87e02
+0xdeadbeef b000b1004885c87e02
+# mov al,0x00 ; mov cl,0x00 ; test rax,rcx ; jg +2
+0x1 b000b1004885c87f02
+0xdeadbeef b000b1004885c87f02
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jo +2
+0x1 b0ffb1ff4885c87002
+0xdeadbeef b0ffb1ff4885c87002
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jno +2
+0x1 b0ffb1ff4885c87102
+0xdeadbeef b0ffb1ff4885c87102
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jb +2
+0x1 b0ffb1ff4885c87202
+0xdeadbeef b0ffb1ff4885c87202
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jae +2
+0x1 b0ffb1ff4885c87302
+0xdeadbeef b0ffb1ff4885c87302
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; je +2
+0x1 b0ffb1ff4885c87402
+0xdeadbeef b0ffb1ff4885c87402
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jne +2
+0x1 b0ffb1ff4885c87502
+0xdeadbeef b0ffb1ff4885c87502
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jbe +2
+0x1 b0ffb1ff4885c87602
+0xdeadbeef b0ffb1ff4885c87602
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; ja +2
+0x1 b0ffb1ff4885c87702
+0xdeadbeef b0ffb1ff4885c87702
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; js +2
+0x1 b0ffb1ff4885c87802
+0xdeadbeef b0ffb1ff4885c87802
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jns +2
+0x1 b0ffb1ff4885c87902
+0xdeadbeef b0ffb1ff4885c87902
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jp +2
+0x1 b0ffb1ff4885c87a02
+0xdeadbeef b0ffb1ff4885c87a02
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jnp +2
+0x1 b0ffb1ff4885c87b02
+0xdeadbeef b0ffb1ff4885c87b02
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jl +2
+0x1 b0ffb1ff4885c87c02
+0xdeadbeef b0ffb1ff4885c87c02
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jge +2
+0x1 b0ffb1ff4885c87d02
+0xdeadbeef b0ffb1ff4885c87d02
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jle +2
+0x1 b0ffb1ff4885c87e02
+0xdeadbeef b0ffb1ff4885c87e02
+# mov al,0xff ; mov cl,0xff ; test rax,rcx ; jg +2
+0x1 b0ffb1ff4885c87f02
+0xdeadbeef b0ffb1ff4885c87f02
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jo +2
+0x1 b080b1804885c87002
+0xdeadbeef b080b1804885c87002
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jno +2
+0x1 b080b1804885c87102
+0xdeadbeef b080b1804885c87102
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jb +2
+0x1 b080b1804885c87202
+0xdeadbeef b080b1804885c87202
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jae +2
+0x1 b080b1804885c87302
+0xdeadbeef b080b1804885c87302
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; je +2
+0x1 b080b1804885c87402
+0xdeadbeef b080b1804885c87402
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jne +2
+0x1 b080b1804885c87502
+0xdeadbeef b080b1804885c87502
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jbe +2
+0x1 b080b1804885c87602
+0xdeadbeef b080b1804885c87602
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; ja +2
+0x1 b080b1804885c87702
+0xdeadbeef b080b1804885c87702
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; js +2
+0x1 b080b1804885c87802
+0xdeadbeef b080b1804885c87802
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jns +2
+0x1 b080b1804885c87902
+0xdeadbeef b080b1804885c87902
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jp +2
+0x1 b080b1804885c87a02
+0xdeadbeef b080b1804885c87a02
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jnp +2
+0x1 b080b1804885c87b02
+0xdeadbeef b080b1804885c87b02
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jl +2
+0x1 b080b1804885c87c02
+0xdeadbeef b080b1804885c87c02
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jge +2
+0x1 b080b1804885c87d02
+0xdeadbeef b080b1804885c87d02
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jle +2
+0x1 b080b1804885c87e02
+0xdeadbeef b080b1804885c87e02
+# mov al,0x80 ; mov cl,0x80 ; test rax,rcx ; jg +2
+0x1 b080b1804885c87f02
+0xdeadbeef b080b1804885c87f02
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jo +2
+0x1 b07fb17f4885c87002
+0xdeadbeef b07fb17f4885c87002
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jno +2
+0x1 b07fb17f4885c87102
+0xdeadbeef b07fb17f4885c87102
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jb +2
+0x1 b07fb17f4885c87202
+0xdeadbeef b07fb17f4885c87202
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jae +2
+0x1 b07fb17f4885c87302
+0xdeadbeef b07fb17f4885c87302
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; je +2
+0x1 b07fb17f4885c87402
+0xdeadbeef b07fb17f4885c87402
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jne +2
+0x1 b07fb17f4885c87502
+0xdeadbeef b07fb17f4885c87502
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jbe +2
+0x1 b07fb17f4885c87602
+0xdeadbeef b07fb17f4885c87602
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; ja +2
+0x1 b07fb17f4885c87702
+0xdeadbeef b07fb17f4885c87702
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; js +2
+0x1 b07fb17f4885c87802
+0xdeadbeef b07fb17f4885c87802
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jns +2
+0x1 b07fb17f4885c87902
+0xdeadbeef b07fb17f4885c87902
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jp +2
+0x1 b07fb17f4885c87a02
+0xdeadbeef b07fb17f4885c87a02
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jnp +2
+0x1 b07fb17f4885c87b02
+0xdeadbeef b07fb17f4885c87b02
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jl +2
+0x1 b07fb17f4885c87c02
+0xdeadbeef b07fb17f4885c87c02
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jge +2
+0x1 b07fb17f4885c87d02
+0xdeadbeef b07fb17f4885c87d02
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jle +2
+0x1 b07fb17f4885c87e02
+0xdeadbeef b07fb17f4885c87e02
+# mov al,0x7f ; mov cl,0x7f ; test rax,rcx ; jg +2
+0x1 b07fb17f4885c87f02
+0xdeadbeef b07fb17f4885c87f02
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jo +2
+0x1 b001b1024885c87002
+0xdeadbeef b001b1024885c87002
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jno +2
+0x1 b001b1024885c87102
+0xdeadbeef b001b1024885c87102
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jb +2
+0x1 b001b1024885c87202
+0xdeadbeef b001b1024885c87202
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jae +2
+0x1 b001b1024885c87302
+0xdeadbeef b001b1024885c87302
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; je +2
+0x1 b001b1024885c87402
+0xdeadbeef b001b1024885c87402
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jne +2
+0x1 b001b1024885c87502
+0xdeadbeef b001b1024885c87502
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jbe +2
+0x1 b001b1024885c87602
+0xdeadbeef b001b1024885c87602
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; ja +2
+0x1 b001b1024885c87702
+0xdeadbeef b001b1024885c87702
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; js +2
+0x1 b001b1024885c87802
+0xdeadbeef b001b1024885c87802
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jns +2
+0x1 b001b1024885c87902
+0xdeadbeef b001b1024885c87902
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jp +2
+0x1 b001b1024885c87a02
+0xdeadbeef b001b1024885c87a02
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jnp +2
+0x1 b001b1024885c87b02
+0xdeadbeef b001b1024885c87b02
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jl +2
+0x1 b001b1024885c87c02
+0xdeadbeef b001b1024885c87c02
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jge +2
+0x1 b001b1024885c87d02
+0xdeadbeef b001b1024885c87d02
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jle +2
+0x1 b001b1024885c87e02
+0xdeadbeef b001b1024885c87e02
+# mov al,0x01 ; mov cl,0x02 ; test rax,rcx ; jg +2
+0x1 b001b1024885c87f02
+0xdeadbeef b001b1024885c87f02
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jo +2
+0x1 b000b1004821c87002
+0xdeadbeef b000b1004821c87002
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jno +2
+0x1 b000b1004821c87102
+0xdeadbeef b000b1004821c87102
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jb +2
+0x1 b000b1004821c87202
+0xdeadbeef b000b1004821c87202
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jae +2
+0x1 b000b1004821c87302
+0xdeadbeef b000b1004821c87302
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; je +2
+0x1 b000b1004821c87402
+0xdeadbeef b000b1004821c87402
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jne +2
+0x1 b000b1004821c87502
+0xdeadbeef b000b1004821c87502
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jbe +2
+0x1 b000b1004821c87602
+0xdeadbeef b000b1004821c87602
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; ja +2
+0x1 b000b1004821c87702
+0xdeadbeef b000b1004821c87702
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; js +2
+0x1 b000b1004821c87802
+0xdeadbeef b000b1004821c87802
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jns +2
+0x1 b000b1004821c87902
+0xdeadbeef b000b1004821c87902
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jp +2
+0x1 b000b1004821c87a02
+0xdeadbeef b000b1004821c87a02
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jnp +2
+0x1 b000b1004821c87b02
+0xdeadbeef b000b1004821c87b02
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jl +2
+0x1 b000b1004821c87c02
+0xdeadbeef b000b1004821c87c02
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jge +2
+0x1 b000b1004821c87d02
+0xdeadbeef b000b1004821c87d02
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jle +2
+0x1 b000b1004821c87e02
+0xdeadbeef b000b1004821c87e02
+# mov al,0x00 ; mov cl,0x00 ; and  rax,rcx ; jg +2
+0x1 b000b1004821c87f02
+0xdeadbeef b000b1004821c87f02
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jo +2
+0x1 b0ffb1ff4821c87002
+0xdeadbeef b0ffb1ff4821c87002
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jno +2
+0x1 b0ffb1ff4821c87102
+0xdeadbeef b0ffb1ff4821c87102
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jb +2
+0x1 b0ffb1ff4821c87202
+0xdeadbeef b0ffb1ff4821c87202
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jae +2
+0x1 b0ffb1ff4821c87302
+0xdeadbeef b0ffb1ff4821c87302
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; je +2
+0x1 b0ffb1ff4821c87402
+0xdeadbeef b0ffb1ff4821c87402
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jne +2
+0x1 b0ffb1ff4821c87502
+0xdeadbeef b0ffb1ff4821c87502
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jbe +2
+0x1 b0ffb1ff4821c87602
+0xdeadbeef b0ffb1ff4821c87602
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; ja +2
+0x1 b0ffb1ff4821c87702
+0xdeadbeef b0ffb1ff4821c87702
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; js +2
+0x1 b0ffb1ff4821c87802
+0xdeadbeef b0ffb1ff4821c87802
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jns +2
+0x1 b0ffb1ff4821c87902
+0xdeadbeef b0ffb1ff4821c87902
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jp +2
+0x1 b0ffb1ff4821c87a02
+0xdeadbeef b0ffb1ff4821c87a02
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jnp +2
+0x1 b0ffb1ff4821c87b02
+0xdeadbeef b0ffb1ff4821c87b02
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jl +2
+0x1 b0ffb1ff4821c87c02
+0xdeadbeef b0ffb1ff4821c87c02
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jge +2
+0x1 b0ffb1ff4821c87d02
+0xdeadbeef b0ffb1ff4821c87d02
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jle +2
+0x1 b0ffb1ff4821c87e02
+0xdeadbeef b0ffb1ff4821c87e02
+# mov al,0xff ; mov cl,0xff ; and  rax,rcx ; jg +2
+0x1 b0ffb1ff4821c87f02
+0xdeadbeef b0ffb1ff4821c87f02
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jo +2
+0x1 b080b1804821c87002
+0xdeadbeef b080b1804821c87002
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jno +2
+0x1 b080b1804821c87102
+0xdeadbeef b080b1804821c87102
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jb +2
+0x1 b080b1804821c87202
+0xdeadbeef b080b1804821c87202
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jae +2
+0x1 b080b1804821c87302
+0xdeadbeef b080b1804821c87302
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; je +2
+0x1 b080b1804821c87402
+0xdeadbeef b080b1804821c87402
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jne +2
+0x1 b080b1804821c87502
+0xdeadbeef b080b1804821c87502
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jbe +2
+0x1 b080b1804821c87602
+0xdeadbeef b080b1804821c87602
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; ja +2
+0x1 b080b1804821c87702
+0xdeadbeef b080b1804821c87702
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; js +2
+0x1 b080b1804821c87802
+0xdeadbeef b080b1804821c87802
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jns +2
+0x1 b080b1804821c87902
+0xdeadbeef b080b1804821c87902
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jp +2
+0x1 b080b1804821c87a02
+0xdeadbeef b080b1804821c87a02
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jnp +2
+0x1 b080b1804821c87b02
+0xdeadbeef b080b1804821c87b02
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jl +2
+0x1 b080b1804821c87c02
+0xdeadbeef b080b1804821c87c02
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jge +2
+0x1 b080b1804821c87d02
+0xdeadbeef b080b1804821c87d02
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jle +2
+0x1 b080b1804821c87e02
+0xdeadbeef b080b1804821c87e02
+# mov al,0x80 ; mov cl,0x80 ; and  rax,rcx ; jg +2
+0x1 b080b1804821c87f02
+0xdeadbeef b080b1804821c87f02
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jo +2
+0x1 b07fb17f4821c87002
+0xdeadbeef b07fb17f4821c87002
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jno +2
+0x1 b07fb17f4821c87102
+0xdeadbeef b07fb17f4821c87102
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jb +2
+0x1 b07fb17f4821c87202
+0xdeadbeef b07fb17f4821c87202
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jae +2
+0x1 b07fb17f4821c87302
+0xdeadbeef b07fb17f4821c87302
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; je +2
+0x1 b07fb17f4821c87402
+0xdeadbeef b07fb17f4821c87402
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jne +2
+0x1 b07fb17f4821c87502
+0xdeadbeef b07fb17f4821c87502
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jbe +2
+0x1 b07fb17f4821c87602
+0xdeadbeef b07fb17f4821c87602
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; ja +2
+0x1 b07fb17f4821c87702
+0xdeadbeef b07fb17f4821c87702
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; js +2
+0x1 b07fb17f4821c87802
+0xdeadbeef b07fb17f4821c87802
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jns +2
+0x1 b07fb17f4821c87902
+0xdeadbeef b07fb17f4821c87902
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jp +2
+0x1 b07fb17f4821c87a02
+0xdeadbeef b07fb17f4821c87a02
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jnp +2
+0x1 b07fb17f4821c87b02
+0xdeadbeef b07fb17f4821c87b02
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jl +2
+0x1 b07fb17f4821c87c02
+0xdeadbeef b07fb17f4821c87c02
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jge +2
+0x1 b07fb17f4821c87d02
+0xdeadbeef b07fb17f4821c87d02
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jle +2
+0x1 b07fb17f4821c87e02
+0xdeadbeef b07fb17f4821c87e02
+# mov al,0x7f ; mov cl,0x7f ; and  rax,rcx ; jg +2
+0x1 b07fb17f4821c87f02
+0xdeadbeef b07fb17f4821c87f02
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jo +2
+0x1 b001b1024821c87002
+0xdeadbeef b001b1024821c87002
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jno +2
+0x1 b001b1024821c87102
+0xdeadbeef b001b1024821c87102
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jb +2
+0x1 b001b1024821c87202
+0xdeadbeef b001b1024821c87202
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jae +2
+0x1 b001b1024821c87302
+0xdeadbeef b001b1024821c87302
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; je +2
+0x1 b001b1024821c87402
+0xdeadbeef b001b1024821c87402
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jne +2
+0x1 b001b1024821c87502
+0xdeadbeef b001b1024821c87502
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jbe +2
+0x1 b001b1024821c87602
+0xdeadbeef b001b1024821c87602
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; ja +2
+0x1 b001b1024821c87702
+0xdeadbeef b001b1024821c87702
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; js +2
+0x1 b001b1024821c87802
+0xdeadbeef b001b1024821c87802
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jns +2
+0x1 b001b1024821c87902
+0xdeadbeef b001b1024821c87902
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jp +2
+0x1 b001b1024821c87a02
+0xdeadbeef b001b1024821c87a02
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jnp +2
+0x1 b001b1024821c87b02
+0xdeadbeef b001b1024821c87b02
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jl +2
+0x1 b001b1024821c87c02
+0xdeadbeef b001b1024821c87c02
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jge +2
+0x1 b001b1024821c87d02
+0xdeadbeef b001b1024821c87d02
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jle +2
+0x1 b001b1024821c87e02
+0xdeadbeef b001b1024821c87e02
+# mov al,0x01 ; mov cl,0x02 ; and  rax,rcx ; jg +2
+0x1 b001b1024821c87f02
+0xdeadbeef b001b1024821c87f02
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jo +2
+0x1 b000b1004809c87002
+0xdeadbeef b000b1004809c87002
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jno +2
+0x1 b000b1004809c87102
+0xdeadbeef b000b1004809c87102
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jb +2
+0x1 b000b1004809c87202
+0xdeadbeef b000b1004809c87202
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jae +2
+0x1 b000b1004809c87302
+0xdeadbeef b000b1004809c87302
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; je +2
+0x1 b000b1004809c87402
+0xdeadbeef b000b1004809c87402
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jne +2
+0x1 b000b1004809c87502
+0xdeadbeef b000b1004809c87502
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jbe +2
+0x1 b000b1004809c87602
+0xdeadbeef b000b1004809c87602
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; ja +2
+0x1 b000b1004809c87702
+0xdeadbeef b000b1004809c87702
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; js +2
+0x1 b000b1004809c87802
+0xdeadbeef b000b1004809c87802
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jns +2
+0x1 b000b1004809c87902
+0xdeadbeef b000b1004809c87902
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jp +2
+0x1 b000b1004809c87a02
+0xdeadbeef b000b1004809c87a02
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jnp +2
+0x1 b000b1004809c87b02
+0xdeadbeef b000b1004809c87b02
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jl +2
+0x1 b000b1004809c87c02
+0xdeadbeef b000b1004809c87c02
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jge +2
+0x1 b000b1004809c87d02
+0xdeadbeef b000b1004809c87d02
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jle +2
+0x1 b000b1004809c87e02
+0xdeadbeef b000b1004809c87e02
+# mov al,0x00 ; mov cl,0x00 ; or   rax,rcx ; jg +2
+0x1 b000b1004809c87f02
+0xdeadbeef b000b1004809c87f02
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jo +2
+0x1 b0ffb1ff4809c87002
+0xdeadbeef b0ffb1ff4809c87002
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jno +2
+0x1 b0ffb1ff4809c87102
+0xdeadbeef b0ffb1ff4809c87102
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jb +2
+0x1 b0ffb1ff4809c87202
+0xdeadbeef b0ffb1ff4809c87202
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jae +2
+0x1 b0ffb1ff4809c87302
+0xdeadbeef b0ffb1ff4809c87302
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; je +2
+0x1 b0ffb1ff4809c87402
+0xdeadbeef b0ffb1ff4809c87402
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jne +2
+0x1 b0ffb1ff4809c87502
+0xdeadbeef b0ffb1ff4809c87502
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jbe +2
+0x1 b0ffb1ff4809c87602
+0xdeadbeef b0ffb1ff4809c87602
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; ja +2
+0x1 b0ffb1ff4809c87702
+0xdeadbeef b0ffb1ff4809c87702
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; js +2
+0x1 b0ffb1ff4809c87802
+0xdeadbeef b0ffb1ff4809c87802
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jns +2
+0x1 b0ffb1ff4809c87902
+0xdeadbeef b0ffb1ff4809c87902
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jp +2
+0x1 b0ffb1ff4809c87a02
+0xdeadbeef b0ffb1ff4809c87a02
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jnp +2
+0x1 b0ffb1ff4809c87b02
+0xdeadbeef b0ffb1ff4809c87b02
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jl +2
+0x1 b0ffb1ff4809c87c02
+0xdeadbeef b0ffb1ff4809c87c02
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jge +2
+0x1 b0ffb1ff4809c87d02
+0xdeadbeef b0ffb1ff4809c87d02
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jle +2
+0x1 b0ffb1ff4809c87e02
+0xdeadbeef b0ffb1ff4809c87e02
+# mov al,0xff ; mov cl,0xff ; or   rax,rcx ; jg +2
+0x1 b0ffb1ff4809c87f02
+0xdeadbeef b0ffb1ff4809c87f02
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jo +2
+0x1 b080b1804809c87002
+0xdeadbeef b080b1804809c87002
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jno +2
+0x1 b080b1804809c87102
+0xdeadbeef b080b1804809c87102
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jb +2
+0x1 b080b1804809c87202
+0xdeadbeef b080b1804809c87202
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jae +2
+0x1 b080b1804809c87302
+0xdeadbeef b080b1804809c87302
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; je +2
+0x1 b080b1804809c87402
+0xdeadbeef b080b1804809c87402
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jne +2
+0x1 b080b1804809c87502
+0xdeadbeef b080b1804809c87502
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jbe +2
+0x1 b080b1804809c87602
+0xdeadbeef b080b1804809c87602
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; ja +2
+0x1 b080b1804809c87702
+0xdeadbeef b080b1804809c87702
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; js +2
+0x1 b080b1804809c87802
+0xdeadbeef b080b1804809c87802
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jns +2
+0x1 b080b1804809c87902
+0xdeadbeef b080b1804809c87902
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jp +2
+0x1 b080b1804809c87a02
+0xdeadbeef b080b1804809c87a02
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jnp +2
+0x1 b080b1804809c87b02
+0xdeadbeef b080b1804809c87b02
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jl +2
+0x1 b080b1804809c87c02
+0xdeadbeef b080b1804809c87c02
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jge +2
+0x1 b080b1804809c87d02
+0xdeadbeef b080b1804809c87d02
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jle +2
+0x1 b080b1804809c87e02
+0xdeadbeef b080b1804809c87e02
+# mov al,0x80 ; mov cl,0x80 ; or   rax,rcx ; jg +2
+0x1 b080b1804809c87f02
+0xdeadbeef b080b1804809c87f02
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jo +2
+0x1 b07fb17f4809c87002
+0xdeadbeef b07fb17f4809c87002
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jno +2
+0x1 b07fb17f4809c87102
+0xdeadbeef b07fb17f4809c87102
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jb +2
+0x1 b07fb17f4809c87202
+0xdeadbeef b07fb17f4809c87202
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jae +2
+0x1 b07fb17f4809c87302
+0xdeadbeef b07fb17f4809c87302
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; je +2
+0x1 b07fb17f4809c87402
+0xdeadbeef b07fb17f4809c87402
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jne +2
+0x1 b07fb17f4809c87502
+0xdeadbeef b07fb17f4809c87502
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jbe +2
+0x1 b07fb17f4809c87602
+0xdeadbeef b07fb17f4809c87602
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; ja +2
+0x1 b07fb17f4809c87702
+0xdeadbeef b07fb17f4809c87702
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; js +2
+0x1 b07fb17f4809c87802
+0xdeadbeef b07fb17f4809c87802
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jns +2
+0x1 b07fb17f4809c87902
+0xdeadbeef b07fb17f4809c87902
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jp +2
+0x1 b07fb17f4809c87a02
+0xdeadbeef b07fb17f4809c87a02
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jnp +2
+0x1 b07fb17f4809c87b02
+0xdeadbeef b07fb17f4809c87b02
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jl +2
+0x1 b07fb17f4809c87c02
+0xdeadbeef b07fb17f4809c87c02
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jge +2
+0x1 b07fb17f4809c87d02
+0xdeadbeef b07fb17f4809c87d02
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jle +2
+0x1 b07fb17f4809c87e02
+0xdeadbeef b07fb17f4809c87e02
+# mov al,0x7f ; mov cl,0x7f ; or   rax,rcx ; jg +2
+0x1 b07fb17f4809c87f02
+0xdeadbeef b07fb17f4809c87f02
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jo +2
+0x1 b001b1024809c87002
+0xdeadbeef b001b1024809c87002
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jno +2
+0x1 b001b1024809c87102
+0xdeadbeef b001b1024809c87102
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jb +2
+0x1 b001b1024809c87202
+0xdeadbeef b001b1024809c87202
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jae +2
+0x1 b001b1024809c87302
+0xdeadbeef b001b1024809c87302
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; je +2
+0x1 b001b1024809c87402
+0xdeadbeef b001b1024809c87402
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jne +2
+0x1 b001b1024809c87502
+0xdeadbeef b001b1024809c87502
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jbe +2
+0x1 b001b1024809c87602
+0xdeadbeef b001b1024809c87602
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; ja +2
+0x1 b001b1024809c87702
+0xdeadbeef b001b1024809c87702
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; js +2
+0x1 b001b1024809c87802
+0xdeadbeef b001b1024809c87802
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jns +2
+0x1 b001b1024809c87902
+0xdeadbeef b001b1024809c87902
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jp +2
+0x1 b001b1024809c87a02
+0xdeadbeef b001b1024809c87a02
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jnp +2
+0x1 b001b1024809c87b02
+0xdeadbeef b001b1024809c87b02
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jl +2
+0x1 b001b1024809c87c02
+0xdeadbeef b001b1024809c87c02
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jge +2
+0x1 b001b1024809c87d02
+0xdeadbeef b001b1024809c87d02
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jle +2
+0x1 b001b1024809c87e02
+0xdeadbeef b001b1024809c87e02
+# mov al,0x01 ; mov cl,0x02 ; or   rax,rcx ; jg +2
+0x1 b001b1024809c87f02
+0xdeadbeef b001b1024809c87f02
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jo +2
+0x1 b000b1004831c87002
+0xdeadbeef b000b1004831c87002
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jno +2
+0x1 b000b1004831c87102
+0xdeadbeef b000b1004831c87102
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jb +2
+0x1 b000b1004831c87202
+0xdeadbeef b000b1004831c87202
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jae +2
+0x1 b000b1004831c87302
+0xdeadbeef b000b1004831c87302
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; je +2
+0x1 b000b1004831c87402
+0xdeadbeef b000b1004831c87402
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jne +2
+0x1 b000b1004831c87502
+0xdeadbeef b000b1004831c87502
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jbe +2
+0x1 b000b1004831c87602
+0xdeadbeef b000b1004831c87602
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; ja +2
+0x1 b000b1004831c87702
+0xdeadbeef b000b1004831c87702
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; js +2
+0x1 b000b1004831c87802
+0xdeadbeef b000b1004831c87802
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jns +2
+0x1 b000b1004831c87902
+0xdeadbeef b000b1004831c87902
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jp +2
+0x1 b000b1004831c87a02
+0xdeadbeef b000b1004831c87a02
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jnp +2
+0x1 b000b1004831c87b02
+0xdeadbeef b000b1004831c87b02
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jl +2
+0x1 b000b1004831c87c02
+0xdeadbeef b000b1004831c87c02
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jge +2
+0x1 b000b1004831c87d02
+0xdeadbeef b000b1004831c87d02
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jle +2
+0x1 b000b1004831c87e02
+0xdeadbeef b000b1004831c87e02
+# mov al,0x00 ; mov cl,0x00 ; xor  rax,rcx ; jg +2
+0x1 b000b1004831c87f02
+0xdeadbeef b000b1004831c87f02
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jo +2
+0x1 b0ffb1ff4831c87002
+0xdeadbeef b0ffb1ff4831c87002
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jno +2
+0x1 b0ffb1ff4831c87102
+0xdeadbeef b0ffb1ff4831c87102
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jb +2
+0x1 b0ffb1ff4831c87202
+0xdeadbeef b0ffb1ff4831c87202
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jae +2
+0x1 b0ffb1ff4831c87302
+0xdeadbeef b0ffb1ff4831c87302
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; je +2
+0x1 b0ffb1ff4831c87402
+0xdeadbeef b0ffb1ff4831c87402
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jne +2
+0x1 b0ffb1ff4831c87502
+0xdeadbeef b0ffb1ff4831c87502
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jbe +2
+0x1 b0ffb1ff4831c87602
+0xdeadbeef b0ffb1ff4831c87602
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; ja +2
+0x1 b0ffb1ff4831c87702
+0xdeadbeef b0ffb1ff4831c87702
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; js +2
+0x1 b0ffb1ff4831c87802
+0xdeadbeef b0ffb1ff4831c87802
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jns +2
+0x1 b0ffb1ff4831c87902
+0xdeadbeef b0ffb1ff4831c87902
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jp +2
+0x1 b0ffb1ff4831c87a02
+0xdeadbeef b0ffb1ff4831c87a02
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jnp +2
+0x1 b0ffb1ff4831c87b02
+0xdeadbeef b0ffb1ff4831c87b02
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jl +2
+0x1 b0ffb1ff4831c87c02
+0xdeadbeef b0ffb1ff4831c87c02
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jge +2
+0x1 b0ffb1ff4831c87d02
+0xdeadbeef b0ffb1ff4831c87d02
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jle +2
+0x1 b0ffb1ff4831c87e02
+0xdeadbeef b0ffb1ff4831c87e02
+# mov al,0xff ; mov cl,0xff ; xor  rax,rcx ; jg +2
+0x1 b0ffb1ff4831c87f02
+0xdeadbeef b0ffb1ff4831c87f02
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jo +2
+0x1 b080b1804831c87002
+0xdeadbeef b080b1804831c87002
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jno +2
+0x1 b080b1804831c87102
+0xdeadbeef b080b1804831c87102
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jb +2
+0x1 b080b1804831c87202
+0xdeadbeef b080b1804831c87202
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jae +2
+0x1 b080b1804831c87302
+0xdeadbeef b080b1804831c87302
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; je +2
+0x1 b080b1804831c87402
+0xdeadbeef b080b1804831c87402
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jne +2
+0x1 b080b1804831c87502
+0xdeadbeef b080b1804831c87502
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jbe +2
+0x1 b080b1804831c87602
+0xdeadbeef b080b1804831c87602
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; ja +2
+0x1 b080b1804831c87702
+0xdeadbeef b080b1804831c87702
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; js +2
+0x1 b080b1804831c87802
+0xdeadbeef b080b1804831c87802
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jns +2
+0x1 b080b1804831c87902
+0xdeadbeef b080b1804831c87902
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jp +2
+0x1 b080b1804831c87a02
+0xdeadbeef b080b1804831c87a02
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jnp +2
+0x1 b080b1804831c87b02
+0xdeadbeef b080b1804831c87b02
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jl +2
+0x1 b080b1804831c87c02
+0xdeadbeef b080b1804831c87c02
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jge +2
+0x1 b080b1804831c87d02
+0xdeadbeef b080b1804831c87d02
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jle +2
+0x1 b080b1804831c87e02
+0xdeadbeef b080b1804831c87e02
+# mov al,0x80 ; mov cl,0x80 ; xor  rax,rcx ; jg +2
+0x1 b080b1804831c87f02
+0xdeadbeef b080b1804831c87f02
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jo +2
+0x1 b07fb17f4831c87002
+0xdeadbeef b07fb17f4831c87002
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jno +2
+0x1 b07fb17f4831c87102
+0xdeadbeef b07fb17f4831c87102
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jb +2
+0x1 b07fb17f4831c87202
+0xdeadbeef b07fb17f4831c87202
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jae +2
+0x1 b07fb17f4831c87302
+0xdeadbeef b07fb17f4831c87302
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; je +2
+0x1 b07fb17f4831c87402
+0xdeadbeef b07fb17f4831c87402
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jne +2
+0x1 b07fb17f4831c87502
+0xdeadbeef b07fb17f4831c87502
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jbe +2
+0x1 b07fb17f4831c87602
+0xdeadbeef b07fb17f4831c87602
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; ja +2
+0x1 b07fb17f4831c87702
+0xdeadbeef b07fb17f4831c87702
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; js +2
+0x1 b07fb17f4831c87802
+0xdeadbeef b07fb17f4831c87802
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jns +2
+0x1 b07fb17f4831c87902
+0xdeadbeef b07fb17f4831c87902
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jp +2
+0x1 b07fb17f4831c87a02
+0xdeadbeef b07fb17f4831c87a02
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jnp +2
+0x1 b07fb17f4831c87b02
+0xdeadbeef b07fb17f4831c87b02
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jl +2
+0x1 b07fb17f4831c87c02
+0xdeadbeef b07fb17f4831c87c02
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jge +2
+0x1 b07fb17f4831c87d02
+0xdeadbeef b07fb17f4831c87d02
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jle +2
+0x1 b07fb17f4831c87e02
+0xdeadbeef b07fb17f4831c87e02
+# mov al,0x7f ; mov cl,0x7f ; xor  rax,rcx ; jg +2
+0x1 b07fb17f4831c87f02
+0xdeadbeef b07fb17f4831c87f02
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jo +2
+0x1 b001b1024831c87002
+0xdeadbeef b001b1024831c87002
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jno +2
+0x1 b001b1024831c87102
+0xdeadbeef b001b1024831c87102
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jb +2
+0x1 b001b1024831c87202
+0xdeadbeef b001b1024831c87202
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jae +2
+0x1 b001b1024831c87302
+0xdeadbeef b001b1024831c87302
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; je +2
+0x1 b001b1024831c87402
+0xdeadbeef b001b1024831c87402
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jne +2
+0x1 b001b1024831c87502
+0xdeadbeef b001b1024831c87502
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jbe +2
+0x1 b001b1024831c87602
+0xdeadbeef b001b1024831c87602
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; ja +2
+0x1 b001b1024831c87702
+0xdeadbeef b001b1024831c87702
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; js +2
+0x1 b001b1024831c87802
+0xdeadbeef b001b1024831c87802
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jns +2
+0x1 b001b1024831c87902
+0xdeadbeef b001b1024831c87902
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jp +2
+0x1 b001b1024831c87a02
+0xdeadbeef b001b1024831c87a02
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jnp +2
+0x1 b001b1024831c87b02
+0xdeadbeef b001b1024831c87b02
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jl +2
+0x1 b001b1024831c87c02
+0xdeadbeef b001b1024831c87c02
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jge +2
+0x1 b001b1024831c87d02
+0xdeadbeef b001b1024831c87d02
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jle +2
+0x1 b001b1024831c87e02
+0xdeadbeef b001b1024831c87e02
+# mov al,0x01 ; mov cl,0x02 ; xor  rax,rcx ; jg +2
+0x1 b001b1024831c87f02
+0xdeadbeef b001b1024831c87f02
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jo +2
+0x1 b000b10085c87002
+0xdeadbeef b000b10085c87002
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jno +2
+0x1 b000b10085c87102
+0xdeadbeef b000b10085c87102
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jb +2
+0x1 b000b10085c87202
+0xdeadbeef b000b10085c87202
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jae +2
+0x1 b000b10085c87302
+0xdeadbeef b000b10085c87302
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; je +2
+0x1 b000b10085c87402
+0xdeadbeef b000b10085c87402
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jne +2
+0x1 b000b10085c87502
+0xdeadbeef b000b10085c87502
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jbe +2
+0x1 b000b10085c87602
+0xdeadbeef b000b10085c87602
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; ja +2
+0x1 b000b10085c87702
+0xdeadbeef b000b10085c87702
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; js +2
+0x1 b000b10085c87802
+0xdeadbeef b000b10085c87802
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jns +2
+0x1 b000b10085c87902
+0xdeadbeef b000b10085c87902
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jp +2
+0x1 b000b10085c87a02
+0xdeadbeef b000b10085c87a02
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jnp +2
+0x1 b000b10085c87b02
+0xdeadbeef b000b10085c87b02
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jl +2
+0x1 b000b10085c87c02
+0xdeadbeef b000b10085c87c02
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jge +2
+0x1 b000b10085c87d02
+0xdeadbeef b000b10085c87d02
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jle +2
+0x1 b000b10085c87e02
+0xdeadbeef b000b10085c87e02
+# mov al,0x00 ; mov cl,0x00 ; test eax,ecx ; jg +2
+0x1 b000b10085c87f02
+0xdeadbeef b000b10085c87f02
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jo +2
+0x1 b0ffb1ff85c87002
+0xdeadbeef b0ffb1ff85c87002
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jno +2
+0x1 b0ffb1ff85c87102
+0xdeadbeef b0ffb1ff85c87102
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jb +2
+0x1 b0ffb1ff85c87202
+0xdeadbeef b0ffb1ff85c87202
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jae +2
+0x1 b0ffb1ff85c87302
+0xdeadbeef b0ffb1ff85c87302
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; je +2
+0x1 b0ffb1ff85c87402
+0xdeadbeef b0ffb1ff85c87402
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jne +2
+0x1 b0ffb1ff85c87502
+0xdeadbeef b0ffb1ff85c87502
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jbe +2
+0x1 b0ffb1ff85c87602
+0xdeadbeef b0ffb1ff85c87602
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; ja +2
+0x1 b0ffb1ff85c87702
+0xdeadbeef b0ffb1ff85c87702
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; js +2
+0x1 b0ffb1ff85c87802
+0xdeadbeef b0ffb1ff85c87802
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jns +2
+0x1 b0ffb1ff85c87902
+0xdeadbeef b0ffb1ff85c87902
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jp +2
+0x1 b0ffb1ff85c87a02
+0xdeadbeef b0ffb1ff85c87a02
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jnp +2
+0x1 b0ffb1ff85c87b02
+0xdeadbeef b0ffb1ff85c87b02
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jl +2
+0x1 b0ffb1ff85c87c02
+0xdeadbeef b0ffb1ff85c87c02
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jge +2
+0x1 b0ffb1ff85c87d02
+0xdeadbeef b0ffb1ff85c87d02
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jle +2
+0x1 b0ffb1ff85c87e02
+0xdeadbeef b0ffb1ff85c87e02
+# mov al,0xff ; mov cl,0xff ; test eax,ecx ; jg +2
+0x1 b0ffb1ff85c87f02
+0xdeadbeef b0ffb1ff85c87f02
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jo +2
+0x1 b080b18085c87002
+0xdeadbeef b080b18085c87002
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jno +2
+0x1 b080b18085c87102
+0xdeadbeef b080b18085c87102
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jb +2
+0x1 b080b18085c87202
+0xdeadbeef b080b18085c87202
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jae +2
+0x1 b080b18085c87302
+0xdeadbeef b080b18085c87302
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; je +2
+0x1 b080b18085c87402
+0xdeadbeef b080b18085c87402
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jne +2
+0x1 b080b18085c87502
+0xdeadbeef b080b18085c87502
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jbe +2
+0x1 b080b18085c87602
+0xdeadbeef b080b18085c87602
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; ja +2
+0x1 b080b18085c87702
+0xdeadbeef b080b18085c87702
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; js +2
+0x1 b080b18085c87802
+0xdeadbeef b080b18085c87802
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jns +2
+0x1 b080b18085c87902
+0xdeadbeef b080b18085c87902
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jp +2
+0x1 b080b18085c87a02
+0xdeadbeef b080b18085c87a02
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jnp +2
+0x1 b080b18085c87b02
+0xdeadbeef b080b18085c87b02
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jl +2
+0x1 b080b18085c87c02
+0xdeadbeef b080b18085c87c02
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jge +2
+0x1 b080b18085c87d02
+0xdeadbeef b080b18085c87d02
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jle +2
+0x1 b080b18085c87e02
+0xdeadbeef b080b18085c87e02
+# mov al,0x80 ; mov cl,0x80 ; test eax,ecx ; jg +2
+0x1 b080b18085c87f02
+0xdeadbeef b080b18085c87f02
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jo +2
+0x1 b07fb17f85c87002
+0xdeadbeef b07fb17f85c87002
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jno +2
+0x1 b07fb17f85c87102
+0xdeadbeef b07fb17f85c87102
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jb +2
+0x1 b07fb17f85c87202
+0xdeadbeef b07fb17f85c87202
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jae +2
+0x1 b07fb17f85c87302
+0xdeadbeef b07fb17f85c87302
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; je +2
+0x1 b07fb17f85c87402
+0xdeadbeef b07fb17f85c87402
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jne +2
+0x1 b07fb17f85c87502
+0xdeadbeef b07fb17f85c87502
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jbe +2
+0x1 b07fb17f85c87602
+0xdeadbeef b07fb17f85c87602
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; ja +2
+0x1 b07fb17f85c87702
+0xdeadbeef b07fb17f85c87702
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; js +2
+0x1 b07fb17f85c87802
+0xdeadbeef b07fb17f85c87802
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jns +2
+0x1 b07fb17f85c87902
+0xdeadbeef b07fb17f85c87902
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jp +2
+0x1 b07fb17f85c87a02
+0xdeadbeef b07fb17f85c87a02
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jnp +2
+0x1 b07fb17f85c87b02
+0xdeadbeef b07fb17f85c87b02
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jl +2
+0x1 b07fb17f85c87c02
+0xdeadbeef b07fb17f85c87c02
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jge +2
+0x1 b07fb17f85c87d02
+0xdeadbeef b07fb17f85c87d02
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jle +2
+0x1 b07fb17f85c87e02
+0xdeadbeef b07fb17f85c87e02
+# mov al,0x7f ; mov cl,0x7f ; test eax,ecx ; jg +2
+0x1 b07fb17f85c87f02
+0xdeadbeef b07fb17f85c87f02
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jo +2
+0x1 b001b10285c87002
+0xdeadbeef b001b10285c87002
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jno +2
+0x1 b001b10285c87102
+0xdeadbeef b001b10285c87102
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jb +2
+0x1 b001b10285c87202
+0xdeadbeef b001b10285c87202
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jae +2
+0x1 b001b10285c87302
+0xdeadbeef b001b10285c87302
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; je +2
+0x1 b001b10285c87402
+0xdeadbeef b001b10285c87402
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jne +2
+0x1 b001b10285c87502
+0xdeadbeef b001b10285c87502
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jbe +2
+0x1 b001b10285c87602
+0xdeadbeef b001b10285c87602
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; ja +2
+0x1 b001b10285c87702
+0xdeadbeef b001b10285c87702
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; js +2
+0x1 b001b10285c87802
+0xdeadbeef b001b10285c87802
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jns +2
+0x1 b001b10285c87902
+0xdeadbeef b001b10285c87902
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jp +2
+0x1 b001b10285c87a02
+0xdeadbeef b001b10285c87a02
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jnp +2
+0x1 b001b10285c87b02
+0xdeadbeef b001b10285c87b02
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jl +2
+0x1 b001b10285c87c02
+0xdeadbeef b001b10285c87c02
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jge +2
+0x1 b001b10285c87d02
+0xdeadbeef b001b10285c87d02
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jle +2
+0x1 b001b10285c87e02
+0xdeadbeef b001b10285c87e02
+# mov al,0x01 ; mov cl,0x02 ; test eax,ecx ; jg +2
+0x1 b001b10285c87f02
+0xdeadbeef b001b10285c87f02
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jo +2
+0x1 b000b10021c87002
+0xdeadbeef b000b10021c87002
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jno +2
+0x1 b000b10021c87102
+0xdeadbeef b000b10021c87102
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jb +2
+0x1 b000b10021c87202
+0xdeadbeef b000b10021c87202
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jae +2
+0x1 b000b10021c87302
+0xdeadbeef b000b10021c87302
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; je +2
+0x1 b000b10021c87402
+0xdeadbeef b000b10021c87402
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jne +2
+0x1 b000b10021c87502
+0xdeadbeef b000b10021c87502
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jbe +2
+0x1 b000b10021c87602
+0xdeadbeef b000b10021c87602
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; ja +2
+0x1 b000b10021c87702
+0xdeadbeef b000b10021c87702
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; js +2
+0x1 b000b10021c87802
+0xdeadbeef b000b10021c87802
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jns +2
+0x1 b000b10021c87902
+0xdeadbeef b000b10021c87902
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jp +2
+0x1 b000b10021c87a02
+0xdeadbeef b000b10021c87a02
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jnp +2
+0x1 b000b10021c87b02
+0xdeadbeef b000b10021c87b02
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jl +2
+0x1 b000b10021c87c02
+0xdeadbeef b000b10021c87c02
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jge +2
+0x1 b000b10021c87d02
+0xdeadbeef b000b10021c87d02
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jle +2
+0x1 b000b10021c87e02
+0xdeadbeef b000b10021c87e02
+# mov al,0x00 ; mov cl,0x00 ; and  eax,ecx ; jg +2
+0x1 b000b10021c87f02
+0xdeadbeef b000b10021c87f02
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jo +2
+0x1 b0ffb1ff21c87002
+0xdeadbeef b0ffb1ff21c87002
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jno +2
+0x1 b0ffb1ff21c87102
+0xdeadbeef b0ffb1ff21c87102
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jb +2
+0x1 b0ffb1ff21c87202
+0xdeadbeef b0ffb1ff21c87202
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jae +2
+0x1 b0ffb1ff21c87302
+0xdeadbeef b0ffb1ff21c87302
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; je +2
+0x1 b0ffb1ff21c87402
+0xdeadbeef b0ffb1ff21c87402
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jne +2
+0x1 b0ffb1ff21c87502
+0xdeadbeef b0ffb1ff21c87502
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jbe +2
+0x1 b0ffb1ff21c87602
+0xdeadbeef b0ffb1ff21c87602
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; ja +2
+0x1 b0ffb1ff21c87702
+0xdeadbeef b0ffb1ff21c87702
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; js +2
+0x1 b0ffb1ff21c87802
+0xdeadbeef b0ffb1ff21c87802
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jns +2
+0x1 b0ffb1ff21c87902
+0xdeadbeef b0ffb1ff21c87902
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jp +2
+0x1 b0ffb1ff21c87a02
+0xdeadbeef b0ffb1ff21c87a02
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jnp +2
+0x1 b0ffb1ff21c87b02
+0xdeadbeef b0ffb1ff21c87b02
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jl +2
+0x1 b0ffb1ff21c87c02
+0xdeadbeef b0ffb1ff21c87c02
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jge +2
+0x1 b0ffb1ff21c87d02
+0xdeadbeef b0ffb1ff21c87d02
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jle +2
+0x1 b0ffb1ff21c87e02
+0xdeadbeef b0ffb1ff21c87e02
+# mov al,0xff ; mov cl,0xff ; and  eax,ecx ; jg +2
+0x1 b0ffb1ff21c87f02
+0xdeadbeef b0ffb1ff21c87f02
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jo +2
+0x1 b080b18021c87002
+0xdeadbeef b080b18021c87002
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jno +2
+0x1 b080b18021c87102
+0xdeadbeef b080b18021c87102
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jb +2
+0x1 b080b18021c87202
+0xdeadbeef b080b18021c87202
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jae +2
+0x1 b080b18021c87302
+0xdeadbeef b080b18021c87302
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; je +2
+0x1 b080b18021c87402
+0xdeadbeef b080b18021c87402
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jne +2
+0x1 b080b18021c87502
+0xdeadbeef b080b18021c87502
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jbe +2
+0x1 b080b18021c87602
+0xdeadbeef b080b18021c87602
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; ja +2
+0x1 b080b18021c87702
+0xdeadbeef b080b18021c87702
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; js +2
+0x1 b080b18021c87802
+0xdeadbeef b080b18021c87802
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jns +2
+0x1 b080b18021c87902
+0xdeadbeef b080b18021c87902
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jp +2
+0x1 b080b18021c87a02
+0xdeadbeef b080b18021c87a02
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jnp +2
+0x1 b080b18021c87b02
+0xdeadbeef b080b18021c87b02
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jl +2
+0x1 b080b18021c87c02
+0xdeadbeef b080b18021c87c02
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jge +2
+0x1 b080b18021c87d02
+0xdeadbeef b080b18021c87d02
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jle +2
+0x1 b080b18021c87e02
+0xdeadbeef b080b18021c87e02
+# mov al,0x80 ; mov cl,0x80 ; and  eax,ecx ; jg +2
+0x1 b080b18021c87f02
+0xdeadbeef b080b18021c87f02
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jo +2
+0x1 b07fb17f21c87002
+0xdeadbeef b07fb17f21c87002
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jno +2
+0x1 b07fb17f21c87102
+0xdeadbeef b07fb17f21c87102
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jb +2
+0x1 b07fb17f21c87202
+0xdeadbeef b07fb17f21c87202
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jae +2
+0x1 b07fb17f21c87302
+0xdeadbeef b07fb17f21c87302
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; je +2
+0x1 b07fb17f21c87402
+0xdeadbeef b07fb17f21c87402
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jne +2
+0x1 b07fb17f21c87502
+0xdeadbeef b07fb17f21c87502
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jbe +2
+0x1 b07fb17f21c87602
+0xdeadbeef b07fb17f21c87602
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; ja +2
+0x1 b07fb17f21c87702
+0xdeadbeef b07fb17f21c87702
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; js +2
+0x1 b07fb17f21c87802
+0xdeadbeef b07fb17f21c87802
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jns +2
+0x1 b07fb17f21c87902
+0xdeadbeef b07fb17f21c87902
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jp +2
+0x1 b07fb17f21c87a02
+0xdeadbeef b07fb17f21c87a02
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jnp +2
+0x1 b07fb17f21c87b02
+0xdeadbeef b07fb17f21c87b02
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jl +2
+0x1 b07fb17f21c87c02
+0xdeadbeef b07fb17f21c87c02
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jge +2
+0x1 b07fb17f21c87d02
+0xdeadbeef b07fb17f21c87d02
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jle +2
+0x1 b07fb17f21c87e02
+0xdeadbeef b07fb17f21c87e02
+# mov al,0x7f ; mov cl,0x7f ; and  eax,ecx ; jg +2
+0x1 b07fb17f21c87f02
+0xdeadbeef b07fb17f21c87f02
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jo +2
+0x1 b001b10221c87002
+0xdeadbeef b001b10221c87002
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jno +2
+0x1 b001b10221c87102
+0xdeadbeef b001b10221c87102
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jb +2
+0x1 b001b10221c87202
+0xdeadbeef b001b10221c87202
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jae +2
+0x1 b001b10221c87302
+0xdeadbeef b001b10221c87302
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; je +2
+0x1 b001b10221c87402
+0xdeadbeef b001b10221c87402
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jne +2
+0x1 b001b10221c87502
+0xdeadbeef b001b10221c87502
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jbe +2
+0x1 b001b10221c87602
+0xdeadbeef b001b10221c87602
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; ja +2
+0x1 b001b10221c87702
+0xdeadbeef b001b10221c87702
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; js +2
+0x1 b001b10221c87802
+0xdeadbeef b001b10221c87802
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jns +2
+0x1 b001b10221c87902
+0xdeadbeef b001b10221c87902
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jp +2
+0x1 b001b10221c87a02
+0xdeadbeef b001b10221c87a02
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jnp +2
+0x1 b001b10221c87b02
+0xdeadbeef b001b10221c87b02
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jl +2
+0x1 b001b10221c87c02
+0xdeadbeef b001b10221c87c02
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jge +2
+0x1 b001b10221c87d02
+0xdeadbeef b001b10221c87d02
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jle +2
+0x1 b001b10221c87e02
+0xdeadbeef b001b10221c87e02
+# mov al,0x01 ; mov cl,0x02 ; and  eax,ecx ; jg +2
+0x1 b001b10221c87f02
+0xdeadbeef b001b10221c87f02
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jo +2
+0x1 b000b1006685c87002
+0xdeadbeef b000b1006685c87002
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jno +2
+0x1 b000b1006685c87102
+0xdeadbeef b000b1006685c87102
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jb +2
+0x1 b000b1006685c87202
+0xdeadbeef b000b1006685c87202
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jae +2
+0x1 b000b1006685c87302
+0xdeadbeef b000b1006685c87302
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; je +2
+0x1 b000b1006685c87402
+0xdeadbeef b000b1006685c87402
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jne +2
+0x1 b000b1006685c87502
+0xdeadbeef b000b1006685c87502
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jbe +2
+0x1 b000b1006685c87602
+0xdeadbeef b000b1006685c87602
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; ja +2
+0x1 b000b1006685c87702
+0xdeadbeef b000b1006685c87702
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; js +2
+0x1 b000b1006685c87802
+0xdeadbeef b000b1006685c87802
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jns +2
+0x1 b000b1006685c87902
+0xdeadbeef b000b1006685c87902
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jp +2
+0x1 b000b1006685c87a02
+0xdeadbeef b000b1006685c87a02
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jnp +2
+0x1 b000b1006685c87b02
+0xdeadbeef b000b1006685c87b02
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jl +2
+0x1 b000b1006685c87c02
+0xdeadbeef b000b1006685c87c02
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jge +2
+0x1 b000b1006685c87d02
+0xdeadbeef b000b1006685c87d02
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jle +2
+0x1 b000b1006685c87e02
+0xdeadbeef b000b1006685c87e02
+# mov al,0x00 ; mov cl,0x00 ; test ax,cx ; jg +2
+0x1 b000b1006685c87f02
+0xdeadbeef b000b1006685c87f02
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jo +2
+0x1 b0ffb1ff6685c87002
+0xdeadbeef b0ffb1ff6685c87002
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jno +2
+0x1 b0ffb1ff6685c87102
+0xdeadbeef b0ffb1ff6685c87102
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jb +2
+0x1 b0ffb1ff6685c87202
+0xdeadbeef b0ffb1ff6685c87202
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jae +2
+0x1 b0ffb1ff6685c87302
+0xdeadbeef b0ffb1ff6685c87302
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; je +2
+0x1 b0ffb1ff6685c87402
+0xdeadbeef b0ffb1ff6685c87402
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jne +2
+0x1 b0ffb1ff6685c87502
+0xdeadbeef b0ffb1ff6685c87502
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jbe +2
+0x1 b0ffb1ff6685c87602
+0xdeadbeef b0ffb1ff6685c87602
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; ja +2
+0x1 b0ffb1ff6685c87702
+0xdeadbeef b0ffb1ff6685c87702
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; js +2
+0x1 b0ffb1ff6685c87802
+0xdeadbeef b0ffb1ff6685c87802
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jns +2
+0x1 b0ffb1ff6685c87902
+0xdeadbeef b0ffb1ff6685c87902
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jp +2
+0x1 b0ffb1ff6685c87a02
+0xdeadbeef b0ffb1ff6685c87a02
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jnp +2
+0x1 b0ffb1ff6685c87b02
+0xdeadbeef b0ffb1ff6685c87b02
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jl +2
+0x1 b0ffb1ff6685c87c02
+0xdeadbeef b0ffb1ff6685c87c02
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jge +2
+0x1 b0ffb1ff6685c87d02
+0xdeadbeef b0ffb1ff6685c87d02
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jle +2
+0x1 b0ffb1ff6685c87e02
+0xdeadbeef b0ffb1ff6685c87e02
+# mov al,0xff ; mov cl,0xff ; test ax,cx ; jg +2
+0x1 b0ffb1ff6685c87f02
+0xdeadbeef b0ffb1ff6685c87f02
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jo +2
+0x1 b080b1806685c87002
+0xdeadbeef b080b1806685c87002
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jno +2
+0x1 b080b1806685c87102
+0xdeadbeef b080b1806685c87102
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jb +2
+0x1 b080b1806685c87202
+0xdeadbeef b080b1806685c87202
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jae +2
+0x1 b080b1806685c87302
+0xdeadbeef b080b1806685c87302
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; je +2
+0x1 b080b1806685c87402
+0xdeadbeef b080b1806685c87402
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jne +2
+0x1 b080b1806685c87502
+0xdeadbeef b080b1806685c87502
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jbe +2
+0x1 b080b1806685c87602
+0xdeadbeef b080b1806685c87602
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; ja +2
+0x1 b080b1806685c87702
+0xdeadbeef b080b1806685c87702
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; js +2
+0x1 b080b1806685c87802
+0xdeadbeef b080b1806685c87802
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jns +2
+0x1 b080b1806685c87902
+0xdeadbeef b080b1806685c87902
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jp +2
+0x1 b080b1806685c87a02
+0xdeadbeef b080b1806685c87a02
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jnp +2
+0x1 b080b1806685c87b02
+0xdeadbeef b080b1806685c87b02
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jl +2
+0x1 b080b1806685c87c02
+0xdeadbeef b080b1806685c87c02
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jge +2
+0x1 b080b1806685c87d02
+0xdeadbeef b080b1806685c87d02
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jle +2
+0x1 b080b1806685c87e02
+0xdeadbeef b080b1806685c87e02
+# mov al,0x80 ; mov cl,0x80 ; test ax,cx ; jg +2
+0x1 b080b1806685c87f02
+0xdeadbeef b080b1806685c87f02
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jo +2
+0x1 b07fb17f6685c87002
+0xdeadbeef b07fb17f6685c87002
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jno +2
+0x1 b07fb17f6685c87102
+0xdeadbeef b07fb17f6685c87102
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jb +2
+0x1 b07fb17f6685c87202
+0xdeadbeef b07fb17f6685c87202
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jae +2
+0x1 b07fb17f6685c87302
+0xdeadbeef b07fb17f6685c87302
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; je +2
+0x1 b07fb17f6685c87402
+0xdeadbeef b07fb17f6685c87402
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jne +2
+0x1 b07fb17f6685c87502
+0xdeadbeef b07fb17f6685c87502
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jbe +2
+0x1 b07fb17f6685c87602
+0xdeadbeef b07fb17f6685c87602
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; ja +2
+0x1 b07fb17f6685c87702
+0xdeadbeef b07fb17f6685c87702
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; js +2
+0x1 b07fb17f6685c87802
+0xdeadbeef b07fb17f6685c87802
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jns +2
+0x1 b07fb17f6685c87902
+0xdeadbeef b07fb17f6685c87902
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jp +2
+0x1 b07fb17f6685c87a02
+0xdeadbeef b07fb17f6685c87a02
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jnp +2
+0x1 b07fb17f6685c87b02
+0xdeadbeef b07fb17f6685c87b02
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jl +2
+0x1 b07fb17f6685c87c02
+0xdeadbeef b07fb17f6685c87c02
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jge +2
+0x1 b07fb17f6685c87d02
+0xdeadbeef b07fb17f6685c87d02
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jle +2
+0x1 b07fb17f6685c87e02
+0xdeadbeef b07fb17f6685c87e02
+# mov al,0x7f ; mov cl,0x7f ; test ax,cx ; jg +2
+0x1 b07fb17f6685c87f02
+0xdeadbeef b07fb17f6685c87f02
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jo +2
+0x1 b001b1026685c87002
+0xdeadbeef b001b1026685c87002
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jno +2
+0x1 b001b1026685c87102
+0xdeadbeef b001b1026685c87102
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jb +2
+0x1 b001b1026685c87202
+0xdeadbeef b001b1026685c87202
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jae +2
+0x1 b001b1026685c87302
+0xdeadbeef b001b1026685c87302
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; je +2
+0x1 b001b1026685c87402
+0xdeadbeef b001b1026685c87402
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jne +2
+0x1 b001b1026685c87502
+0xdeadbeef b001b1026685c87502
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jbe +2
+0x1 b001b1026685c87602
+0xdeadbeef b001b1026685c87602
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; ja +2
+0x1 b001b1026685c87702
+0xdeadbeef b001b1026685c87702
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; js +2
+0x1 b001b1026685c87802
+0xdeadbeef b001b1026685c87802
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jns +2
+0x1 b001b1026685c87902
+0xdeadbeef b001b1026685c87902
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jp +2
+0x1 b001b1026685c87a02
+0xdeadbeef b001b1026685c87a02
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jnp +2
+0x1 b001b1026685c87b02
+0xdeadbeef b001b1026685c87b02
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jl +2
+0x1 b001b1026685c87c02
+0xdeadbeef b001b1026685c87c02
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jge +2
+0x1 b001b1026685c87d02
+0xdeadbeef b001b1026685c87d02
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jle +2
+0x1 b001b1026685c87e02
+0xdeadbeef b001b1026685c87e02
+# mov al,0x01 ; mov cl,0x02 ; test ax,cx ; jg +2
+0x1 b001b1026685c87f02
+0xdeadbeef b001b1026685c87f02
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jo +2
+0x1 b000b1006621c87002
+0xdeadbeef b000b1006621c87002
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jno +2
+0x1 b000b1006621c87102
+0xdeadbeef b000b1006621c87102
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jb +2
+0x1 b000b1006621c87202
+0xdeadbeef b000b1006621c87202
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jae +2
+0x1 b000b1006621c87302
+0xdeadbeef b000b1006621c87302
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; je +2
+0x1 b000b1006621c87402
+0xdeadbeef b000b1006621c87402
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jne +2
+0x1 b000b1006621c87502
+0xdeadbeef b000b1006621c87502
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jbe +2
+0x1 b000b1006621c87602
+0xdeadbeef b000b1006621c87602
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; ja +2
+0x1 b000b1006621c87702
+0xdeadbeef b000b1006621c87702
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; js +2
+0x1 b000b1006621c87802
+0xdeadbeef b000b1006621c87802
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jns +2
+0x1 b000b1006621c87902
+0xdeadbeef b000b1006621c87902
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jp +2
+0x1 b000b1006621c87a02
+0xdeadbeef b000b1006621c87a02
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jnp +2
+0x1 b000b1006621c87b02
+0xdeadbeef b000b1006621c87b02
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jl +2
+0x1 b000b1006621c87c02
+0xdeadbeef b000b1006621c87c02
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jge +2
+0x1 b000b1006621c87d02
+0xdeadbeef b000b1006621c87d02
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jle +2
+0x1 b000b1006621c87e02
+0xdeadbeef b000b1006621c87e02
+# mov al,0x00 ; mov cl,0x00 ; and  ax,cx ; jg +2
+0x1 b000b1006621c87f02
+0xdeadbeef b000b1006621c87f02
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jo +2
+0x1 b0ffb1ff6621c87002
+0xdeadbeef b0ffb1ff6621c87002
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jno +2
+0x1 b0ffb1ff6621c87102
+0xdeadbeef b0ffb1ff6621c87102
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jb +2
+0x1 b0ffb1ff6621c87202
+0xdeadbeef b0ffb1ff6621c87202
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jae +2
+0x1 b0ffb1ff6621c87302
+0xdeadbeef b0ffb1ff6621c87302
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; je +2
+0x1 b0ffb1ff6621c87402
+0xdeadbeef b0ffb1ff6621c87402
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jne +2
+0x1 b0ffb1ff6621c87502
+0xdeadbeef b0ffb1ff6621c87502
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jbe +2
+0x1 b0ffb1ff6621c87602
+0xdeadbeef b0ffb1ff6621c87602
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; ja +2
+0x1 b0ffb1ff6621c87702
+0xdeadbeef b0ffb1ff6621c87702
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; js +2
+0x1 b0ffb1ff6621c87802
+0xdeadbeef b0ffb1ff6621c87802
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jns +2
+0x1 b0ffb1ff6621c87902
+0xdeadbeef b0ffb1ff6621c87902
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jp +2
+0x1 b0ffb1ff6621c87a02
+0xdeadbeef b0ffb1ff6621c87a02
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jnp +2
+0x1 b0ffb1ff6621c87b02
+0xdeadbeef b0ffb1ff6621c87b02
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jl +2
+0x1 b0ffb1ff6621c87c02
+0xdeadbeef b0ffb1ff6621c87c02
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jge +2
+0x1 b0ffb1ff6621c87d02
+0xdeadbeef b0ffb1ff6621c87d02
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jle +2
+0x1 b0ffb1ff6621c87e02
+0xdeadbeef b0ffb1ff6621c87e02
+# mov al,0xff ; mov cl,0xff ; and  ax,cx ; jg +2
+0x1 b0ffb1ff6621c87f02
+0xdeadbeef b0ffb1ff6621c87f02
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jo +2
+0x1 b080b1806621c87002
+0xdeadbeef b080b1806621c87002
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jno +2
+0x1 b080b1806621c87102
+0xdeadbeef b080b1806621c87102
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jb +2
+0x1 b080b1806621c87202
+0xdeadbeef b080b1806621c87202
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jae +2
+0x1 b080b1806621c87302
+0xdeadbeef b080b1806621c87302
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; je +2
+0x1 b080b1806621c87402
+0xdeadbeef b080b1806621c87402
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jne +2
+0x1 b080b1806621c87502
+0xdeadbeef b080b1806621c87502
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jbe +2
+0x1 b080b1806621c87602
+0xdeadbeef b080b1806621c87602
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; ja +2
+0x1 b080b1806621c87702
+0xdeadbeef b080b1806621c87702
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; js +2
+0x1 b080b1806621c87802
+0xdeadbeef b080b1806621c87802
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jns +2
+0x1 b080b1806621c87902
+0xdeadbeef b080b1806621c87902
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jp +2
+0x1 b080b1806621c87a02
+0xdeadbeef b080b1806621c87a02
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jnp +2
+0x1 b080b1806621c87b02
+0xdeadbeef b080b1806621c87b02
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jl +2
+0x1 b080b1806621c87c02
+0xdeadbeef b080b1806621c87c02
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jge +2
+0x1 b080b1806621c87d02
+0xdeadbeef b080b1806621c87d02
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jle +2
+0x1 b080b1806621c87e02
+0xdeadbeef b080b1806621c87e02
+# mov al,0x80 ; mov cl,0x80 ; and  ax,cx ; jg +2
+0x1 b080b1806621c87f02
+0xdeadbeef b080b1806621c87f02
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jo +2
+0x1 b07fb17f6621c87002
+0xdeadbeef b07fb17f6621c87002
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jno +2
+0x1 b07fb17f6621c87102
+0xdeadbeef b07fb17f6621c87102
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jb +2
+0x1 b07fb17f6621c87202
+0xdeadbeef b07fb17f6621c87202
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jae +2
+0x1 b07fb17f6621c87302
+0xdeadbeef b07fb17f6621c87302
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; je +2
+0x1 b07fb17f6621c87402
+0xdeadbeef b07fb17f6621c87402
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jne +2
+0x1 b07fb17f6621c87502
+0xdeadbeef b07fb17f6621c87502
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jbe +2
+0x1 b07fb17f6621c87602
+0xdeadbeef b07fb17f6621c87602
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; ja +2
+0x1 b07fb17f6621c87702
+0xdeadbeef b07fb17f6621c87702
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; js +2
+0x1 b07fb17f6621c87802
+0xdeadbeef b07fb17f6621c87802
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jns +2
+0x1 b07fb17f6621c87902
+0xdeadbeef b07fb17f6621c87902
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jp +2
+0x1 b07fb17f6621c87a02
+0xdeadbeef b07fb17f6621c87a02
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jnp +2
+0x1 b07fb17f6621c87b02
+0xdeadbeef b07fb17f6621c87b02
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jl +2
+0x1 b07fb17f6621c87c02
+0xdeadbeef b07fb17f6621c87c02
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jge +2
+0x1 b07fb17f6621c87d02
+0xdeadbeef b07fb17f6621c87d02
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jle +2
+0x1 b07fb17f6621c87e02
+0xdeadbeef b07fb17f6621c87e02
+# mov al,0x7f ; mov cl,0x7f ; and  ax,cx ; jg +2
+0x1 b07fb17f6621c87f02
+0xdeadbeef b07fb17f6621c87f02
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jo +2
+0x1 b001b1026621c87002
+0xdeadbeef b001b1026621c87002
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jno +2
+0x1 b001b1026621c87102
+0xdeadbeef b001b1026621c87102
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jb +2
+0x1 b001b1026621c87202
+0xdeadbeef b001b1026621c87202
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jae +2
+0x1 b001b1026621c87302
+0xdeadbeef b001b1026621c87302
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; je +2
+0x1 b001b1026621c87402
+0xdeadbeef b001b1026621c87402
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jne +2
+0x1 b001b1026621c87502
+0xdeadbeef b001b1026621c87502
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jbe +2
+0x1 b001b1026621c87602
+0xdeadbeef b001b1026621c87602
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; ja +2
+0x1 b001b1026621c87702
+0xdeadbeef b001b1026621c87702
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; js +2
+0x1 b001b1026621c87802
+0xdeadbeef b001b1026621c87802
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jns +2
+0x1 b001b1026621c87902
+0xdeadbeef b001b1026621c87902
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jp +2
+0x1 b001b1026621c87a02
+0xdeadbeef b001b1026621c87a02
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jnp +2
+0x1 b001b1026621c87b02
+0xdeadbeef b001b1026621c87b02
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jl +2
+0x1 b001b1026621c87c02
+0xdeadbeef b001b1026621c87c02
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jge +2
+0x1 b001b1026621c87d02
+0xdeadbeef b001b1026621c87d02
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jle +2
+0x1 b001b1026621c87e02
+0xdeadbeef b001b1026621c87e02
+# mov al,0x01 ; mov cl,0x02 ; and  ax,cx ; jg +2
+0x1 b001b1026621c87f02
+0xdeadbeef b001b1026621c87f02
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jo +2
+0x1 b000b10084c87002
+0xdeadbeef b000b10084c87002
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jno +2
+0x1 b000b10084c87102
+0xdeadbeef b000b10084c87102
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jb +2
+0x1 b000b10084c87202
+0xdeadbeef b000b10084c87202
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jae +2
+0x1 b000b10084c87302
+0xdeadbeef b000b10084c87302
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; je +2
+0x1 b000b10084c87402
+0xdeadbeef b000b10084c87402
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jne +2
+0x1 b000b10084c87502
+0xdeadbeef b000b10084c87502
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jbe +2
+0x1 b000b10084c87602
+0xdeadbeef b000b10084c87602
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; ja +2
+0x1 b000b10084c87702
+0xdeadbeef b000b10084c87702
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; js +2
+0x1 b000b10084c87802
+0xdeadbeef b000b10084c87802
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jns +2
+0x1 b000b10084c87902
+0xdeadbeef b000b10084c87902
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jp +2
+0x1 b000b10084c87a02
+0xdeadbeef b000b10084c87a02
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jnp +2
+0x1 b000b10084c87b02
+0xdeadbeef b000b10084c87b02
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jl +2
+0x1 b000b10084c87c02
+0xdeadbeef b000b10084c87c02
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jge +2
+0x1 b000b10084c87d02
+0xdeadbeef b000b10084c87d02
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jle +2
+0x1 b000b10084c87e02
+0xdeadbeef b000b10084c87e02
+# mov al,0x00 ; mov cl,0x00 ; test al,cl ; jg +2
+0x1 b000b10084c87f02
+0xdeadbeef b000b10084c87f02
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jo +2
+0x1 b0ffb1ff84c87002
+0xdeadbeef b0ffb1ff84c87002
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jno +2
+0x1 b0ffb1ff84c87102
+0xdeadbeef b0ffb1ff84c87102
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jb +2
+0x1 b0ffb1ff84c87202
+0xdeadbeef b0ffb1ff84c87202
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jae +2
+0x1 b0ffb1ff84c87302
+0xdeadbeef b0ffb1ff84c87302
+# mov al,0xff ; mov cl,0xff ; test al,cl ; je +2
+0x1 b0ffb1ff84c87402
+0xdeadbeef b0ffb1ff84c87402
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jne +2
+0x1 b0ffb1ff84c87502
+0xdeadbeef b0ffb1ff84c87502
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jbe +2
+0x1 b0ffb1ff84c87602
+0xdeadbeef b0ffb1ff84c87602
+# mov al,0xff ; mov cl,0xff ; test al,cl ; ja +2
+0x1 b0ffb1ff84c87702
+0xdeadbeef b0ffb1ff84c87702
+# mov al,0xff ; mov cl,0xff ; test al,cl ; js +2
+0x1 b0ffb1ff84c87802
+0xdeadbeef b0ffb1ff84c87802
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jns +2
+0x1 b0ffb1ff84c87902
+0xdeadbeef b0ffb1ff84c87902
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jp +2
+0x1 b0ffb1ff84c87a02
+0xdeadbeef b0ffb1ff84c87a02
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jnp +2
+0x1 b0ffb1ff84c87b02
+0xdeadbeef b0ffb1ff84c87b02
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jl +2
+0x1 b0ffb1ff84c87c02
+0xdeadbeef b0ffb1ff84c87c02
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jge +2
+0x1 b0ffb1ff84c87d02
+0xdeadbeef b0ffb1ff84c87d02
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jle +2
+0x1 b0ffb1ff84c87e02
+0xdeadbeef b0ffb1ff84c87e02
+# mov al,0xff ; mov cl,0xff ; test al,cl ; jg +2
+0x1 b0ffb1ff84c87f02
+0xdeadbeef b0ffb1ff84c87f02
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jo +2
+0x1 b080b18084c87002
+0xdeadbeef b080b18084c87002
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jno +2
+0x1 b080b18084c87102
+0xdeadbeef b080b18084c87102
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jb +2
+0x1 b080b18084c87202
+0xdeadbeef b080b18084c87202
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jae +2
+0x1 b080b18084c87302
+0xdeadbeef b080b18084c87302
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; je +2
+0x1 b080b18084c87402
+0xdeadbeef b080b18084c87402
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jne +2
+0x1 b080b18084c87502
+0xdeadbeef b080b18084c87502
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jbe +2
+0x1 b080b18084c87602
+0xdeadbeef b080b18084c87602
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; ja +2
+0x1 b080b18084c87702
+0xdeadbeef b080b18084c87702
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; js +2
+0x1 b080b18084c87802
+0xdeadbeef b080b18084c87802
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jns +2
+0x1 b080b18084c87902
+0xdeadbeef b080b18084c87902
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jp +2
+0x1 b080b18084c87a02
+0xdeadbeef b080b18084c87a02
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jnp +2
+0x1 b080b18084c87b02
+0xdeadbeef b080b18084c87b02
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jl +2
+0x1 b080b18084c87c02
+0xdeadbeef b080b18084c87c02
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jge +2
+0x1 b080b18084c87d02
+0xdeadbeef b080b18084c87d02
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jle +2
+0x1 b080b18084c87e02
+0xdeadbeef b080b18084c87e02
+# mov al,0x80 ; mov cl,0x80 ; test al,cl ; jg +2
+0x1 b080b18084c87f02
+0xdeadbeef b080b18084c87f02
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jo +2
+0x1 b07fb17f84c87002
+0xdeadbeef b07fb17f84c87002
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jno +2
+0x1 b07fb17f84c87102
+0xdeadbeef b07fb17f84c87102
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jb +2
+0x1 b07fb17f84c87202
+0xdeadbeef b07fb17f84c87202
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jae +2
+0x1 b07fb17f84c87302
+0xdeadbeef b07fb17f84c87302
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; je +2
+0x1 b07fb17f84c87402
+0xdeadbeef b07fb17f84c87402
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jne +2
+0x1 b07fb17f84c87502
+0xdeadbeef b07fb17f84c87502
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jbe +2
+0x1 b07fb17f84c87602
+0xdeadbeef b07fb17f84c87602
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; ja +2
+0x1 b07fb17f84c87702
+0xdeadbeef b07fb17f84c87702
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; js +2
+0x1 b07fb17f84c87802
+0xdeadbeef b07fb17f84c87802
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jns +2
+0x1 b07fb17f84c87902
+0xdeadbeef b07fb17f84c87902
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jp +2
+0x1 b07fb17f84c87a02
+0xdeadbeef b07fb17f84c87a02
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jnp +2
+0x1 b07fb17f84c87b02
+0xdeadbeef b07fb17f84c87b02
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jl +2
+0x1 b07fb17f84c87c02
+0xdeadbeef b07fb17f84c87c02
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jge +2
+0x1 b07fb17f84c87d02
+0xdeadbeef b07fb17f84c87d02
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jle +2
+0x1 b07fb17f84c87e02
+0xdeadbeef b07fb17f84c87e02
+# mov al,0x7f ; mov cl,0x7f ; test al,cl ; jg +2
+0x1 b07fb17f84c87f02
+0xdeadbeef b07fb17f84c87f02
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jo +2
+0x1 b001b10284c87002
+0xdeadbeef b001b10284c87002
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jno +2
+0x1 b001b10284c87102
+0xdeadbeef b001b10284c87102
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jb +2
+0x1 b001b10284c87202
+0xdeadbeef b001b10284c87202
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jae +2
+0x1 b001b10284c87302
+0xdeadbeef b001b10284c87302
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; je +2
+0x1 b001b10284c87402
+0xdeadbeef b001b10284c87402
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jne +2
+0x1 b001b10284c87502
+0xdeadbeef b001b10284c87502
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jbe +2
+0x1 b001b10284c87602
+0xdeadbeef b001b10284c87602
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; ja +2
+0x1 b001b10284c87702
+0xdeadbeef b001b10284c87702
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; js +2
+0x1 b001b10284c87802
+0xdeadbeef b001b10284c87802
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jns +2
+0x1 b001b10284c87902
+0xdeadbeef b001b10284c87902
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jp +2
+0x1 b001b10284c87a02
+0xdeadbeef b001b10284c87a02
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jnp +2
+0x1 b001b10284c87b02
+0xdeadbeef b001b10284c87b02
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jl +2
+0x1 b001b10284c87c02
+0xdeadbeef b001b10284c87c02
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jge +2
+0x1 b001b10284c87d02
+0xdeadbeef b001b10284c87d02
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jle +2
+0x1 b001b10284c87e02
+0xdeadbeef b001b10284c87e02
+# mov al,0x01 ; mov cl,0x02 ; test al,cl ; jg +2
+0x1 b001b10284c87f02
+0xdeadbeef b001b10284c87f02
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jo +2
+0x1 b000b10020c87002
+0xdeadbeef b000b10020c87002
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jno +2
+0x1 b000b10020c87102
+0xdeadbeef b000b10020c87102
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jb +2
+0x1 b000b10020c87202
+0xdeadbeef b000b10020c87202
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jae +2
+0x1 b000b10020c87302
+0xdeadbeef b000b10020c87302
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; je +2
+0x1 b000b10020c87402
+0xdeadbeef b000b10020c87402
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jne +2
+0x1 b000b10020c87502
+0xdeadbeef b000b10020c87502
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jbe +2
+0x1 b000b10020c87602
+0xdeadbeef b000b10020c87602
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; ja +2
+0x1 b000b10020c87702
+0xdeadbeef b000b10020c87702
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; js +2
+0x1 b000b10020c87802
+0xdeadbeef b000b10020c87802
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jns +2
+0x1 b000b10020c87902
+0xdeadbeef b000b10020c87902
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jp +2
+0x1 b000b10020c87a02
+0xdeadbeef b000b10020c87a02
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jnp +2
+0x1 b000b10020c87b02
+0xdeadbeef b000b10020c87b02
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jl +2
+0x1 b000b10020c87c02
+0xdeadbeef b000b10020c87c02
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jge +2
+0x1 b000b10020c87d02
+0xdeadbeef b000b10020c87d02
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jle +2
+0x1 b000b10020c87e02
+0xdeadbeef b000b10020c87e02
+# mov al,0x00 ; mov cl,0x00 ; and  al,cl ; jg +2
+0x1 b000b10020c87f02
+0xdeadbeef b000b10020c87f02
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jo +2
+0x1 b0ffb1ff20c87002
+0xdeadbeef b0ffb1ff20c87002
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jno +2
+0x1 b0ffb1ff20c87102
+0xdeadbeef b0ffb1ff20c87102
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jb +2
+0x1 b0ffb1ff20c87202
+0xdeadbeef b0ffb1ff20c87202
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jae +2
+0x1 b0ffb1ff20c87302
+0xdeadbeef b0ffb1ff20c87302
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; je +2
+0x1 b0ffb1ff20c87402
+0xdeadbeef b0ffb1ff20c87402
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jne +2
+0x1 b0ffb1ff20c87502
+0xdeadbeef b0ffb1ff20c87502
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jbe +2
+0x1 b0ffb1ff20c87602
+0xdeadbeef b0ffb1ff20c87602
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; ja +2
+0x1 b0ffb1ff20c87702
+0xdeadbeef b0ffb1ff20c87702
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; js +2
+0x1 b0ffb1ff20c87802
+0xdeadbeef b0ffb1ff20c87802
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jns +2
+0x1 b0ffb1ff20c87902
+0xdeadbeef b0ffb1ff20c87902
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jp +2
+0x1 b0ffb1ff20c87a02
+0xdeadbeef b0ffb1ff20c87a02
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jnp +2
+0x1 b0ffb1ff20c87b02
+0xdeadbeef b0ffb1ff20c87b02
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jl +2
+0x1 b0ffb1ff20c87c02
+0xdeadbeef b0ffb1ff20c87c02
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jge +2
+0x1 b0ffb1ff20c87d02
+0xdeadbeef b0ffb1ff20c87d02
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jle +2
+0x1 b0ffb1ff20c87e02
+0xdeadbeef b0ffb1ff20c87e02
+# mov al,0xff ; mov cl,0xff ; and  al,cl ; jg +2
+0x1 b0ffb1ff20c87f02
+0xdeadbeef b0ffb1ff20c87f02
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jo +2
+0x1 b080b18020c87002
+0xdeadbeef b080b18020c87002
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jno +2
+0x1 b080b18020c87102
+0xdeadbeef b080b18020c87102
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jb +2
+0x1 b080b18020c87202
+0xdeadbeef b080b18020c87202
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jae +2
+0x1 b080b18020c87302
+0xdeadbeef b080b18020c87302
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; je +2
+0x1 b080b18020c87402
+0xdeadbeef b080b18020c87402
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jne +2
+0x1 b080b18020c87502
+0xdeadbeef b080b18020c87502
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jbe +2
+0x1 b080b18020c87602
+0xdeadbeef b080b18020c87602
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; ja +2
+0x1 b080b18020c87702
+0xdeadbeef b080b18020c87702
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; js +2
+0x1 b080b18020c87802
+0xdeadbeef b080b18020c87802
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jns +2
+0x1 b080b18020c87902
+0xdeadbeef b080b18020c87902
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jp +2
+0x1 b080b18020c87a02
+0xdeadbeef b080b18020c87a02
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jnp +2
+0x1 b080b18020c87b02
+0xdeadbeef b080b18020c87b02
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jl +2
+0x1 b080b18020c87c02
+0xdeadbeef b080b18020c87c02
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jge +2
+0x1 b080b18020c87d02
+0xdeadbeef b080b18020c87d02
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jle +2
+0x1 b080b18020c87e02
+0xdeadbeef b080b18020c87e02
+# mov al,0x80 ; mov cl,0x80 ; and  al,cl ; jg +2
+0x1 b080b18020c87f02
+0xdeadbeef b080b18020c87f02
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jo +2
+0x1 b07fb17f20c87002
+0xdeadbeef b07fb17f20c87002
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jno +2
+0x1 b07fb17f20c87102
+0xdeadbeef b07fb17f20c87102
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jb +2
+0x1 b07fb17f20c87202
+0xdeadbeef b07fb17f20c87202
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jae +2
+0x1 b07fb17f20c87302
+0xdeadbeef b07fb17f20c87302
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; je +2
+0x1 b07fb17f20c87402
+0xdeadbeef b07fb17f20c87402
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jne +2
+0x1 b07fb17f20c87502
+0xdeadbeef b07fb17f20c87502
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jbe +2
+0x1 b07fb17f20c87602
+0xdeadbeef b07fb17f20c87602
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; ja +2
+0x1 b07fb17f20c87702
+0xdeadbeef b07fb17f20c87702
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; js +2
+0x1 b07fb17f20c87802
+0xdeadbeef b07fb17f20c87802
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jns +2
+0x1 b07fb17f20c87902
+0xdeadbeef b07fb17f20c87902
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jp +2
+0x1 b07fb17f20c87a02
+0xdeadbeef b07fb17f20c87a02
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jnp +2
+0x1 b07fb17f20c87b02
+0xdeadbeef b07fb17f20c87b02
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jl +2
+0x1 b07fb17f20c87c02
+0xdeadbeef b07fb17f20c87c02
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jge +2
+0x1 b07fb17f20c87d02
+0xdeadbeef b07fb17f20c87d02
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jle +2
+0x1 b07fb17f20c87e02
+0xdeadbeef b07fb17f20c87e02
+# mov al,0x7f ; mov cl,0x7f ; and  al,cl ; jg +2
+0x1 b07fb17f20c87f02
+0xdeadbeef b07fb17f20c87f02
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jo +2
+0x1 b001b10220c87002
+0xdeadbeef b001b10220c87002
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jno +2
+0x1 b001b10220c87102
+0xdeadbeef b001b10220c87102
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jb +2
+0x1 b001b10220c87202
+0xdeadbeef b001b10220c87202
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jae +2
+0x1 b001b10220c87302
+0xdeadbeef b001b10220c87302
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; je +2
+0x1 b001b10220c87402
+0xdeadbeef b001b10220c87402
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jne +2
+0x1 b001b10220c87502
+0xdeadbeef b001b10220c87502
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jbe +2
+0x1 b001b10220c87602
+0xdeadbeef b001b10220c87602
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; ja +2
+0x1 b001b10220c87702
+0xdeadbeef b001b10220c87702
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; js +2
+0x1 b001b10220c87802
+0xdeadbeef b001b10220c87802
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jns +2
+0x1 b001b10220c87902
+0xdeadbeef b001b10220c87902
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jp +2
+0x1 b001b10220c87a02
+0xdeadbeef b001b10220c87a02
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jnp +2
+0x1 b001b10220c87b02
+0xdeadbeef b001b10220c87b02
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jl +2
+0x1 b001b10220c87c02
+0xdeadbeef b001b10220c87c02
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jge +2
+0x1 b001b10220c87d02
+0xdeadbeef b001b10220c87d02
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jle +2
+0x1 b001b10220c87e02
+0xdeadbeef b001b10220c87e02
+# mov al,0x01 ; mov cl,0x02 ; and  al,cl ; jg +2
+0x1 b001b10220c87f02
+0xdeadbeef b001b10220c87f02

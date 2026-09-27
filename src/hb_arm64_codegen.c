@@ -11478,6 +11478,18 @@ static void fr_uchest(enum fr_prichina r)
 }
 
 
+/* Claude 28.09.2026 — ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ СРАЩИВАНИЯ (MACRUNNER_HB_TEST_JCC_FUSE_FLIP, только для тестов).
+ * Сращённый переход берёт ОБРАТНОЕ условие: сличение с интерпретатором обязано покраснеть. Без него
+ * зелёный корпус при JCC_FUSE_FULL не доказывал бы, что сращённый путь вообще исполнялся. */
+static int test_jcc_fuse_flip(void) {
+    return hb_jit_gate_flag(HB_GATE_HB_TEST_JCC_FUSE_FLIP, 0);
+}
+static hb_cc_t test_jcc_fuse_flip_cc(hb_cc_t cc) {
+    static const hb_cc_t inv[16] = {HB_CC_NE, HB_CC_E, HB_CC_NS, HB_CC_S, HB_CC_LE, HB_CC_L, HB_CC_GE, HB_CC_G,
+                                    HB_CC_BE, HB_CC_B, HB_CC_AE, HB_CC_A, HB_CC_NO, HB_CC_O, HB_CC_NP, HB_CC_P};
+    return ((unsigned)cc < 16u) ? inv[cc] : cc;
+}
+
 static struct fr_otkaz emit_cmp_sub_jcc_pochemu(hb_codegen_buffer_t* buf, const hb_ir_instr_t* op,
                                     const hb_ir_instr_t* jcc) {
     hb_lazy_flags_kind_t kind;
@@ -11568,7 +11580,7 @@ static struct fr_otkaz emit_cmp_sub_jcc_pochemu(hb_codegen_buffer_t* buf, const 
                     emit_set_pc_const(buf, jcc->guest_addr + jcc->guest_len);
                 return FR_USPEH;
             case HB_FCC_USLOVIE:
-                if (!emit_flags_set_pc_armcond(buf, ac, jcc->target,
+                if (!emit_flags_set_pc_armcond(buf, test_jcc_fuse_flip() ? (ac ^ 1) : ac, jcc->target,
                                                jcc->guest_addr + jcc->guest_len))
                     return FR_OTKAZ(ZAGRUZCHIK);
                 return FR_USPEH;
@@ -11581,8 +11593,8 @@ static struct fr_otkaz emit_cmp_sub_jcc_pochemu(hb_codegen_buffer_t* buf, const 
     }
     /* Cannot fail for the conditions that reach here (P/NP are refused above), but the branch
      * is emitted last and a silent false would strand the whole sequence — so it bails too. */
-    if (!emit_flags_set_pc_any_cond(buf, jcc->cc, jcc->target,
-                                    jcc->guest_addr + jcc->guest_len))
+    if (!emit_flags_set_pc_any_cond(buf, test_jcc_fuse_flip() ? test_jcc_fuse_flip_cc(jcc->cc) : jcc->cc,
+                                    jcc->target, jcc->guest_addr + jcc->guest_len))
         return FR_OTKAZ(ZAGRUZCHIK);
     return FR_USPEH;
 }

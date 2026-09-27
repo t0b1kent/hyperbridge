@@ -6922,6 +6922,7 @@ static unsigned persistent_cache_version(void) {
          * закрывала для пяти гейтов закрепления: записи сращённые и несращённые ложились бы
          * под ОДИН ключ, и контрольная рука A/B подняла бы чужой выпуск. */
         HB_KEY_GATE("MACRUNNER_HB_JCC_FUSE_FULL");
+        HB_KEY_GATE("MACRUNNER_HB_TEST_JCC_FUSE_FLIP");
 
         /* ★ СНЯТИЕ МЁРТВЫХ ЗАПИСЕЙ ЛЕНИВЫХ ФЛАГОВ (MACRUNNER_HB_DEADLAZY_SKIP) меняет ВЫПУСК:
          * второй проход не выпускает записи, помеченные разбором первого. Гейт УЧЁТА

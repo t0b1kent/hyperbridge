@@ -453,6 +453,11 @@ test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPM
 	grep -q "ЦЕЛО" tests/hb_sse_oracle/out/foreign.stderr
 	head -3 tests/hb_sse_oracle/corpus/smoke.cases | HB_DIFF_IDENTITY=1 HB_DIFF_TEST_FOREIGN_AT=0x140e00000 HB_DIFF_TEST_OLD_RESERVE=1 \
 	  ./$(SSE_ORACLE_RUNNER_BIN) > /dev/null 2> tests/hb_sse_oracle/out/foreign-old.stderr; test $$? -eq 87
+	@echo "Fused CMP/SUB/TEST/AND + Jcc (MACRUNNER_HB_JCC_FUSE_FULL=2) against the interpreter; flipped condition must be caught..."
+	for c in tests/hb_jcc_fuse/*.cases; do \
+	  MACRUNNER_HB_JIT_DIRECT_MEM=0 MACRUNNER_HB_JCC_FUSE_FULL=2 ./$(SSE_ORACLE_RUNNER_BIN) < $$c 2>/dev/null | python3 tests/hb_jcc_fuse/check.py --clean || exit 1; \
+	done
+	MACRUNNER_HB_JIT_DIRECT_MEM=0 MACRUNNER_HB_JCC_FUSE_FULL=2 MACRUNNER_HB_TEST_JCC_FUSE_FLIP=1 ./$(SSE_ORACLE_RUNNER_BIN) < tests/hb_jcc_fuse/flags-x64.cases 2>/dev/null | python3 tests/hb_jcc_fuse/check.py --mismatch
 	@echo "Running Python test suite..."
 	python3 -m unittest discover -s tests -v
 

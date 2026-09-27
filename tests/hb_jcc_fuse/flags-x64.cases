@@ -1,0 +1,4900 @@
+# Корпус лейна ФЛАГИ (06.09.2026): производитель флагов + Jcc, значения операндов
+# заданы ЯВНО movs внутри случая — края знакового переполнения и переноса.
+# ПОРОЖДЁН tools/flagi/породить-корпус.py — править порождатель, не файл.
+# Формат: <зерно> <байты> <ожидаемое-число-команд>
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JE
+0x1 b000b38038d87402 4
+0xdeadbeef b000b38038d87402 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JNE
+0x1 b000b38038d87502 4
+0xdeadbeef b000b38038d87502 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JB
+0x1 b000b38038d87202 4
+0xdeadbeef b000b38038d87202 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JAE
+0x1 b000b38038d87302 4
+0xdeadbeef b000b38038d87302 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JBE
+0x1 b000b38038d87602 4
+0xdeadbeef b000b38038d87602 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JA
+0x1 b000b38038d87702 4
+0xdeadbeef b000b38038d87702 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JS
+0x1 b000b38038d87802 4
+0xdeadbeef b000b38038d87802 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JNS
+0x1 b000b38038d87902 4
+0xdeadbeef b000b38038d87902 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JL
+0x1 b000b38038d87c02 4
+0xdeadbeef b000b38038d87c02 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JGE
+0x1 b000b38038d87d02 4
+0xdeadbeef b000b38038d87d02 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JLE
+0x1 b000b38038d87e02 4
+0xdeadbeef b000b38038d87e02 4
+# asm: mov a=0x0 b=0x80 ; CMP8 ; JG
+0x1 b000b38038d87f02 4
+0xdeadbeef b000b38038d87f02 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JE
+0x1 b080b30038d87402 4
+0xdeadbeef b080b30038d87402 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JNE
+0x1 b080b30038d87502 4
+0xdeadbeef b080b30038d87502 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JB
+0x1 b080b30038d87202 4
+0xdeadbeef b080b30038d87202 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JAE
+0x1 b080b30038d87302 4
+0xdeadbeef b080b30038d87302 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JBE
+0x1 b080b30038d87602 4
+0xdeadbeef b080b30038d87602 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JA
+0x1 b080b30038d87702 4
+0xdeadbeef b080b30038d87702 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JS
+0x1 b080b30038d87802 4
+0xdeadbeef b080b30038d87802 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JNS
+0x1 b080b30038d87902 4
+0xdeadbeef b080b30038d87902 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JL
+0x1 b080b30038d87c02 4
+0xdeadbeef b080b30038d87c02 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JGE
+0x1 b080b30038d87d02 4
+0xdeadbeef b080b30038d87d02 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JLE
+0x1 b080b30038d87e02 4
+0xdeadbeef b080b30038d87e02 4
+# asm: mov a=0x80 b=0x0 ; CMP8 ; JG
+0x1 b080b30038d87f02 4
+0xdeadbeef b080b30038d87f02 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JE
+0x1 b07fb3ff38d87402 4
+0xdeadbeef b07fb3ff38d87402 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JNE
+0x1 b07fb3ff38d87502 4
+0xdeadbeef b07fb3ff38d87502 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JB
+0x1 b07fb3ff38d87202 4
+0xdeadbeef b07fb3ff38d87202 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JAE
+0x1 b07fb3ff38d87302 4
+0xdeadbeef b07fb3ff38d87302 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JBE
+0x1 b07fb3ff38d87602 4
+0xdeadbeef b07fb3ff38d87602 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JA
+0x1 b07fb3ff38d87702 4
+0xdeadbeef b07fb3ff38d87702 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JS
+0x1 b07fb3ff38d87802 4
+0xdeadbeef b07fb3ff38d87802 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JNS
+0x1 b07fb3ff38d87902 4
+0xdeadbeef b07fb3ff38d87902 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JL
+0x1 b07fb3ff38d87c02 4
+0xdeadbeef b07fb3ff38d87c02 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JGE
+0x1 b07fb3ff38d87d02 4
+0xdeadbeef b07fb3ff38d87d02 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JLE
+0x1 b07fb3ff38d87e02 4
+0xdeadbeef b07fb3ff38d87e02 4
+# asm: mov a=0x7f b=0xff ; CMP8 ; JG
+0x1 b07fb3ff38d87f02 4
+0xdeadbeef b07fb3ff38d87f02 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JE
+0x1 b0ffb37f38d87402 4
+0xdeadbeef b0ffb37f38d87402 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JNE
+0x1 b0ffb37f38d87502 4
+0xdeadbeef b0ffb37f38d87502 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JB
+0x1 b0ffb37f38d87202 4
+0xdeadbeef b0ffb37f38d87202 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JAE
+0x1 b0ffb37f38d87302 4
+0xdeadbeef b0ffb37f38d87302 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JBE
+0x1 b0ffb37f38d87602 4
+0xdeadbeef b0ffb37f38d87602 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JA
+0x1 b0ffb37f38d87702 4
+0xdeadbeef b0ffb37f38d87702 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JS
+0x1 b0ffb37f38d87802 4
+0xdeadbeef b0ffb37f38d87802 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JNS
+0x1 b0ffb37f38d87902 4
+0xdeadbeef b0ffb37f38d87902 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JL
+0x1 b0ffb37f38d87c02 4
+0xdeadbeef b0ffb37f38d87c02 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JGE
+0x1 b0ffb37f38d87d02 4
+0xdeadbeef b0ffb37f38d87d02 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JLE
+0x1 b0ffb37f38d87e02 4
+0xdeadbeef b0ffb37f38d87e02 4
+# asm: mov a=0xff b=0x7f ; CMP8 ; JG
+0x1 b0ffb37f38d87f02 4
+0xdeadbeef b0ffb37f38d87f02 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JE
+0x1 b080b37f38d87402 4
+0xdeadbeef b080b37f38d87402 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JNE
+0x1 b080b37f38d87502 4
+0xdeadbeef b080b37f38d87502 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JB
+0x1 b080b37f38d87202 4
+0xdeadbeef b080b37f38d87202 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JAE
+0x1 b080b37f38d87302 4
+0xdeadbeef b080b37f38d87302 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JBE
+0x1 b080b37f38d87602 4
+0xdeadbeef b080b37f38d87602 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JA
+0x1 b080b37f38d87702 4
+0xdeadbeef b080b37f38d87702 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JS
+0x1 b080b37f38d87802 4
+0xdeadbeef b080b37f38d87802 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JNS
+0x1 b080b37f38d87902 4
+0xdeadbeef b080b37f38d87902 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JL
+0x1 b080b37f38d87c02 4
+0xdeadbeef b080b37f38d87c02 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JGE
+0x1 b080b37f38d87d02 4
+0xdeadbeef b080b37f38d87d02 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JLE
+0x1 b080b37f38d87e02 4
+0xdeadbeef b080b37f38d87e02 4
+# asm: mov a=0x80 b=0x7f ; CMP8 ; JG
+0x1 b080b37f38d87f02 4
+0xdeadbeef b080b37f38d87f02 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JE
+0x1 b07fb38038d87402 4
+0xdeadbeef b07fb38038d87402 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JNE
+0x1 b07fb38038d87502 4
+0xdeadbeef b07fb38038d87502 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JB
+0x1 b07fb38038d87202 4
+0xdeadbeef b07fb38038d87202 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JAE
+0x1 b07fb38038d87302 4
+0xdeadbeef b07fb38038d87302 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JBE
+0x1 b07fb38038d87602 4
+0xdeadbeef b07fb38038d87602 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JA
+0x1 b07fb38038d87702 4
+0xdeadbeef b07fb38038d87702 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JS
+0x1 b07fb38038d87802 4
+0xdeadbeef b07fb38038d87802 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JNS
+0x1 b07fb38038d87902 4
+0xdeadbeef b07fb38038d87902 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JL
+0x1 b07fb38038d87c02 4
+0xdeadbeef b07fb38038d87c02 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JGE
+0x1 b07fb38038d87d02 4
+0xdeadbeef b07fb38038d87d02 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JLE
+0x1 b07fb38038d87e02 4
+0xdeadbeef b07fb38038d87e02 4
+# asm: mov a=0x7f b=0x80 ; CMP8 ; JG
+0x1 b07fb38038d87f02 4
+0xdeadbeef b07fb38038d87f02 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JE
+0x1 b000b30138d87402 4
+0xdeadbeef b000b30138d87402 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JNE
+0x1 b000b30138d87502 4
+0xdeadbeef b000b30138d87502 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JB
+0x1 b000b30138d87202 4
+0xdeadbeef b000b30138d87202 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JAE
+0x1 b000b30138d87302 4
+0xdeadbeef b000b30138d87302 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JBE
+0x1 b000b30138d87602 4
+0xdeadbeef b000b30138d87602 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JA
+0x1 b000b30138d87702 4
+0xdeadbeef b000b30138d87702 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JS
+0x1 b000b30138d87802 4
+0xdeadbeef b000b30138d87802 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JNS
+0x1 b000b30138d87902 4
+0xdeadbeef b000b30138d87902 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JL
+0x1 b000b30138d87c02 4
+0xdeadbeef b000b30138d87c02 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JGE
+0x1 b000b30138d87d02 4
+0xdeadbeef b000b30138d87d02 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JLE
+0x1 b000b30138d87e02 4
+0xdeadbeef b000b30138d87e02 4
+# asm: mov a=0x0 b=0x1 ; CMP8 ; JG
+0x1 b000b30138d87f02 4
+0xdeadbeef b000b30138d87f02 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JE
+0x1 b001b30038d87402 4
+0xdeadbeef b001b30038d87402 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JNE
+0x1 b001b30038d87502 4
+0xdeadbeef b001b30038d87502 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JB
+0x1 b001b30038d87202 4
+0xdeadbeef b001b30038d87202 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JAE
+0x1 b001b30038d87302 4
+0xdeadbeef b001b30038d87302 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JBE
+0x1 b001b30038d87602 4
+0xdeadbeef b001b30038d87602 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JA
+0x1 b001b30038d87702 4
+0xdeadbeef b001b30038d87702 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JS
+0x1 b001b30038d87802 4
+0xdeadbeef b001b30038d87802 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JNS
+0x1 b001b30038d87902 4
+0xdeadbeef b001b30038d87902 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JL
+0x1 b001b30038d87c02 4
+0xdeadbeef b001b30038d87c02 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JGE
+0x1 b001b30038d87d02 4
+0xdeadbeef b001b30038d87d02 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JLE
+0x1 b001b30038d87e02 4
+0xdeadbeef b001b30038d87e02 4
+# asm: mov a=0x1 b=0x0 ; CMP8 ; JG
+0x1 b001b30038d87f02 4
+0xdeadbeef b001b30038d87f02 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JE
+0x1 b080b38038d87402 4
+0xdeadbeef b080b38038d87402 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JNE
+0x1 b080b38038d87502 4
+0xdeadbeef b080b38038d87502 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JB
+0x1 b080b38038d87202 4
+0xdeadbeef b080b38038d87202 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JAE
+0x1 b080b38038d87302 4
+0xdeadbeef b080b38038d87302 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JBE
+0x1 b080b38038d87602 4
+0xdeadbeef b080b38038d87602 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JA
+0x1 b080b38038d87702 4
+0xdeadbeef b080b38038d87702 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JS
+0x1 b080b38038d87802 4
+0xdeadbeef b080b38038d87802 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JNS
+0x1 b080b38038d87902 4
+0xdeadbeef b080b38038d87902 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JL
+0x1 b080b38038d87c02 4
+0xdeadbeef b080b38038d87c02 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JGE
+0x1 b080b38038d87d02 4
+0xdeadbeef b080b38038d87d02 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JLE
+0x1 b080b38038d87e02 4
+0xdeadbeef b080b38038d87e02 4
+# asm: mov a=0x80 b=0x80 ; CMP8 ; JG
+0x1 b080b38038d87f02 4
+0xdeadbeef b080b38038d87f02 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JE
+0x1 b0ffb3ff38d87402 4
+0xdeadbeef b0ffb3ff38d87402 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JNE
+0x1 b0ffb3ff38d87502 4
+0xdeadbeef b0ffb3ff38d87502 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JB
+0x1 b0ffb3ff38d87202 4
+0xdeadbeef b0ffb3ff38d87202 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JAE
+0x1 b0ffb3ff38d87302 4
+0xdeadbeef b0ffb3ff38d87302 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JBE
+0x1 b0ffb3ff38d87602 4
+0xdeadbeef b0ffb3ff38d87602 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JA
+0x1 b0ffb3ff38d87702 4
+0xdeadbeef b0ffb3ff38d87702 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JS
+0x1 b0ffb3ff38d87802 4
+0xdeadbeef b0ffb3ff38d87802 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JNS
+0x1 b0ffb3ff38d87902 4
+0xdeadbeef b0ffb3ff38d87902 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JL
+0x1 b0ffb3ff38d87c02 4
+0xdeadbeef b0ffb3ff38d87c02 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JGE
+0x1 b0ffb3ff38d87d02 4
+0xdeadbeef b0ffb3ff38d87d02 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JLE
+0x1 b0ffb3ff38d87e02 4
+0xdeadbeef b0ffb3ff38d87e02 4
+# asm: mov a=0xff b=0xff ; CMP8 ; JG
+0x1 b0ffb3ff38d87f02 4
+0xdeadbeef b0ffb3ff38d87f02 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JE
+0x1 b000b30038d87402 4
+0xdeadbeef b000b30038d87402 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JNE
+0x1 b000b30038d87502 4
+0xdeadbeef b000b30038d87502 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JB
+0x1 b000b30038d87202 4
+0xdeadbeef b000b30038d87202 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JAE
+0x1 b000b30038d87302 4
+0xdeadbeef b000b30038d87302 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JBE
+0x1 b000b30038d87602 4
+0xdeadbeef b000b30038d87602 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JA
+0x1 b000b30038d87702 4
+0xdeadbeef b000b30038d87702 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JS
+0x1 b000b30038d87802 4
+0xdeadbeef b000b30038d87802 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JNS
+0x1 b000b30038d87902 4
+0xdeadbeef b000b30038d87902 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JL
+0x1 b000b30038d87c02 4
+0xdeadbeef b000b30038d87c02 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JGE
+0x1 b000b30038d87d02 4
+0xdeadbeef b000b30038d87d02 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JLE
+0x1 b000b30038d87e02 4
+0xdeadbeef b000b30038d87e02 4
+# asm: mov a=0x0 b=0x0 ; CMP8 ; JG
+0x1 b000b30038d87f02 4
+0xdeadbeef b000b30038d87f02 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JE
+0x1 b07fb37f38d87402 4
+0xdeadbeef b07fb37f38d87402 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JNE
+0x1 b07fb37f38d87502 4
+0xdeadbeef b07fb37f38d87502 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JB
+0x1 b07fb37f38d87202 4
+0xdeadbeef b07fb37f38d87202 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JAE
+0x1 b07fb37f38d87302 4
+0xdeadbeef b07fb37f38d87302 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JBE
+0x1 b07fb37f38d87602 4
+0xdeadbeef b07fb37f38d87602 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JA
+0x1 b07fb37f38d87702 4
+0xdeadbeef b07fb37f38d87702 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JS
+0x1 b07fb37f38d87802 4
+0xdeadbeef b07fb37f38d87802 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JNS
+0x1 b07fb37f38d87902 4
+0xdeadbeef b07fb37f38d87902 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JL
+0x1 b07fb37f38d87c02 4
+0xdeadbeef b07fb37f38d87c02 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JGE
+0x1 b07fb37f38d87d02 4
+0xdeadbeef b07fb37f38d87d02 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JLE
+0x1 b07fb37f38d87e02 4
+0xdeadbeef b07fb37f38d87e02 4
+# asm: mov a=0x7f b=0x7f ; CMP8 ; JG
+0x1 b07fb37f38d87f02 4
+0xdeadbeef b07fb37f38d87f02 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JE
+0x1 b000b38028d87402 4
+0xdeadbeef b000b38028d87402 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JNE
+0x1 b000b38028d87502 4
+0xdeadbeef b000b38028d87502 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JB
+0x1 b000b38028d87202 4
+0xdeadbeef b000b38028d87202 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JAE
+0x1 b000b38028d87302 4
+0xdeadbeef b000b38028d87302 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JBE
+0x1 b000b38028d87602 4
+0xdeadbeef b000b38028d87602 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JA
+0x1 b000b38028d87702 4
+0xdeadbeef b000b38028d87702 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JS
+0x1 b000b38028d87802 4
+0xdeadbeef b000b38028d87802 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JNS
+0x1 b000b38028d87902 4
+0xdeadbeef b000b38028d87902 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JL
+0x1 b000b38028d87c02 4
+0xdeadbeef b000b38028d87c02 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JGE
+0x1 b000b38028d87d02 4
+0xdeadbeef b000b38028d87d02 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JLE
+0x1 b000b38028d87e02 4
+0xdeadbeef b000b38028d87e02 4
+# asm: mov a=0x0 b=0x80 ; SUB8 ; JG
+0x1 b000b38028d87f02 4
+0xdeadbeef b000b38028d87f02 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JE
+0x1 b080b30028d87402 4
+0xdeadbeef b080b30028d87402 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JNE
+0x1 b080b30028d87502 4
+0xdeadbeef b080b30028d87502 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JB
+0x1 b080b30028d87202 4
+0xdeadbeef b080b30028d87202 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JAE
+0x1 b080b30028d87302 4
+0xdeadbeef b080b30028d87302 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JBE
+0x1 b080b30028d87602 4
+0xdeadbeef b080b30028d87602 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JA
+0x1 b080b30028d87702 4
+0xdeadbeef b080b30028d87702 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JS
+0x1 b080b30028d87802 4
+0xdeadbeef b080b30028d87802 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JNS
+0x1 b080b30028d87902 4
+0xdeadbeef b080b30028d87902 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JL
+0x1 b080b30028d87c02 4
+0xdeadbeef b080b30028d87c02 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JGE
+0x1 b080b30028d87d02 4
+0xdeadbeef b080b30028d87d02 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JLE
+0x1 b080b30028d87e02 4
+0xdeadbeef b080b30028d87e02 4
+# asm: mov a=0x80 b=0x0 ; SUB8 ; JG
+0x1 b080b30028d87f02 4
+0xdeadbeef b080b30028d87f02 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JE
+0x1 b07fb3ff28d87402 4
+0xdeadbeef b07fb3ff28d87402 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JNE
+0x1 b07fb3ff28d87502 4
+0xdeadbeef b07fb3ff28d87502 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JB
+0x1 b07fb3ff28d87202 4
+0xdeadbeef b07fb3ff28d87202 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JAE
+0x1 b07fb3ff28d87302 4
+0xdeadbeef b07fb3ff28d87302 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JBE
+0x1 b07fb3ff28d87602 4
+0xdeadbeef b07fb3ff28d87602 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JA
+0x1 b07fb3ff28d87702 4
+0xdeadbeef b07fb3ff28d87702 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JS
+0x1 b07fb3ff28d87802 4
+0xdeadbeef b07fb3ff28d87802 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JNS
+0x1 b07fb3ff28d87902 4
+0xdeadbeef b07fb3ff28d87902 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JL
+0x1 b07fb3ff28d87c02 4
+0xdeadbeef b07fb3ff28d87c02 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JGE
+0x1 b07fb3ff28d87d02 4
+0xdeadbeef b07fb3ff28d87d02 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JLE
+0x1 b07fb3ff28d87e02 4
+0xdeadbeef b07fb3ff28d87e02 4
+# asm: mov a=0x7f b=0xff ; SUB8 ; JG
+0x1 b07fb3ff28d87f02 4
+0xdeadbeef b07fb3ff28d87f02 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JE
+0x1 b0ffb37f28d87402 4
+0xdeadbeef b0ffb37f28d87402 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JNE
+0x1 b0ffb37f28d87502 4
+0xdeadbeef b0ffb37f28d87502 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JB
+0x1 b0ffb37f28d87202 4
+0xdeadbeef b0ffb37f28d87202 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JAE
+0x1 b0ffb37f28d87302 4
+0xdeadbeef b0ffb37f28d87302 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JBE
+0x1 b0ffb37f28d87602 4
+0xdeadbeef b0ffb37f28d87602 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JA
+0x1 b0ffb37f28d87702 4
+0xdeadbeef b0ffb37f28d87702 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JS
+0x1 b0ffb37f28d87802 4
+0xdeadbeef b0ffb37f28d87802 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JNS
+0x1 b0ffb37f28d87902 4
+0xdeadbeef b0ffb37f28d87902 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JL
+0x1 b0ffb37f28d87c02 4
+0xdeadbeef b0ffb37f28d87c02 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JGE
+0x1 b0ffb37f28d87d02 4
+0xdeadbeef b0ffb37f28d87d02 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JLE
+0x1 b0ffb37f28d87e02 4
+0xdeadbeef b0ffb37f28d87e02 4
+# asm: mov a=0xff b=0x7f ; SUB8 ; JG
+0x1 b0ffb37f28d87f02 4
+0xdeadbeef b0ffb37f28d87f02 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JE
+0x1 b080b37f28d87402 4
+0xdeadbeef b080b37f28d87402 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JNE
+0x1 b080b37f28d87502 4
+0xdeadbeef b080b37f28d87502 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JB
+0x1 b080b37f28d87202 4
+0xdeadbeef b080b37f28d87202 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JAE
+0x1 b080b37f28d87302 4
+0xdeadbeef b080b37f28d87302 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JBE
+0x1 b080b37f28d87602 4
+0xdeadbeef b080b37f28d87602 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JA
+0x1 b080b37f28d87702 4
+0xdeadbeef b080b37f28d87702 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JS
+0x1 b080b37f28d87802 4
+0xdeadbeef b080b37f28d87802 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JNS
+0x1 b080b37f28d87902 4
+0xdeadbeef b080b37f28d87902 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JL
+0x1 b080b37f28d87c02 4
+0xdeadbeef b080b37f28d87c02 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JGE
+0x1 b080b37f28d87d02 4
+0xdeadbeef b080b37f28d87d02 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JLE
+0x1 b080b37f28d87e02 4
+0xdeadbeef b080b37f28d87e02 4
+# asm: mov a=0x80 b=0x7f ; SUB8 ; JG
+0x1 b080b37f28d87f02 4
+0xdeadbeef b080b37f28d87f02 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JE
+0x1 b07fb38028d87402 4
+0xdeadbeef b07fb38028d87402 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JNE
+0x1 b07fb38028d87502 4
+0xdeadbeef b07fb38028d87502 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JB
+0x1 b07fb38028d87202 4
+0xdeadbeef b07fb38028d87202 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JAE
+0x1 b07fb38028d87302 4
+0xdeadbeef b07fb38028d87302 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JBE
+0x1 b07fb38028d87602 4
+0xdeadbeef b07fb38028d87602 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JA
+0x1 b07fb38028d87702 4
+0xdeadbeef b07fb38028d87702 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JS
+0x1 b07fb38028d87802 4
+0xdeadbeef b07fb38028d87802 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JNS
+0x1 b07fb38028d87902 4
+0xdeadbeef b07fb38028d87902 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JL
+0x1 b07fb38028d87c02 4
+0xdeadbeef b07fb38028d87c02 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JGE
+0x1 b07fb38028d87d02 4
+0xdeadbeef b07fb38028d87d02 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JLE
+0x1 b07fb38028d87e02 4
+0xdeadbeef b07fb38028d87e02 4
+# asm: mov a=0x7f b=0x80 ; SUB8 ; JG
+0x1 b07fb38028d87f02 4
+0xdeadbeef b07fb38028d87f02 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JE
+0x1 b000b30128d87402 4
+0xdeadbeef b000b30128d87402 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JNE
+0x1 b000b30128d87502 4
+0xdeadbeef b000b30128d87502 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JB
+0x1 b000b30128d87202 4
+0xdeadbeef b000b30128d87202 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JAE
+0x1 b000b30128d87302 4
+0xdeadbeef b000b30128d87302 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JBE
+0x1 b000b30128d87602 4
+0xdeadbeef b000b30128d87602 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JA
+0x1 b000b30128d87702 4
+0xdeadbeef b000b30128d87702 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JS
+0x1 b000b30128d87802 4
+0xdeadbeef b000b30128d87802 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JNS
+0x1 b000b30128d87902 4
+0xdeadbeef b000b30128d87902 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JL
+0x1 b000b30128d87c02 4
+0xdeadbeef b000b30128d87c02 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JGE
+0x1 b000b30128d87d02 4
+0xdeadbeef b000b30128d87d02 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JLE
+0x1 b000b30128d87e02 4
+0xdeadbeef b000b30128d87e02 4
+# asm: mov a=0x0 b=0x1 ; SUB8 ; JG
+0x1 b000b30128d87f02 4
+0xdeadbeef b000b30128d87f02 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JE
+0x1 b001b30028d87402 4
+0xdeadbeef b001b30028d87402 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JNE
+0x1 b001b30028d87502 4
+0xdeadbeef b001b30028d87502 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JB
+0x1 b001b30028d87202 4
+0xdeadbeef b001b30028d87202 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JAE
+0x1 b001b30028d87302 4
+0xdeadbeef b001b30028d87302 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JBE
+0x1 b001b30028d87602 4
+0xdeadbeef b001b30028d87602 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JA
+0x1 b001b30028d87702 4
+0xdeadbeef b001b30028d87702 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JS
+0x1 b001b30028d87802 4
+0xdeadbeef b001b30028d87802 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JNS
+0x1 b001b30028d87902 4
+0xdeadbeef b001b30028d87902 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JL
+0x1 b001b30028d87c02 4
+0xdeadbeef b001b30028d87c02 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JGE
+0x1 b001b30028d87d02 4
+0xdeadbeef b001b30028d87d02 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JLE
+0x1 b001b30028d87e02 4
+0xdeadbeef b001b30028d87e02 4
+# asm: mov a=0x1 b=0x0 ; SUB8 ; JG
+0x1 b001b30028d87f02 4
+0xdeadbeef b001b30028d87f02 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JE
+0x1 b080b38028d87402 4
+0xdeadbeef b080b38028d87402 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JNE
+0x1 b080b38028d87502 4
+0xdeadbeef b080b38028d87502 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JB
+0x1 b080b38028d87202 4
+0xdeadbeef b080b38028d87202 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JAE
+0x1 b080b38028d87302 4
+0xdeadbeef b080b38028d87302 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JBE
+0x1 b080b38028d87602 4
+0xdeadbeef b080b38028d87602 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JA
+0x1 b080b38028d87702 4
+0xdeadbeef b080b38028d87702 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JS
+0x1 b080b38028d87802 4
+0xdeadbeef b080b38028d87802 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JNS
+0x1 b080b38028d87902 4
+0xdeadbeef b080b38028d87902 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JL
+0x1 b080b38028d87c02 4
+0xdeadbeef b080b38028d87c02 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JGE
+0x1 b080b38028d87d02 4
+0xdeadbeef b080b38028d87d02 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JLE
+0x1 b080b38028d87e02 4
+0xdeadbeef b080b38028d87e02 4
+# asm: mov a=0x80 b=0x80 ; SUB8 ; JG
+0x1 b080b38028d87f02 4
+0xdeadbeef b080b38028d87f02 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JE
+0x1 b0ffb3ff28d87402 4
+0xdeadbeef b0ffb3ff28d87402 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JNE
+0x1 b0ffb3ff28d87502 4
+0xdeadbeef b0ffb3ff28d87502 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JB
+0x1 b0ffb3ff28d87202 4
+0xdeadbeef b0ffb3ff28d87202 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JAE
+0x1 b0ffb3ff28d87302 4
+0xdeadbeef b0ffb3ff28d87302 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JBE
+0x1 b0ffb3ff28d87602 4
+0xdeadbeef b0ffb3ff28d87602 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JA
+0x1 b0ffb3ff28d87702 4
+0xdeadbeef b0ffb3ff28d87702 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JS
+0x1 b0ffb3ff28d87802 4
+0xdeadbeef b0ffb3ff28d87802 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JNS
+0x1 b0ffb3ff28d87902 4
+0xdeadbeef b0ffb3ff28d87902 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JL
+0x1 b0ffb3ff28d87c02 4
+0xdeadbeef b0ffb3ff28d87c02 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JGE
+0x1 b0ffb3ff28d87d02 4
+0xdeadbeef b0ffb3ff28d87d02 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JLE
+0x1 b0ffb3ff28d87e02 4
+0xdeadbeef b0ffb3ff28d87e02 4
+# asm: mov a=0xff b=0xff ; SUB8 ; JG
+0x1 b0ffb3ff28d87f02 4
+0xdeadbeef b0ffb3ff28d87f02 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JE
+0x1 b000b30028d87402 4
+0xdeadbeef b000b30028d87402 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JNE
+0x1 b000b30028d87502 4
+0xdeadbeef b000b30028d87502 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JB
+0x1 b000b30028d87202 4
+0xdeadbeef b000b30028d87202 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JAE
+0x1 b000b30028d87302 4
+0xdeadbeef b000b30028d87302 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JBE
+0x1 b000b30028d87602 4
+0xdeadbeef b000b30028d87602 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JA
+0x1 b000b30028d87702 4
+0xdeadbeef b000b30028d87702 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JS
+0x1 b000b30028d87802 4
+0xdeadbeef b000b30028d87802 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JNS
+0x1 b000b30028d87902 4
+0xdeadbeef b000b30028d87902 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JL
+0x1 b000b30028d87c02 4
+0xdeadbeef b000b30028d87c02 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JGE
+0x1 b000b30028d87d02 4
+0xdeadbeef b000b30028d87d02 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JLE
+0x1 b000b30028d87e02 4
+0xdeadbeef b000b30028d87e02 4
+# asm: mov a=0x0 b=0x0 ; SUB8 ; JG
+0x1 b000b30028d87f02 4
+0xdeadbeef b000b30028d87f02 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JE
+0x1 b07fb37f28d87402 4
+0xdeadbeef b07fb37f28d87402 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JNE
+0x1 b07fb37f28d87502 4
+0xdeadbeef b07fb37f28d87502 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JB
+0x1 b07fb37f28d87202 4
+0xdeadbeef b07fb37f28d87202 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JAE
+0x1 b07fb37f28d87302 4
+0xdeadbeef b07fb37f28d87302 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JBE
+0x1 b07fb37f28d87602 4
+0xdeadbeef b07fb37f28d87602 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JA
+0x1 b07fb37f28d87702 4
+0xdeadbeef b07fb37f28d87702 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JS
+0x1 b07fb37f28d87802 4
+0xdeadbeef b07fb37f28d87802 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JNS
+0x1 b07fb37f28d87902 4
+0xdeadbeef b07fb37f28d87902 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JL
+0x1 b07fb37f28d87c02 4
+0xdeadbeef b07fb37f28d87c02 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JGE
+0x1 b07fb37f28d87d02 4
+0xdeadbeef b07fb37f28d87d02 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JLE
+0x1 b07fb37f28d87e02 4
+0xdeadbeef b07fb37f28d87e02 4
+# asm: mov a=0x7f b=0x7f ; SUB8 ; JG
+0x1 b07fb37f28d87f02 4
+0xdeadbeef b07fb37f28d87f02 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JE
+0x1 b000b38084d87402 4
+0xdeadbeef b000b38084d87402 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JNE
+0x1 b000b38084d87502 4
+0xdeadbeef b000b38084d87502 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JB
+0x1 b000b38084d87202 4
+0xdeadbeef b000b38084d87202 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JAE
+0x1 b000b38084d87302 4
+0xdeadbeef b000b38084d87302 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JBE
+0x1 b000b38084d87602 4
+0xdeadbeef b000b38084d87602 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JA
+0x1 b000b38084d87702 4
+0xdeadbeef b000b38084d87702 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JS
+0x1 b000b38084d87802 4
+0xdeadbeef b000b38084d87802 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JNS
+0x1 b000b38084d87902 4
+0xdeadbeef b000b38084d87902 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JL
+0x1 b000b38084d87c02 4
+0xdeadbeef b000b38084d87c02 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JGE
+0x1 b000b38084d87d02 4
+0xdeadbeef b000b38084d87d02 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JLE
+0x1 b000b38084d87e02 4
+0xdeadbeef b000b38084d87e02 4
+# asm: mov a=0x0 b=0x80 ; TEST8 ; JG
+0x1 b000b38084d87f02 4
+0xdeadbeef b000b38084d87f02 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JE
+0x1 b080b30084d87402 4
+0xdeadbeef b080b30084d87402 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JNE
+0x1 b080b30084d87502 4
+0xdeadbeef b080b30084d87502 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JB
+0x1 b080b30084d87202 4
+0xdeadbeef b080b30084d87202 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JAE
+0x1 b080b30084d87302 4
+0xdeadbeef b080b30084d87302 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JBE
+0x1 b080b30084d87602 4
+0xdeadbeef b080b30084d87602 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JA
+0x1 b080b30084d87702 4
+0xdeadbeef b080b30084d87702 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JS
+0x1 b080b30084d87802 4
+0xdeadbeef b080b30084d87802 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JNS
+0x1 b080b30084d87902 4
+0xdeadbeef b080b30084d87902 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JL
+0x1 b080b30084d87c02 4
+0xdeadbeef b080b30084d87c02 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JGE
+0x1 b080b30084d87d02 4
+0xdeadbeef b080b30084d87d02 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JLE
+0x1 b080b30084d87e02 4
+0xdeadbeef b080b30084d87e02 4
+# asm: mov a=0x80 b=0x0 ; TEST8 ; JG
+0x1 b080b30084d87f02 4
+0xdeadbeef b080b30084d87f02 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JE
+0x1 b07fb3ff84d87402 4
+0xdeadbeef b07fb3ff84d87402 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JNE
+0x1 b07fb3ff84d87502 4
+0xdeadbeef b07fb3ff84d87502 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JB
+0x1 b07fb3ff84d87202 4
+0xdeadbeef b07fb3ff84d87202 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JAE
+0x1 b07fb3ff84d87302 4
+0xdeadbeef b07fb3ff84d87302 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JBE
+0x1 b07fb3ff84d87602 4
+0xdeadbeef b07fb3ff84d87602 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JA
+0x1 b07fb3ff84d87702 4
+0xdeadbeef b07fb3ff84d87702 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JS
+0x1 b07fb3ff84d87802 4
+0xdeadbeef b07fb3ff84d87802 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JNS
+0x1 b07fb3ff84d87902 4
+0xdeadbeef b07fb3ff84d87902 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JL
+0x1 b07fb3ff84d87c02 4
+0xdeadbeef b07fb3ff84d87c02 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JGE
+0x1 b07fb3ff84d87d02 4
+0xdeadbeef b07fb3ff84d87d02 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JLE
+0x1 b07fb3ff84d87e02 4
+0xdeadbeef b07fb3ff84d87e02 4
+# asm: mov a=0x7f b=0xff ; TEST8 ; JG
+0x1 b07fb3ff84d87f02 4
+0xdeadbeef b07fb3ff84d87f02 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JE
+0x1 b0ffb37f84d87402 4
+0xdeadbeef b0ffb37f84d87402 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JNE
+0x1 b0ffb37f84d87502 4
+0xdeadbeef b0ffb37f84d87502 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JB
+0x1 b0ffb37f84d87202 4
+0xdeadbeef b0ffb37f84d87202 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JAE
+0x1 b0ffb37f84d87302 4
+0xdeadbeef b0ffb37f84d87302 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JBE
+0x1 b0ffb37f84d87602 4
+0xdeadbeef b0ffb37f84d87602 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JA
+0x1 b0ffb37f84d87702 4
+0xdeadbeef b0ffb37f84d87702 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JS
+0x1 b0ffb37f84d87802 4
+0xdeadbeef b0ffb37f84d87802 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JNS
+0x1 b0ffb37f84d87902 4
+0xdeadbeef b0ffb37f84d87902 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JL
+0x1 b0ffb37f84d87c02 4
+0xdeadbeef b0ffb37f84d87c02 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JGE
+0x1 b0ffb37f84d87d02 4
+0xdeadbeef b0ffb37f84d87d02 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JLE
+0x1 b0ffb37f84d87e02 4
+0xdeadbeef b0ffb37f84d87e02 4
+# asm: mov a=0xff b=0x7f ; TEST8 ; JG
+0x1 b0ffb37f84d87f02 4
+0xdeadbeef b0ffb37f84d87f02 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JE
+0x1 b080b37f84d87402 4
+0xdeadbeef b080b37f84d87402 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JNE
+0x1 b080b37f84d87502 4
+0xdeadbeef b080b37f84d87502 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JB
+0x1 b080b37f84d87202 4
+0xdeadbeef b080b37f84d87202 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JAE
+0x1 b080b37f84d87302 4
+0xdeadbeef b080b37f84d87302 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JBE
+0x1 b080b37f84d87602 4
+0xdeadbeef b080b37f84d87602 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JA
+0x1 b080b37f84d87702 4
+0xdeadbeef b080b37f84d87702 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JS
+0x1 b080b37f84d87802 4
+0xdeadbeef b080b37f84d87802 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JNS
+0x1 b080b37f84d87902 4
+0xdeadbeef b080b37f84d87902 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JL
+0x1 b080b37f84d87c02 4
+0xdeadbeef b080b37f84d87c02 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JGE
+0x1 b080b37f84d87d02 4
+0xdeadbeef b080b37f84d87d02 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JLE
+0x1 b080b37f84d87e02 4
+0xdeadbeef b080b37f84d87e02 4
+# asm: mov a=0x80 b=0x7f ; TEST8 ; JG
+0x1 b080b37f84d87f02 4
+0xdeadbeef b080b37f84d87f02 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JE
+0x1 b07fb38084d87402 4
+0xdeadbeef b07fb38084d87402 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JNE
+0x1 b07fb38084d87502 4
+0xdeadbeef b07fb38084d87502 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JB
+0x1 b07fb38084d87202 4
+0xdeadbeef b07fb38084d87202 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JAE
+0x1 b07fb38084d87302 4
+0xdeadbeef b07fb38084d87302 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JBE
+0x1 b07fb38084d87602 4
+0xdeadbeef b07fb38084d87602 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JA
+0x1 b07fb38084d87702 4
+0xdeadbeef b07fb38084d87702 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JS
+0x1 b07fb38084d87802 4
+0xdeadbeef b07fb38084d87802 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JNS
+0x1 b07fb38084d87902 4
+0xdeadbeef b07fb38084d87902 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JL
+0x1 b07fb38084d87c02 4
+0xdeadbeef b07fb38084d87c02 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JGE
+0x1 b07fb38084d87d02 4
+0xdeadbeef b07fb38084d87d02 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JLE
+0x1 b07fb38084d87e02 4
+0xdeadbeef b07fb38084d87e02 4
+# asm: mov a=0x7f b=0x80 ; TEST8 ; JG
+0x1 b07fb38084d87f02 4
+0xdeadbeef b07fb38084d87f02 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JE
+0x1 b000b30184d87402 4
+0xdeadbeef b000b30184d87402 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JNE
+0x1 b000b30184d87502 4
+0xdeadbeef b000b30184d87502 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JB
+0x1 b000b30184d87202 4
+0xdeadbeef b000b30184d87202 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JAE
+0x1 b000b30184d87302 4
+0xdeadbeef b000b30184d87302 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JBE
+0x1 b000b30184d87602 4
+0xdeadbeef b000b30184d87602 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JA
+0x1 b000b30184d87702 4
+0xdeadbeef b000b30184d87702 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JS
+0x1 b000b30184d87802 4
+0xdeadbeef b000b30184d87802 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JNS
+0x1 b000b30184d87902 4
+0xdeadbeef b000b30184d87902 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JL
+0x1 b000b30184d87c02 4
+0xdeadbeef b000b30184d87c02 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JGE
+0x1 b000b30184d87d02 4
+0xdeadbeef b000b30184d87d02 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JLE
+0x1 b000b30184d87e02 4
+0xdeadbeef b000b30184d87e02 4
+# asm: mov a=0x0 b=0x1 ; TEST8 ; JG
+0x1 b000b30184d87f02 4
+0xdeadbeef b000b30184d87f02 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JE
+0x1 b001b30084d87402 4
+0xdeadbeef b001b30084d87402 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JNE
+0x1 b001b30084d87502 4
+0xdeadbeef b001b30084d87502 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JB
+0x1 b001b30084d87202 4
+0xdeadbeef b001b30084d87202 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JAE
+0x1 b001b30084d87302 4
+0xdeadbeef b001b30084d87302 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JBE
+0x1 b001b30084d87602 4
+0xdeadbeef b001b30084d87602 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JA
+0x1 b001b30084d87702 4
+0xdeadbeef b001b30084d87702 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JS
+0x1 b001b30084d87802 4
+0xdeadbeef b001b30084d87802 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JNS
+0x1 b001b30084d87902 4
+0xdeadbeef b001b30084d87902 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JL
+0x1 b001b30084d87c02 4
+0xdeadbeef b001b30084d87c02 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JGE
+0x1 b001b30084d87d02 4
+0xdeadbeef b001b30084d87d02 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JLE
+0x1 b001b30084d87e02 4
+0xdeadbeef b001b30084d87e02 4
+# asm: mov a=0x1 b=0x0 ; TEST8 ; JG
+0x1 b001b30084d87f02 4
+0xdeadbeef b001b30084d87f02 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JE
+0x1 b080b38084d87402 4
+0xdeadbeef b080b38084d87402 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JNE
+0x1 b080b38084d87502 4
+0xdeadbeef b080b38084d87502 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JB
+0x1 b080b38084d87202 4
+0xdeadbeef b080b38084d87202 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JAE
+0x1 b080b38084d87302 4
+0xdeadbeef b080b38084d87302 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JBE
+0x1 b080b38084d87602 4
+0xdeadbeef b080b38084d87602 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JA
+0x1 b080b38084d87702 4
+0xdeadbeef b080b38084d87702 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JS
+0x1 b080b38084d87802 4
+0xdeadbeef b080b38084d87802 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JNS
+0x1 b080b38084d87902 4
+0xdeadbeef b080b38084d87902 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JL
+0x1 b080b38084d87c02 4
+0xdeadbeef b080b38084d87c02 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JGE
+0x1 b080b38084d87d02 4
+0xdeadbeef b080b38084d87d02 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JLE
+0x1 b080b38084d87e02 4
+0xdeadbeef b080b38084d87e02 4
+# asm: mov a=0x80 b=0x80 ; TEST8 ; JG
+0x1 b080b38084d87f02 4
+0xdeadbeef b080b38084d87f02 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JE
+0x1 b0ffb3ff84d87402 4
+0xdeadbeef b0ffb3ff84d87402 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JNE
+0x1 b0ffb3ff84d87502 4
+0xdeadbeef b0ffb3ff84d87502 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JB
+0x1 b0ffb3ff84d87202 4
+0xdeadbeef b0ffb3ff84d87202 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JAE
+0x1 b0ffb3ff84d87302 4
+0xdeadbeef b0ffb3ff84d87302 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JBE
+0x1 b0ffb3ff84d87602 4
+0xdeadbeef b0ffb3ff84d87602 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JA
+0x1 b0ffb3ff84d87702 4
+0xdeadbeef b0ffb3ff84d87702 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JS
+0x1 b0ffb3ff84d87802 4
+0xdeadbeef b0ffb3ff84d87802 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JNS
+0x1 b0ffb3ff84d87902 4
+0xdeadbeef b0ffb3ff84d87902 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JL
+0x1 b0ffb3ff84d87c02 4
+0xdeadbeef b0ffb3ff84d87c02 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JGE
+0x1 b0ffb3ff84d87d02 4
+0xdeadbeef b0ffb3ff84d87d02 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JLE
+0x1 b0ffb3ff84d87e02 4
+0xdeadbeef b0ffb3ff84d87e02 4
+# asm: mov a=0xff b=0xff ; TEST8 ; JG
+0x1 b0ffb3ff84d87f02 4
+0xdeadbeef b0ffb3ff84d87f02 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JE
+0x1 b000b30084d87402 4
+0xdeadbeef b000b30084d87402 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JNE
+0x1 b000b30084d87502 4
+0xdeadbeef b000b30084d87502 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JB
+0x1 b000b30084d87202 4
+0xdeadbeef b000b30084d87202 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JAE
+0x1 b000b30084d87302 4
+0xdeadbeef b000b30084d87302 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JBE
+0x1 b000b30084d87602 4
+0xdeadbeef b000b30084d87602 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JA
+0x1 b000b30084d87702 4
+0xdeadbeef b000b30084d87702 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JS
+0x1 b000b30084d87802 4
+0xdeadbeef b000b30084d87802 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JNS
+0x1 b000b30084d87902 4
+0xdeadbeef b000b30084d87902 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JL
+0x1 b000b30084d87c02 4
+0xdeadbeef b000b30084d87c02 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JGE
+0x1 b000b30084d87d02 4
+0xdeadbeef b000b30084d87d02 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JLE
+0x1 b000b30084d87e02 4
+0xdeadbeef b000b30084d87e02 4
+# asm: mov a=0x0 b=0x0 ; TEST8 ; JG
+0x1 b000b30084d87f02 4
+0xdeadbeef b000b30084d87f02 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JE
+0x1 b07fb37f84d87402 4
+0xdeadbeef b07fb37f84d87402 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JNE
+0x1 b07fb37f84d87502 4
+0xdeadbeef b07fb37f84d87502 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JB
+0x1 b07fb37f84d87202 4
+0xdeadbeef b07fb37f84d87202 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JAE
+0x1 b07fb37f84d87302 4
+0xdeadbeef b07fb37f84d87302 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JBE
+0x1 b07fb37f84d87602 4
+0xdeadbeef b07fb37f84d87602 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JA
+0x1 b07fb37f84d87702 4
+0xdeadbeef b07fb37f84d87702 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JS
+0x1 b07fb37f84d87802 4
+0xdeadbeef b07fb37f84d87802 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JNS
+0x1 b07fb37f84d87902 4
+0xdeadbeef b07fb37f84d87902 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JL
+0x1 b07fb37f84d87c02 4
+0xdeadbeef b07fb37f84d87c02 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JGE
+0x1 b07fb37f84d87d02 4
+0xdeadbeef b07fb37f84d87d02 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JLE
+0x1 b07fb37f84d87e02 4
+0xdeadbeef b07fb37f84d87e02 4
+# asm: mov a=0x7f b=0x7f ; TEST8 ; JG
+0x1 b07fb37f84d87f02 4
+0xdeadbeef b07fb37f84d87f02 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JE
+0x1 b000b38020d87402 4
+0xdeadbeef b000b38020d87402 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JNE
+0x1 b000b38020d87502 4
+0xdeadbeef b000b38020d87502 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JB
+0x1 b000b38020d87202 4
+0xdeadbeef b000b38020d87202 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JAE
+0x1 b000b38020d87302 4
+0xdeadbeef b000b38020d87302 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JBE
+0x1 b000b38020d87602 4
+0xdeadbeef b000b38020d87602 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JA
+0x1 b000b38020d87702 4
+0xdeadbeef b000b38020d87702 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JS
+0x1 b000b38020d87802 4
+0xdeadbeef b000b38020d87802 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JNS
+0x1 b000b38020d87902 4
+0xdeadbeef b000b38020d87902 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JL
+0x1 b000b38020d87c02 4
+0xdeadbeef b000b38020d87c02 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JGE
+0x1 b000b38020d87d02 4
+0xdeadbeef b000b38020d87d02 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JLE
+0x1 b000b38020d87e02 4
+0xdeadbeef b000b38020d87e02 4
+# asm: mov a=0x0 b=0x80 ; AND8 ; JG
+0x1 b000b38020d87f02 4
+0xdeadbeef b000b38020d87f02 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JE
+0x1 b080b30020d87402 4
+0xdeadbeef b080b30020d87402 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JNE
+0x1 b080b30020d87502 4
+0xdeadbeef b080b30020d87502 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JB
+0x1 b080b30020d87202 4
+0xdeadbeef b080b30020d87202 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JAE
+0x1 b080b30020d87302 4
+0xdeadbeef b080b30020d87302 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JBE
+0x1 b080b30020d87602 4
+0xdeadbeef b080b30020d87602 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JA
+0x1 b080b30020d87702 4
+0xdeadbeef b080b30020d87702 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JS
+0x1 b080b30020d87802 4
+0xdeadbeef b080b30020d87802 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JNS
+0x1 b080b30020d87902 4
+0xdeadbeef b080b30020d87902 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JL
+0x1 b080b30020d87c02 4
+0xdeadbeef b080b30020d87c02 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JGE
+0x1 b080b30020d87d02 4
+0xdeadbeef b080b30020d87d02 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JLE
+0x1 b080b30020d87e02 4
+0xdeadbeef b080b30020d87e02 4
+# asm: mov a=0x80 b=0x0 ; AND8 ; JG
+0x1 b080b30020d87f02 4
+0xdeadbeef b080b30020d87f02 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JE
+0x1 b07fb3ff20d87402 4
+0xdeadbeef b07fb3ff20d87402 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JNE
+0x1 b07fb3ff20d87502 4
+0xdeadbeef b07fb3ff20d87502 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JB
+0x1 b07fb3ff20d87202 4
+0xdeadbeef b07fb3ff20d87202 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JAE
+0x1 b07fb3ff20d87302 4
+0xdeadbeef b07fb3ff20d87302 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JBE
+0x1 b07fb3ff20d87602 4
+0xdeadbeef b07fb3ff20d87602 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JA
+0x1 b07fb3ff20d87702 4
+0xdeadbeef b07fb3ff20d87702 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JS
+0x1 b07fb3ff20d87802 4
+0xdeadbeef b07fb3ff20d87802 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JNS
+0x1 b07fb3ff20d87902 4
+0xdeadbeef b07fb3ff20d87902 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JL
+0x1 b07fb3ff20d87c02 4
+0xdeadbeef b07fb3ff20d87c02 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JGE
+0x1 b07fb3ff20d87d02 4
+0xdeadbeef b07fb3ff20d87d02 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JLE
+0x1 b07fb3ff20d87e02 4
+0xdeadbeef b07fb3ff20d87e02 4
+# asm: mov a=0x7f b=0xff ; AND8 ; JG
+0x1 b07fb3ff20d87f02 4
+0xdeadbeef b07fb3ff20d87f02 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JE
+0x1 b0ffb37f20d87402 4
+0xdeadbeef b0ffb37f20d87402 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JNE
+0x1 b0ffb37f20d87502 4
+0xdeadbeef b0ffb37f20d87502 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JB
+0x1 b0ffb37f20d87202 4
+0xdeadbeef b0ffb37f20d87202 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JAE
+0x1 b0ffb37f20d87302 4
+0xdeadbeef b0ffb37f20d87302 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JBE
+0x1 b0ffb37f20d87602 4
+0xdeadbeef b0ffb37f20d87602 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JA
+0x1 b0ffb37f20d87702 4
+0xdeadbeef b0ffb37f20d87702 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JS
+0x1 b0ffb37f20d87802 4
+0xdeadbeef b0ffb37f20d87802 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JNS
+0x1 b0ffb37f20d87902 4
+0xdeadbeef b0ffb37f20d87902 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JL
+0x1 b0ffb37f20d87c02 4
+0xdeadbeef b0ffb37f20d87c02 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JGE
+0x1 b0ffb37f20d87d02 4
+0xdeadbeef b0ffb37f20d87d02 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JLE
+0x1 b0ffb37f20d87e02 4
+0xdeadbeef b0ffb37f20d87e02 4
+# asm: mov a=0xff b=0x7f ; AND8 ; JG
+0x1 b0ffb37f20d87f02 4
+0xdeadbeef b0ffb37f20d87f02 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JE
+0x1 b080b37f20d87402 4
+0xdeadbeef b080b37f20d87402 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JNE
+0x1 b080b37f20d87502 4
+0xdeadbeef b080b37f20d87502 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JB
+0x1 b080b37f20d87202 4
+0xdeadbeef b080b37f20d87202 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JAE
+0x1 b080b37f20d87302 4
+0xdeadbeef b080b37f20d87302 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JBE
+0x1 b080b37f20d87602 4
+0xdeadbeef b080b37f20d87602 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JA
+0x1 b080b37f20d87702 4
+0xdeadbeef b080b37f20d87702 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JS
+0x1 b080b37f20d87802 4
+0xdeadbeef b080b37f20d87802 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JNS
+0x1 b080b37f20d87902 4
+0xdeadbeef b080b37f20d87902 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JL
+0x1 b080b37f20d87c02 4
+0xdeadbeef b080b37f20d87c02 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JGE
+0x1 b080b37f20d87d02 4
+0xdeadbeef b080b37f20d87d02 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JLE
+0x1 b080b37f20d87e02 4
+0xdeadbeef b080b37f20d87e02 4
+# asm: mov a=0x80 b=0x7f ; AND8 ; JG
+0x1 b080b37f20d87f02 4
+0xdeadbeef b080b37f20d87f02 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JE
+0x1 b07fb38020d87402 4
+0xdeadbeef b07fb38020d87402 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JNE
+0x1 b07fb38020d87502 4
+0xdeadbeef b07fb38020d87502 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JB
+0x1 b07fb38020d87202 4
+0xdeadbeef b07fb38020d87202 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JAE
+0x1 b07fb38020d87302 4
+0xdeadbeef b07fb38020d87302 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JBE
+0x1 b07fb38020d87602 4
+0xdeadbeef b07fb38020d87602 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JA
+0x1 b07fb38020d87702 4
+0xdeadbeef b07fb38020d87702 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JS
+0x1 b07fb38020d87802 4
+0xdeadbeef b07fb38020d87802 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JNS
+0x1 b07fb38020d87902 4
+0xdeadbeef b07fb38020d87902 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JL
+0x1 b07fb38020d87c02 4
+0xdeadbeef b07fb38020d87c02 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JGE
+0x1 b07fb38020d87d02 4
+0xdeadbeef b07fb38020d87d02 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JLE
+0x1 b07fb38020d87e02 4
+0xdeadbeef b07fb38020d87e02 4
+# asm: mov a=0x7f b=0x80 ; AND8 ; JG
+0x1 b07fb38020d87f02 4
+0xdeadbeef b07fb38020d87f02 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JE
+0x1 b000b30120d87402 4
+0xdeadbeef b000b30120d87402 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JNE
+0x1 b000b30120d87502 4
+0xdeadbeef b000b30120d87502 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JB
+0x1 b000b30120d87202 4
+0xdeadbeef b000b30120d87202 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JAE
+0x1 b000b30120d87302 4
+0xdeadbeef b000b30120d87302 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JBE
+0x1 b000b30120d87602 4
+0xdeadbeef b000b30120d87602 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JA
+0x1 b000b30120d87702 4
+0xdeadbeef b000b30120d87702 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JS
+0x1 b000b30120d87802 4
+0xdeadbeef b000b30120d87802 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JNS
+0x1 b000b30120d87902 4
+0xdeadbeef b000b30120d87902 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JL
+0x1 b000b30120d87c02 4
+0xdeadbeef b000b30120d87c02 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JGE
+0x1 b000b30120d87d02 4
+0xdeadbeef b000b30120d87d02 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JLE
+0x1 b000b30120d87e02 4
+0xdeadbeef b000b30120d87e02 4
+# asm: mov a=0x0 b=0x1 ; AND8 ; JG
+0x1 b000b30120d87f02 4
+0xdeadbeef b000b30120d87f02 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JE
+0x1 b001b30020d87402 4
+0xdeadbeef b001b30020d87402 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JNE
+0x1 b001b30020d87502 4
+0xdeadbeef b001b30020d87502 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JB
+0x1 b001b30020d87202 4
+0xdeadbeef b001b30020d87202 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JAE
+0x1 b001b30020d87302 4
+0xdeadbeef b001b30020d87302 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JBE
+0x1 b001b30020d87602 4
+0xdeadbeef b001b30020d87602 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JA
+0x1 b001b30020d87702 4
+0xdeadbeef b001b30020d87702 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JS
+0x1 b001b30020d87802 4
+0xdeadbeef b001b30020d87802 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JNS
+0x1 b001b30020d87902 4
+0xdeadbeef b001b30020d87902 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JL
+0x1 b001b30020d87c02 4
+0xdeadbeef b001b30020d87c02 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JGE
+0x1 b001b30020d87d02 4
+0xdeadbeef b001b30020d87d02 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JLE
+0x1 b001b30020d87e02 4
+0xdeadbeef b001b30020d87e02 4
+# asm: mov a=0x1 b=0x0 ; AND8 ; JG
+0x1 b001b30020d87f02 4
+0xdeadbeef b001b30020d87f02 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JE
+0x1 b080b38020d87402 4
+0xdeadbeef b080b38020d87402 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JNE
+0x1 b080b38020d87502 4
+0xdeadbeef b080b38020d87502 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JB
+0x1 b080b38020d87202 4
+0xdeadbeef b080b38020d87202 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JAE
+0x1 b080b38020d87302 4
+0xdeadbeef b080b38020d87302 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JBE
+0x1 b080b38020d87602 4
+0xdeadbeef b080b38020d87602 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JA
+0x1 b080b38020d87702 4
+0xdeadbeef b080b38020d87702 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JS
+0x1 b080b38020d87802 4
+0xdeadbeef b080b38020d87802 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JNS
+0x1 b080b38020d87902 4
+0xdeadbeef b080b38020d87902 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JL
+0x1 b080b38020d87c02 4
+0xdeadbeef b080b38020d87c02 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JGE
+0x1 b080b38020d87d02 4
+0xdeadbeef b080b38020d87d02 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JLE
+0x1 b080b38020d87e02 4
+0xdeadbeef b080b38020d87e02 4
+# asm: mov a=0x80 b=0x80 ; AND8 ; JG
+0x1 b080b38020d87f02 4
+0xdeadbeef b080b38020d87f02 4
+# asm: mov a=0xff b=0xff ; AND8 ; JE
+0x1 b0ffb3ff20d87402 4
+0xdeadbeef b0ffb3ff20d87402 4
+# asm: mov a=0xff b=0xff ; AND8 ; JNE
+0x1 b0ffb3ff20d87502 4
+0xdeadbeef b0ffb3ff20d87502 4
+# asm: mov a=0xff b=0xff ; AND8 ; JB
+0x1 b0ffb3ff20d87202 4
+0xdeadbeef b0ffb3ff20d87202 4
+# asm: mov a=0xff b=0xff ; AND8 ; JAE
+0x1 b0ffb3ff20d87302 4
+0xdeadbeef b0ffb3ff20d87302 4
+# asm: mov a=0xff b=0xff ; AND8 ; JBE
+0x1 b0ffb3ff20d87602 4
+0xdeadbeef b0ffb3ff20d87602 4
+# asm: mov a=0xff b=0xff ; AND8 ; JA
+0x1 b0ffb3ff20d87702 4
+0xdeadbeef b0ffb3ff20d87702 4
+# asm: mov a=0xff b=0xff ; AND8 ; JS
+0x1 b0ffb3ff20d87802 4
+0xdeadbeef b0ffb3ff20d87802 4
+# asm: mov a=0xff b=0xff ; AND8 ; JNS
+0x1 b0ffb3ff20d87902 4
+0xdeadbeef b0ffb3ff20d87902 4
+# asm: mov a=0xff b=0xff ; AND8 ; JL
+0x1 b0ffb3ff20d87c02 4
+0xdeadbeef b0ffb3ff20d87c02 4
+# asm: mov a=0xff b=0xff ; AND8 ; JGE
+0x1 b0ffb3ff20d87d02 4
+0xdeadbeef b0ffb3ff20d87d02 4
+# asm: mov a=0xff b=0xff ; AND8 ; JLE
+0x1 b0ffb3ff20d87e02 4
+0xdeadbeef b0ffb3ff20d87e02 4
+# asm: mov a=0xff b=0xff ; AND8 ; JG
+0x1 b0ffb3ff20d87f02 4
+0xdeadbeef b0ffb3ff20d87f02 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JE
+0x1 b000b30020d87402 4
+0xdeadbeef b000b30020d87402 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JNE
+0x1 b000b30020d87502 4
+0xdeadbeef b000b30020d87502 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JB
+0x1 b000b30020d87202 4
+0xdeadbeef b000b30020d87202 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JAE
+0x1 b000b30020d87302 4
+0xdeadbeef b000b30020d87302 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JBE
+0x1 b000b30020d87602 4
+0xdeadbeef b000b30020d87602 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JA
+0x1 b000b30020d87702 4
+0xdeadbeef b000b30020d87702 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JS
+0x1 b000b30020d87802 4
+0xdeadbeef b000b30020d87802 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JNS
+0x1 b000b30020d87902 4
+0xdeadbeef b000b30020d87902 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JL
+0x1 b000b30020d87c02 4
+0xdeadbeef b000b30020d87c02 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JGE
+0x1 b000b30020d87d02 4
+0xdeadbeef b000b30020d87d02 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JLE
+0x1 b000b30020d87e02 4
+0xdeadbeef b000b30020d87e02 4
+# asm: mov a=0x0 b=0x0 ; AND8 ; JG
+0x1 b000b30020d87f02 4
+0xdeadbeef b000b30020d87f02 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JE
+0x1 b07fb37f20d87402 4
+0xdeadbeef b07fb37f20d87402 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JNE
+0x1 b07fb37f20d87502 4
+0xdeadbeef b07fb37f20d87502 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JB
+0x1 b07fb37f20d87202 4
+0xdeadbeef b07fb37f20d87202 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JAE
+0x1 b07fb37f20d87302 4
+0xdeadbeef b07fb37f20d87302 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JBE
+0x1 b07fb37f20d87602 4
+0xdeadbeef b07fb37f20d87602 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JA
+0x1 b07fb37f20d87702 4
+0xdeadbeef b07fb37f20d87702 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JS
+0x1 b07fb37f20d87802 4
+0xdeadbeef b07fb37f20d87802 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JNS
+0x1 b07fb37f20d87902 4
+0xdeadbeef b07fb37f20d87902 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JL
+0x1 b07fb37f20d87c02 4
+0xdeadbeef b07fb37f20d87c02 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JGE
+0x1 b07fb37f20d87d02 4
+0xdeadbeef b07fb37f20d87d02 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JLE
+0x1 b07fb37f20d87e02 4
+0xdeadbeef b07fb37f20d87e02 4
+# asm: mov a=0x7f b=0x7f ; AND8 ; JG
+0x1 b07fb37f20d87f02 4
+0xdeadbeef b07fb37f20d87f02 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JE
+0x1 66b8000066bb00806639d87402 4
+0xdeadbeef 66b8000066bb00806639d87402 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JNE
+0x1 66b8000066bb00806639d87502 4
+0xdeadbeef 66b8000066bb00806639d87502 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JB
+0x1 66b8000066bb00806639d87202 4
+0xdeadbeef 66b8000066bb00806639d87202 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JAE
+0x1 66b8000066bb00806639d87302 4
+0xdeadbeef 66b8000066bb00806639d87302 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JBE
+0x1 66b8000066bb00806639d87602 4
+0xdeadbeef 66b8000066bb00806639d87602 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JA
+0x1 66b8000066bb00806639d87702 4
+0xdeadbeef 66b8000066bb00806639d87702 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JS
+0x1 66b8000066bb00806639d87802 4
+0xdeadbeef 66b8000066bb00806639d87802 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JNS
+0x1 66b8000066bb00806639d87902 4
+0xdeadbeef 66b8000066bb00806639d87902 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JL
+0x1 66b8000066bb00806639d87c02 4
+0xdeadbeef 66b8000066bb00806639d87c02 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JGE
+0x1 66b8000066bb00806639d87d02 4
+0xdeadbeef 66b8000066bb00806639d87d02 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JLE
+0x1 66b8000066bb00806639d87e02 4
+0xdeadbeef 66b8000066bb00806639d87e02 4
+# asm: mov a=0x0 b=0x8000 ; CMP16 ; JG
+0x1 66b8000066bb00806639d87f02 4
+0xdeadbeef 66b8000066bb00806639d87f02 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JE
+0x1 66b8008066bb00006639d87402 4
+0xdeadbeef 66b8008066bb00006639d87402 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JNE
+0x1 66b8008066bb00006639d87502 4
+0xdeadbeef 66b8008066bb00006639d87502 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JB
+0x1 66b8008066bb00006639d87202 4
+0xdeadbeef 66b8008066bb00006639d87202 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JAE
+0x1 66b8008066bb00006639d87302 4
+0xdeadbeef 66b8008066bb00006639d87302 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JBE
+0x1 66b8008066bb00006639d87602 4
+0xdeadbeef 66b8008066bb00006639d87602 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JA
+0x1 66b8008066bb00006639d87702 4
+0xdeadbeef 66b8008066bb00006639d87702 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JS
+0x1 66b8008066bb00006639d87802 4
+0xdeadbeef 66b8008066bb00006639d87802 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JNS
+0x1 66b8008066bb00006639d87902 4
+0xdeadbeef 66b8008066bb00006639d87902 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JL
+0x1 66b8008066bb00006639d87c02 4
+0xdeadbeef 66b8008066bb00006639d87c02 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JGE
+0x1 66b8008066bb00006639d87d02 4
+0xdeadbeef 66b8008066bb00006639d87d02 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JLE
+0x1 66b8008066bb00006639d87e02 4
+0xdeadbeef 66b8008066bb00006639d87e02 4
+# asm: mov a=0x8000 b=0x0 ; CMP16 ; JG
+0x1 66b8008066bb00006639d87f02 4
+0xdeadbeef 66b8008066bb00006639d87f02 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JE
+0x1 66b8ff7f66bbffff6639d87402 4
+0xdeadbeef 66b8ff7f66bbffff6639d87402 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JNE
+0x1 66b8ff7f66bbffff6639d87502 4
+0xdeadbeef 66b8ff7f66bbffff6639d87502 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JB
+0x1 66b8ff7f66bbffff6639d87202 4
+0xdeadbeef 66b8ff7f66bbffff6639d87202 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JAE
+0x1 66b8ff7f66bbffff6639d87302 4
+0xdeadbeef 66b8ff7f66bbffff6639d87302 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JBE
+0x1 66b8ff7f66bbffff6639d87602 4
+0xdeadbeef 66b8ff7f66bbffff6639d87602 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JA
+0x1 66b8ff7f66bbffff6639d87702 4
+0xdeadbeef 66b8ff7f66bbffff6639d87702 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JS
+0x1 66b8ff7f66bbffff6639d87802 4
+0xdeadbeef 66b8ff7f66bbffff6639d87802 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JNS
+0x1 66b8ff7f66bbffff6639d87902 4
+0xdeadbeef 66b8ff7f66bbffff6639d87902 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JL
+0x1 66b8ff7f66bbffff6639d87c02 4
+0xdeadbeef 66b8ff7f66bbffff6639d87c02 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JGE
+0x1 66b8ff7f66bbffff6639d87d02 4
+0xdeadbeef 66b8ff7f66bbffff6639d87d02 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JLE
+0x1 66b8ff7f66bbffff6639d87e02 4
+0xdeadbeef 66b8ff7f66bbffff6639d87e02 4
+# asm: mov a=0x7fff b=0xffff ; CMP16 ; JG
+0x1 66b8ff7f66bbffff6639d87f02 4
+0xdeadbeef 66b8ff7f66bbffff6639d87f02 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JE
+0x1 66b8ffff66bbff7f6639d87402 4
+0xdeadbeef 66b8ffff66bbff7f6639d87402 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JNE
+0x1 66b8ffff66bbff7f6639d87502 4
+0xdeadbeef 66b8ffff66bbff7f6639d87502 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JB
+0x1 66b8ffff66bbff7f6639d87202 4
+0xdeadbeef 66b8ffff66bbff7f6639d87202 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JAE
+0x1 66b8ffff66bbff7f6639d87302 4
+0xdeadbeef 66b8ffff66bbff7f6639d87302 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JBE
+0x1 66b8ffff66bbff7f6639d87602 4
+0xdeadbeef 66b8ffff66bbff7f6639d87602 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JA
+0x1 66b8ffff66bbff7f6639d87702 4
+0xdeadbeef 66b8ffff66bbff7f6639d87702 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JS
+0x1 66b8ffff66bbff7f6639d87802 4
+0xdeadbeef 66b8ffff66bbff7f6639d87802 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JNS
+0x1 66b8ffff66bbff7f6639d87902 4
+0xdeadbeef 66b8ffff66bbff7f6639d87902 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JL
+0x1 66b8ffff66bbff7f6639d87c02 4
+0xdeadbeef 66b8ffff66bbff7f6639d87c02 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JGE
+0x1 66b8ffff66bbff7f6639d87d02 4
+0xdeadbeef 66b8ffff66bbff7f6639d87d02 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JLE
+0x1 66b8ffff66bbff7f6639d87e02 4
+0xdeadbeef 66b8ffff66bbff7f6639d87e02 4
+# asm: mov a=0xffff b=0x7fff ; CMP16 ; JG
+0x1 66b8ffff66bbff7f6639d87f02 4
+0xdeadbeef 66b8ffff66bbff7f6639d87f02 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JE
+0x1 66b8008066bbff7f6639d87402 4
+0xdeadbeef 66b8008066bbff7f6639d87402 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JNE
+0x1 66b8008066bbff7f6639d87502 4
+0xdeadbeef 66b8008066bbff7f6639d87502 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JB
+0x1 66b8008066bbff7f6639d87202 4
+0xdeadbeef 66b8008066bbff7f6639d87202 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JAE
+0x1 66b8008066bbff7f6639d87302 4
+0xdeadbeef 66b8008066bbff7f6639d87302 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JBE
+0x1 66b8008066bbff7f6639d87602 4
+0xdeadbeef 66b8008066bbff7f6639d87602 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JA
+0x1 66b8008066bbff7f6639d87702 4
+0xdeadbeef 66b8008066bbff7f6639d87702 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JS
+0x1 66b8008066bbff7f6639d87802 4
+0xdeadbeef 66b8008066bbff7f6639d87802 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JNS
+0x1 66b8008066bbff7f6639d87902 4
+0xdeadbeef 66b8008066bbff7f6639d87902 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JL
+0x1 66b8008066bbff7f6639d87c02 4
+0xdeadbeef 66b8008066bbff7f6639d87c02 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JGE
+0x1 66b8008066bbff7f6639d87d02 4
+0xdeadbeef 66b8008066bbff7f6639d87d02 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JLE
+0x1 66b8008066bbff7f6639d87e02 4
+0xdeadbeef 66b8008066bbff7f6639d87e02 4
+# asm: mov a=0x8000 b=0x7fff ; CMP16 ; JG
+0x1 66b8008066bbff7f6639d87f02 4
+0xdeadbeef 66b8008066bbff7f6639d87f02 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JE
+0x1 66b8ff7f66bb00806639d87402 4
+0xdeadbeef 66b8ff7f66bb00806639d87402 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JNE
+0x1 66b8ff7f66bb00806639d87502 4
+0xdeadbeef 66b8ff7f66bb00806639d87502 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JB
+0x1 66b8ff7f66bb00806639d87202 4
+0xdeadbeef 66b8ff7f66bb00806639d87202 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JAE
+0x1 66b8ff7f66bb00806639d87302 4
+0xdeadbeef 66b8ff7f66bb00806639d87302 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JBE
+0x1 66b8ff7f66bb00806639d87602 4
+0xdeadbeef 66b8ff7f66bb00806639d87602 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JA
+0x1 66b8ff7f66bb00806639d87702 4
+0xdeadbeef 66b8ff7f66bb00806639d87702 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JS
+0x1 66b8ff7f66bb00806639d87802 4
+0xdeadbeef 66b8ff7f66bb00806639d87802 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JNS
+0x1 66b8ff7f66bb00806639d87902 4
+0xdeadbeef 66b8ff7f66bb00806639d87902 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JL
+0x1 66b8ff7f66bb00806639d87c02 4
+0xdeadbeef 66b8ff7f66bb00806639d87c02 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JGE
+0x1 66b8ff7f66bb00806639d87d02 4
+0xdeadbeef 66b8ff7f66bb00806639d87d02 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JLE
+0x1 66b8ff7f66bb00806639d87e02 4
+0xdeadbeef 66b8ff7f66bb00806639d87e02 4
+# asm: mov a=0x7fff b=0x8000 ; CMP16 ; JG
+0x1 66b8ff7f66bb00806639d87f02 4
+0xdeadbeef 66b8ff7f66bb00806639d87f02 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JE
+0x1 66b8000066bb01006639d87402 4
+0xdeadbeef 66b8000066bb01006639d87402 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JNE
+0x1 66b8000066bb01006639d87502 4
+0xdeadbeef 66b8000066bb01006639d87502 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JB
+0x1 66b8000066bb01006639d87202 4
+0xdeadbeef 66b8000066bb01006639d87202 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JAE
+0x1 66b8000066bb01006639d87302 4
+0xdeadbeef 66b8000066bb01006639d87302 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JBE
+0x1 66b8000066bb01006639d87602 4
+0xdeadbeef 66b8000066bb01006639d87602 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JA
+0x1 66b8000066bb01006639d87702 4
+0xdeadbeef 66b8000066bb01006639d87702 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JS
+0x1 66b8000066bb01006639d87802 4
+0xdeadbeef 66b8000066bb01006639d87802 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JNS
+0x1 66b8000066bb01006639d87902 4
+0xdeadbeef 66b8000066bb01006639d87902 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JL
+0x1 66b8000066bb01006639d87c02 4
+0xdeadbeef 66b8000066bb01006639d87c02 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JGE
+0x1 66b8000066bb01006639d87d02 4
+0xdeadbeef 66b8000066bb01006639d87d02 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JLE
+0x1 66b8000066bb01006639d87e02 4
+0xdeadbeef 66b8000066bb01006639d87e02 4
+# asm: mov a=0x0 b=0x1 ; CMP16 ; JG
+0x1 66b8000066bb01006639d87f02 4
+0xdeadbeef 66b8000066bb01006639d87f02 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JE
+0x1 66b8ffff66bbffff6639d87402 4
+0xdeadbeef 66b8ffff66bbffff6639d87402 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JNE
+0x1 66b8ffff66bbffff6639d87502 4
+0xdeadbeef 66b8ffff66bbffff6639d87502 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JB
+0x1 66b8ffff66bbffff6639d87202 4
+0xdeadbeef 66b8ffff66bbffff6639d87202 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JAE
+0x1 66b8ffff66bbffff6639d87302 4
+0xdeadbeef 66b8ffff66bbffff6639d87302 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JBE
+0x1 66b8ffff66bbffff6639d87602 4
+0xdeadbeef 66b8ffff66bbffff6639d87602 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JA
+0x1 66b8ffff66bbffff6639d87702 4
+0xdeadbeef 66b8ffff66bbffff6639d87702 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JS
+0x1 66b8ffff66bbffff6639d87802 4
+0xdeadbeef 66b8ffff66bbffff6639d87802 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JNS
+0x1 66b8ffff66bbffff6639d87902 4
+0xdeadbeef 66b8ffff66bbffff6639d87902 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JL
+0x1 66b8ffff66bbffff6639d87c02 4
+0xdeadbeef 66b8ffff66bbffff6639d87c02 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JGE
+0x1 66b8ffff66bbffff6639d87d02 4
+0xdeadbeef 66b8ffff66bbffff6639d87d02 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JLE
+0x1 66b8ffff66bbffff6639d87e02 4
+0xdeadbeef 66b8ffff66bbffff6639d87e02 4
+# asm: mov a=0xffff b=0xffff ; CMP16 ; JG
+0x1 66b8ffff66bbffff6639d87f02 4
+0xdeadbeef 66b8ffff66bbffff6639d87f02 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JE
+0x1 66b8000066bb00806629d87402 4
+0xdeadbeef 66b8000066bb00806629d87402 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JNE
+0x1 66b8000066bb00806629d87502 4
+0xdeadbeef 66b8000066bb00806629d87502 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JB
+0x1 66b8000066bb00806629d87202 4
+0xdeadbeef 66b8000066bb00806629d87202 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JAE
+0x1 66b8000066bb00806629d87302 4
+0xdeadbeef 66b8000066bb00806629d87302 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JBE
+0x1 66b8000066bb00806629d87602 4
+0xdeadbeef 66b8000066bb00806629d87602 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JA
+0x1 66b8000066bb00806629d87702 4
+0xdeadbeef 66b8000066bb00806629d87702 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JS
+0x1 66b8000066bb00806629d87802 4
+0xdeadbeef 66b8000066bb00806629d87802 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JNS
+0x1 66b8000066bb00806629d87902 4
+0xdeadbeef 66b8000066bb00806629d87902 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JL
+0x1 66b8000066bb00806629d87c02 4
+0xdeadbeef 66b8000066bb00806629d87c02 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JGE
+0x1 66b8000066bb00806629d87d02 4
+0xdeadbeef 66b8000066bb00806629d87d02 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JLE
+0x1 66b8000066bb00806629d87e02 4
+0xdeadbeef 66b8000066bb00806629d87e02 4
+# asm: mov a=0x0 b=0x8000 ; SUB16 ; JG
+0x1 66b8000066bb00806629d87f02 4
+0xdeadbeef 66b8000066bb00806629d87f02 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JE
+0x1 66b8008066bb00006629d87402 4
+0xdeadbeef 66b8008066bb00006629d87402 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JNE
+0x1 66b8008066bb00006629d87502 4
+0xdeadbeef 66b8008066bb00006629d87502 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JB
+0x1 66b8008066bb00006629d87202 4
+0xdeadbeef 66b8008066bb00006629d87202 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JAE
+0x1 66b8008066bb00006629d87302 4
+0xdeadbeef 66b8008066bb00006629d87302 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JBE
+0x1 66b8008066bb00006629d87602 4
+0xdeadbeef 66b8008066bb00006629d87602 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JA
+0x1 66b8008066bb00006629d87702 4
+0xdeadbeef 66b8008066bb00006629d87702 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JS
+0x1 66b8008066bb00006629d87802 4
+0xdeadbeef 66b8008066bb00006629d87802 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JNS
+0x1 66b8008066bb00006629d87902 4
+0xdeadbeef 66b8008066bb00006629d87902 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JL
+0x1 66b8008066bb00006629d87c02 4
+0xdeadbeef 66b8008066bb00006629d87c02 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JGE
+0x1 66b8008066bb00006629d87d02 4
+0xdeadbeef 66b8008066bb00006629d87d02 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JLE
+0x1 66b8008066bb00006629d87e02 4
+0xdeadbeef 66b8008066bb00006629d87e02 4
+# asm: mov a=0x8000 b=0x0 ; SUB16 ; JG
+0x1 66b8008066bb00006629d87f02 4
+0xdeadbeef 66b8008066bb00006629d87f02 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JE
+0x1 66b8ff7f66bbffff6629d87402 4
+0xdeadbeef 66b8ff7f66bbffff6629d87402 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JNE
+0x1 66b8ff7f66bbffff6629d87502 4
+0xdeadbeef 66b8ff7f66bbffff6629d87502 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JB
+0x1 66b8ff7f66bbffff6629d87202 4
+0xdeadbeef 66b8ff7f66bbffff6629d87202 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JAE
+0x1 66b8ff7f66bbffff6629d87302 4
+0xdeadbeef 66b8ff7f66bbffff6629d87302 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JBE
+0x1 66b8ff7f66bbffff6629d87602 4
+0xdeadbeef 66b8ff7f66bbffff6629d87602 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JA
+0x1 66b8ff7f66bbffff6629d87702 4
+0xdeadbeef 66b8ff7f66bbffff6629d87702 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JS
+0x1 66b8ff7f66bbffff6629d87802 4
+0xdeadbeef 66b8ff7f66bbffff6629d87802 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JNS
+0x1 66b8ff7f66bbffff6629d87902 4
+0xdeadbeef 66b8ff7f66bbffff6629d87902 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JL
+0x1 66b8ff7f66bbffff6629d87c02 4
+0xdeadbeef 66b8ff7f66bbffff6629d87c02 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JGE
+0x1 66b8ff7f66bbffff6629d87d02 4
+0xdeadbeef 66b8ff7f66bbffff6629d87d02 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JLE
+0x1 66b8ff7f66bbffff6629d87e02 4
+0xdeadbeef 66b8ff7f66bbffff6629d87e02 4
+# asm: mov a=0x7fff b=0xffff ; SUB16 ; JG
+0x1 66b8ff7f66bbffff6629d87f02 4
+0xdeadbeef 66b8ff7f66bbffff6629d87f02 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JE
+0x1 66b8ffff66bbff7f6629d87402 4
+0xdeadbeef 66b8ffff66bbff7f6629d87402 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JNE
+0x1 66b8ffff66bbff7f6629d87502 4
+0xdeadbeef 66b8ffff66bbff7f6629d87502 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JB
+0x1 66b8ffff66bbff7f6629d87202 4
+0xdeadbeef 66b8ffff66bbff7f6629d87202 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JAE
+0x1 66b8ffff66bbff7f6629d87302 4
+0xdeadbeef 66b8ffff66bbff7f6629d87302 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JBE
+0x1 66b8ffff66bbff7f6629d87602 4
+0xdeadbeef 66b8ffff66bbff7f6629d87602 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JA
+0x1 66b8ffff66bbff7f6629d87702 4
+0xdeadbeef 66b8ffff66bbff7f6629d87702 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JS
+0x1 66b8ffff66bbff7f6629d87802 4
+0xdeadbeef 66b8ffff66bbff7f6629d87802 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JNS
+0x1 66b8ffff66bbff7f6629d87902 4
+0xdeadbeef 66b8ffff66bbff7f6629d87902 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JL
+0x1 66b8ffff66bbff7f6629d87c02 4
+0xdeadbeef 66b8ffff66bbff7f6629d87c02 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JGE
+0x1 66b8ffff66bbff7f6629d87d02 4
+0xdeadbeef 66b8ffff66bbff7f6629d87d02 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JLE
+0x1 66b8ffff66bbff7f6629d87e02 4
+0xdeadbeef 66b8ffff66bbff7f6629d87e02 4
+# asm: mov a=0xffff b=0x7fff ; SUB16 ; JG
+0x1 66b8ffff66bbff7f6629d87f02 4
+0xdeadbeef 66b8ffff66bbff7f6629d87f02 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JE
+0x1 66b8008066bbff7f6629d87402 4
+0xdeadbeef 66b8008066bbff7f6629d87402 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JNE
+0x1 66b8008066bbff7f6629d87502 4
+0xdeadbeef 66b8008066bbff7f6629d87502 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JB
+0x1 66b8008066bbff7f6629d87202 4
+0xdeadbeef 66b8008066bbff7f6629d87202 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JAE
+0x1 66b8008066bbff7f6629d87302 4
+0xdeadbeef 66b8008066bbff7f6629d87302 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JBE
+0x1 66b8008066bbff7f6629d87602 4
+0xdeadbeef 66b8008066bbff7f6629d87602 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JA
+0x1 66b8008066bbff7f6629d87702 4
+0xdeadbeef 66b8008066bbff7f6629d87702 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JS
+0x1 66b8008066bbff7f6629d87802 4
+0xdeadbeef 66b8008066bbff7f6629d87802 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JNS
+0x1 66b8008066bbff7f6629d87902 4
+0xdeadbeef 66b8008066bbff7f6629d87902 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JL
+0x1 66b8008066bbff7f6629d87c02 4
+0xdeadbeef 66b8008066bbff7f6629d87c02 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JGE
+0x1 66b8008066bbff7f6629d87d02 4
+0xdeadbeef 66b8008066bbff7f6629d87d02 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JLE
+0x1 66b8008066bbff7f6629d87e02 4
+0xdeadbeef 66b8008066bbff7f6629d87e02 4
+# asm: mov a=0x8000 b=0x7fff ; SUB16 ; JG
+0x1 66b8008066bbff7f6629d87f02 4
+0xdeadbeef 66b8008066bbff7f6629d87f02 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JE
+0x1 66b8ff7f66bb00806629d87402 4
+0xdeadbeef 66b8ff7f66bb00806629d87402 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JNE
+0x1 66b8ff7f66bb00806629d87502 4
+0xdeadbeef 66b8ff7f66bb00806629d87502 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JB
+0x1 66b8ff7f66bb00806629d87202 4
+0xdeadbeef 66b8ff7f66bb00806629d87202 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JAE
+0x1 66b8ff7f66bb00806629d87302 4
+0xdeadbeef 66b8ff7f66bb00806629d87302 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JBE
+0x1 66b8ff7f66bb00806629d87602 4
+0xdeadbeef 66b8ff7f66bb00806629d87602 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JA
+0x1 66b8ff7f66bb00806629d87702 4
+0xdeadbeef 66b8ff7f66bb00806629d87702 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JS
+0x1 66b8ff7f66bb00806629d87802 4
+0xdeadbeef 66b8ff7f66bb00806629d87802 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JNS
+0x1 66b8ff7f66bb00806629d87902 4
+0xdeadbeef 66b8ff7f66bb00806629d87902 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JL
+0x1 66b8ff7f66bb00806629d87c02 4
+0xdeadbeef 66b8ff7f66bb00806629d87c02 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JGE
+0x1 66b8ff7f66bb00806629d87d02 4
+0xdeadbeef 66b8ff7f66bb00806629d87d02 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JLE
+0x1 66b8ff7f66bb00806629d87e02 4
+0xdeadbeef 66b8ff7f66bb00806629d87e02 4
+# asm: mov a=0x7fff b=0x8000 ; SUB16 ; JG
+0x1 66b8ff7f66bb00806629d87f02 4
+0xdeadbeef 66b8ff7f66bb00806629d87f02 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JE
+0x1 66b8000066bb01006629d87402 4
+0xdeadbeef 66b8000066bb01006629d87402 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JNE
+0x1 66b8000066bb01006629d87502 4
+0xdeadbeef 66b8000066bb01006629d87502 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JB
+0x1 66b8000066bb01006629d87202 4
+0xdeadbeef 66b8000066bb01006629d87202 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JAE
+0x1 66b8000066bb01006629d87302 4
+0xdeadbeef 66b8000066bb01006629d87302 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JBE
+0x1 66b8000066bb01006629d87602 4
+0xdeadbeef 66b8000066bb01006629d87602 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JA
+0x1 66b8000066bb01006629d87702 4
+0xdeadbeef 66b8000066bb01006629d87702 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JS
+0x1 66b8000066bb01006629d87802 4
+0xdeadbeef 66b8000066bb01006629d87802 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JNS
+0x1 66b8000066bb01006629d87902 4
+0xdeadbeef 66b8000066bb01006629d87902 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JL
+0x1 66b8000066bb01006629d87c02 4
+0xdeadbeef 66b8000066bb01006629d87c02 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JGE
+0x1 66b8000066bb01006629d87d02 4
+0xdeadbeef 66b8000066bb01006629d87d02 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JLE
+0x1 66b8000066bb01006629d87e02 4
+0xdeadbeef 66b8000066bb01006629d87e02 4
+# asm: mov a=0x0 b=0x1 ; SUB16 ; JG
+0x1 66b8000066bb01006629d87f02 4
+0xdeadbeef 66b8000066bb01006629d87f02 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JE
+0x1 66b8ffff66bbffff6629d87402 4
+0xdeadbeef 66b8ffff66bbffff6629d87402 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JNE
+0x1 66b8ffff66bbffff6629d87502 4
+0xdeadbeef 66b8ffff66bbffff6629d87502 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JB
+0x1 66b8ffff66bbffff6629d87202 4
+0xdeadbeef 66b8ffff66bbffff6629d87202 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JAE
+0x1 66b8ffff66bbffff6629d87302 4
+0xdeadbeef 66b8ffff66bbffff6629d87302 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JBE
+0x1 66b8ffff66bbffff6629d87602 4
+0xdeadbeef 66b8ffff66bbffff6629d87602 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JA
+0x1 66b8ffff66bbffff6629d87702 4
+0xdeadbeef 66b8ffff66bbffff6629d87702 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JS
+0x1 66b8ffff66bbffff6629d87802 4
+0xdeadbeef 66b8ffff66bbffff6629d87802 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JNS
+0x1 66b8ffff66bbffff6629d87902 4
+0xdeadbeef 66b8ffff66bbffff6629d87902 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JL
+0x1 66b8ffff66bbffff6629d87c02 4
+0xdeadbeef 66b8ffff66bbffff6629d87c02 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JGE
+0x1 66b8ffff66bbffff6629d87d02 4
+0xdeadbeef 66b8ffff66bbffff6629d87d02 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JLE
+0x1 66b8ffff66bbffff6629d87e02 4
+0xdeadbeef 66b8ffff66bbffff6629d87e02 4
+# asm: mov a=0xffff b=0xffff ; SUB16 ; JG
+0x1 66b8ffff66bbffff6629d87f02 4
+0xdeadbeef 66b8ffff66bbffff6629d87f02 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JE
+0x1 66b8000066bb00806685d87402 4
+0xdeadbeef 66b8000066bb00806685d87402 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JNE
+0x1 66b8000066bb00806685d87502 4
+0xdeadbeef 66b8000066bb00806685d87502 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JB
+0x1 66b8000066bb00806685d87202 4
+0xdeadbeef 66b8000066bb00806685d87202 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JAE
+0x1 66b8000066bb00806685d87302 4
+0xdeadbeef 66b8000066bb00806685d87302 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JBE
+0x1 66b8000066bb00806685d87602 4
+0xdeadbeef 66b8000066bb00806685d87602 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JA
+0x1 66b8000066bb00806685d87702 4
+0xdeadbeef 66b8000066bb00806685d87702 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JS
+0x1 66b8000066bb00806685d87802 4
+0xdeadbeef 66b8000066bb00806685d87802 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JNS
+0x1 66b8000066bb00806685d87902 4
+0xdeadbeef 66b8000066bb00806685d87902 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JL
+0x1 66b8000066bb00806685d87c02 4
+0xdeadbeef 66b8000066bb00806685d87c02 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JGE
+0x1 66b8000066bb00806685d87d02 4
+0xdeadbeef 66b8000066bb00806685d87d02 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JLE
+0x1 66b8000066bb00806685d87e02 4
+0xdeadbeef 66b8000066bb00806685d87e02 4
+# asm: mov a=0x0 b=0x8000 ; TEST16 ; JG
+0x1 66b8000066bb00806685d87f02 4
+0xdeadbeef 66b8000066bb00806685d87f02 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JE
+0x1 66b8008066bb00006685d87402 4
+0xdeadbeef 66b8008066bb00006685d87402 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JNE
+0x1 66b8008066bb00006685d87502 4
+0xdeadbeef 66b8008066bb00006685d87502 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JB
+0x1 66b8008066bb00006685d87202 4
+0xdeadbeef 66b8008066bb00006685d87202 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JAE
+0x1 66b8008066bb00006685d87302 4
+0xdeadbeef 66b8008066bb00006685d87302 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JBE
+0x1 66b8008066bb00006685d87602 4
+0xdeadbeef 66b8008066bb00006685d87602 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JA
+0x1 66b8008066bb00006685d87702 4
+0xdeadbeef 66b8008066bb00006685d87702 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JS
+0x1 66b8008066bb00006685d87802 4
+0xdeadbeef 66b8008066bb00006685d87802 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JNS
+0x1 66b8008066bb00006685d87902 4
+0xdeadbeef 66b8008066bb00006685d87902 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JL
+0x1 66b8008066bb00006685d87c02 4
+0xdeadbeef 66b8008066bb00006685d87c02 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JGE
+0x1 66b8008066bb00006685d87d02 4
+0xdeadbeef 66b8008066bb00006685d87d02 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JLE
+0x1 66b8008066bb00006685d87e02 4
+0xdeadbeef 66b8008066bb00006685d87e02 4
+# asm: mov a=0x8000 b=0x0 ; TEST16 ; JG
+0x1 66b8008066bb00006685d87f02 4
+0xdeadbeef 66b8008066bb00006685d87f02 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JE
+0x1 66b8ff7f66bbffff6685d87402 4
+0xdeadbeef 66b8ff7f66bbffff6685d87402 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JNE
+0x1 66b8ff7f66bbffff6685d87502 4
+0xdeadbeef 66b8ff7f66bbffff6685d87502 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JB
+0x1 66b8ff7f66bbffff6685d87202 4
+0xdeadbeef 66b8ff7f66bbffff6685d87202 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JAE
+0x1 66b8ff7f66bbffff6685d87302 4
+0xdeadbeef 66b8ff7f66bbffff6685d87302 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JBE
+0x1 66b8ff7f66bbffff6685d87602 4
+0xdeadbeef 66b8ff7f66bbffff6685d87602 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JA
+0x1 66b8ff7f66bbffff6685d87702 4
+0xdeadbeef 66b8ff7f66bbffff6685d87702 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JS
+0x1 66b8ff7f66bbffff6685d87802 4
+0xdeadbeef 66b8ff7f66bbffff6685d87802 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JNS
+0x1 66b8ff7f66bbffff6685d87902 4
+0xdeadbeef 66b8ff7f66bbffff6685d87902 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JL
+0x1 66b8ff7f66bbffff6685d87c02 4
+0xdeadbeef 66b8ff7f66bbffff6685d87c02 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JGE
+0x1 66b8ff7f66bbffff6685d87d02 4
+0xdeadbeef 66b8ff7f66bbffff6685d87d02 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JLE
+0x1 66b8ff7f66bbffff6685d87e02 4
+0xdeadbeef 66b8ff7f66bbffff6685d87e02 4
+# asm: mov a=0x7fff b=0xffff ; TEST16 ; JG
+0x1 66b8ff7f66bbffff6685d87f02 4
+0xdeadbeef 66b8ff7f66bbffff6685d87f02 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JE
+0x1 66b8ffff66bbff7f6685d87402 4
+0xdeadbeef 66b8ffff66bbff7f6685d87402 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JNE
+0x1 66b8ffff66bbff7f6685d87502 4
+0xdeadbeef 66b8ffff66bbff7f6685d87502 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JB
+0x1 66b8ffff66bbff7f6685d87202 4
+0xdeadbeef 66b8ffff66bbff7f6685d87202 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JAE
+0x1 66b8ffff66bbff7f6685d87302 4
+0xdeadbeef 66b8ffff66bbff7f6685d87302 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JBE
+0x1 66b8ffff66bbff7f6685d87602 4
+0xdeadbeef 66b8ffff66bbff7f6685d87602 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JA
+0x1 66b8ffff66bbff7f6685d87702 4
+0xdeadbeef 66b8ffff66bbff7f6685d87702 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JS
+0x1 66b8ffff66bbff7f6685d87802 4
+0xdeadbeef 66b8ffff66bbff7f6685d87802 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JNS
+0x1 66b8ffff66bbff7f6685d87902 4
+0xdeadbeef 66b8ffff66bbff7f6685d87902 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JL
+0x1 66b8ffff66bbff7f6685d87c02 4
+0xdeadbeef 66b8ffff66bbff7f6685d87c02 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JGE
+0x1 66b8ffff66bbff7f6685d87d02 4
+0xdeadbeef 66b8ffff66bbff7f6685d87d02 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JLE
+0x1 66b8ffff66bbff7f6685d87e02 4
+0xdeadbeef 66b8ffff66bbff7f6685d87e02 4
+# asm: mov a=0xffff b=0x7fff ; TEST16 ; JG
+0x1 66b8ffff66bbff7f6685d87f02 4
+0xdeadbeef 66b8ffff66bbff7f6685d87f02 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JE
+0x1 66b8008066bbff7f6685d87402 4
+0xdeadbeef 66b8008066bbff7f6685d87402 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JNE
+0x1 66b8008066bbff7f6685d87502 4
+0xdeadbeef 66b8008066bbff7f6685d87502 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JB
+0x1 66b8008066bbff7f6685d87202 4
+0xdeadbeef 66b8008066bbff7f6685d87202 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JAE
+0x1 66b8008066bbff7f6685d87302 4
+0xdeadbeef 66b8008066bbff7f6685d87302 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JBE
+0x1 66b8008066bbff7f6685d87602 4
+0xdeadbeef 66b8008066bbff7f6685d87602 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JA
+0x1 66b8008066bbff7f6685d87702 4
+0xdeadbeef 66b8008066bbff7f6685d87702 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JS
+0x1 66b8008066bbff7f6685d87802 4
+0xdeadbeef 66b8008066bbff7f6685d87802 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JNS
+0x1 66b8008066bbff7f6685d87902 4
+0xdeadbeef 66b8008066bbff7f6685d87902 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JL
+0x1 66b8008066bbff7f6685d87c02 4
+0xdeadbeef 66b8008066bbff7f6685d87c02 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JGE
+0x1 66b8008066bbff7f6685d87d02 4
+0xdeadbeef 66b8008066bbff7f6685d87d02 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JLE
+0x1 66b8008066bbff7f6685d87e02 4
+0xdeadbeef 66b8008066bbff7f6685d87e02 4
+# asm: mov a=0x8000 b=0x7fff ; TEST16 ; JG
+0x1 66b8008066bbff7f6685d87f02 4
+0xdeadbeef 66b8008066bbff7f6685d87f02 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JE
+0x1 66b8ff7f66bb00806685d87402 4
+0xdeadbeef 66b8ff7f66bb00806685d87402 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JNE
+0x1 66b8ff7f66bb00806685d87502 4
+0xdeadbeef 66b8ff7f66bb00806685d87502 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JB
+0x1 66b8ff7f66bb00806685d87202 4
+0xdeadbeef 66b8ff7f66bb00806685d87202 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JAE
+0x1 66b8ff7f66bb00806685d87302 4
+0xdeadbeef 66b8ff7f66bb00806685d87302 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JBE
+0x1 66b8ff7f66bb00806685d87602 4
+0xdeadbeef 66b8ff7f66bb00806685d87602 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JA
+0x1 66b8ff7f66bb00806685d87702 4
+0xdeadbeef 66b8ff7f66bb00806685d87702 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JS
+0x1 66b8ff7f66bb00806685d87802 4
+0xdeadbeef 66b8ff7f66bb00806685d87802 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JNS
+0x1 66b8ff7f66bb00806685d87902 4
+0xdeadbeef 66b8ff7f66bb00806685d87902 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JL
+0x1 66b8ff7f66bb00806685d87c02 4
+0xdeadbeef 66b8ff7f66bb00806685d87c02 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JGE
+0x1 66b8ff7f66bb00806685d87d02 4
+0xdeadbeef 66b8ff7f66bb00806685d87d02 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JLE
+0x1 66b8ff7f66bb00806685d87e02 4
+0xdeadbeef 66b8ff7f66bb00806685d87e02 4
+# asm: mov a=0x7fff b=0x8000 ; TEST16 ; JG
+0x1 66b8ff7f66bb00806685d87f02 4
+0xdeadbeef 66b8ff7f66bb00806685d87f02 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JE
+0x1 66b8000066bb01006685d87402 4
+0xdeadbeef 66b8000066bb01006685d87402 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JNE
+0x1 66b8000066bb01006685d87502 4
+0xdeadbeef 66b8000066bb01006685d87502 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JB
+0x1 66b8000066bb01006685d87202 4
+0xdeadbeef 66b8000066bb01006685d87202 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JAE
+0x1 66b8000066bb01006685d87302 4
+0xdeadbeef 66b8000066bb01006685d87302 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JBE
+0x1 66b8000066bb01006685d87602 4
+0xdeadbeef 66b8000066bb01006685d87602 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JA
+0x1 66b8000066bb01006685d87702 4
+0xdeadbeef 66b8000066bb01006685d87702 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JS
+0x1 66b8000066bb01006685d87802 4
+0xdeadbeef 66b8000066bb01006685d87802 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JNS
+0x1 66b8000066bb01006685d87902 4
+0xdeadbeef 66b8000066bb01006685d87902 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JL
+0x1 66b8000066bb01006685d87c02 4
+0xdeadbeef 66b8000066bb01006685d87c02 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JGE
+0x1 66b8000066bb01006685d87d02 4
+0xdeadbeef 66b8000066bb01006685d87d02 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JLE
+0x1 66b8000066bb01006685d87e02 4
+0xdeadbeef 66b8000066bb01006685d87e02 4
+# asm: mov a=0x0 b=0x1 ; TEST16 ; JG
+0x1 66b8000066bb01006685d87f02 4
+0xdeadbeef 66b8000066bb01006685d87f02 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JE
+0x1 66b8ffff66bbffff6685d87402 4
+0xdeadbeef 66b8ffff66bbffff6685d87402 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JNE
+0x1 66b8ffff66bbffff6685d87502 4
+0xdeadbeef 66b8ffff66bbffff6685d87502 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JB
+0x1 66b8ffff66bbffff6685d87202 4
+0xdeadbeef 66b8ffff66bbffff6685d87202 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JAE
+0x1 66b8ffff66bbffff6685d87302 4
+0xdeadbeef 66b8ffff66bbffff6685d87302 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JBE
+0x1 66b8ffff66bbffff6685d87602 4
+0xdeadbeef 66b8ffff66bbffff6685d87602 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JA
+0x1 66b8ffff66bbffff6685d87702 4
+0xdeadbeef 66b8ffff66bbffff6685d87702 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JS
+0x1 66b8ffff66bbffff6685d87802 4
+0xdeadbeef 66b8ffff66bbffff6685d87802 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JNS
+0x1 66b8ffff66bbffff6685d87902 4
+0xdeadbeef 66b8ffff66bbffff6685d87902 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JL
+0x1 66b8ffff66bbffff6685d87c02 4
+0xdeadbeef 66b8ffff66bbffff6685d87c02 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JGE
+0x1 66b8ffff66bbffff6685d87d02 4
+0xdeadbeef 66b8ffff66bbffff6685d87d02 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JLE
+0x1 66b8ffff66bbffff6685d87e02 4
+0xdeadbeef 66b8ffff66bbffff6685d87e02 4
+# asm: mov a=0xffff b=0xffff ; TEST16 ; JG
+0x1 66b8ffff66bbffff6685d87f02 4
+0xdeadbeef 66b8ffff66bbffff6685d87f02 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JE
+0x1 66b8000066bb00806621d87402 4
+0xdeadbeef 66b8000066bb00806621d87402 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JNE
+0x1 66b8000066bb00806621d87502 4
+0xdeadbeef 66b8000066bb00806621d87502 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JB
+0x1 66b8000066bb00806621d87202 4
+0xdeadbeef 66b8000066bb00806621d87202 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JAE
+0x1 66b8000066bb00806621d87302 4
+0xdeadbeef 66b8000066bb00806621d87302 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JBE
+0x1 66b8000066bb00806621d87602 4
+0xdeadbeef 66b8000066bb00806621d87602 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JA
+0x1 66b8000066bb00806621d87702 4
+0xdeadbeef 66b8000066bb00806621d87702 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JS
+0x1 66b8000066bb00806621d87802 4
+0xdeadbeef 66b8000066bb00806621d87802 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JNS
+0x1 66b8000066bb00806621d87902 4
+0xdeadbeef 66b8000066bb00806621d87902 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JL
+0x1 66b8000066bb00806621d87c02 4
+0xdeadbeef 66b8000066bb00806621d87c02 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JGE
+0x1 66b8000066bb00806621d87d02 4
+0xdeadbeef 66b8000066bb00806621d87d02 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JLE
+0x1 66b8000066bb00806621d87e02 4
+0xdeadbeef 66b8000066bb00806621d87e02 4
+# asm: mov a=0x0 b=0x8000 ; AND16 ; JG
+0x1 66b8000066bb00806621d87f02 4
+0xdeadbeef 66b8000066bb00806621d87f02 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JE
+0x1 66b8008066bb00006621d87402 4
+0xdeadbeef 66b8008066bb00006621d87402 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JNE
+0x1 66b8008066bb00006621d87502 4
+0xdeadbeef 66b8008066bb00006621d87502 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JB
+0x1 66b8008066bb00006621d87202 4
+0xdeadbeef 66b8008066bb00006621d87202 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JAE
+0x1 66b8008066bb00006621d87302 4
+0xdeadbeef 66b8008066bb00006621d87302 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JBE
+0x1 66b8008066bb00006621d87602 4
+0xdeadbeef 66b8008066bb00006621d87602 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JA
+0x1 66b8008066bb00006621d87702 4
+0xdeadbeef 66b8008066bb00006621d87702 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JS
+0x1 66b8008066bb00006621d87802 4
+0xdeadbeef 66b8008066bb00006621d87802 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JNS
+0x1 66b8008066bb00006621d87902 4
+0xdeadbeef 66b8008066bb00006621d87902 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JL
+0x1 66b8008066bb00006621d87c02 4
+0xdeadbeef 66b8008066bb00006621d87c02 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JGE
+0x1 66b8008066bb00006621d87d02 4
+0xdeadbeef 66b8008066bb00006621d87d02 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JLE
+0x1 66b8008066bb00006621d87e02 4
+0xdeadbeef 66b8008066bb00006621d87e02 4
+# asm: mov a=0x8000 b=0x0 ; AND16 ; JG
+0x1 66b8008066bb00006621d87f02 4
+0xdeadbeef 66b8008066bb00006621d87f02 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JE
+0x1 66b8ff7f66bbffff6621d87402 4
+0xdeadbeef 66b8ff7f66bbffff6621d87402 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JNE
+0x1 66b8ff7f66bbffff6621d87502 4
+0xdeadbeef 66b8ff7f66bbffff6621d87502 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JB
+0x1 66b8ff7f66bbffff6621d87202 4
+0xdeadbeef 66b8ff7f66bbffff6621d87202 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JAE
+0x1 66b8ff7f66bbffff6621d87302 4
+0xdeadbeef 66b8ff7f66bbffff6621d87302 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JBE
+0x1 66b8ff7f66bbffff6621d87602 4
+0xdeadbeef 66b8ff7f66bbffff6621d87602 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JA
+0x1 66b8ff7f66bbffff6621d87702 4
+0xdeadbeef 66b8ff7f66bbffff6621d87702 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JS
+0x1 66b8ff7f66bbffff6621d87802 4
+0xdeadbeef 66b8ff7f66bbffff6621d87802 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JNS
+0x1 66b8ff7f66bbffff6621d87902 4
+0xdeadbeef 66b8ff7f66bbffff6621d87902 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JL
+0x1 66b8ff7f66bbffff6621d87c02 4
+0xdeadbeef 66b8ff7f66bbffff6621d87c02 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JGE
+0x1 66b8ff7f66bbffff6621d87d02 4
+0xdeadbeef 66b8ff7f66bbffff6621d87d02 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JLE
+0x1 66b8ff7f66bbffff6621d87e02 4
+0xdeadbeef 66b8ff7f66bbffff6621d87e02 4
+# asm: mov a=0x7fff b=0xffff ; AND16 ; JG
+0x1 66b8ff7f66bbffff6621d87f02 4
+0xdeadbeef 66b8ff7f66bbffff6621d87f02 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JE
+0x1 66b8ffff66bbff7f6621d87402 4
+0xdeadbeef 66b8ffff66bbff7f6621d87402 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JNE
+0x1 66b8ffff66bbff7f6621d87502 4
+0xdeadbeef 66b8ffff66bbff7f6621d87502 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JB
+0x1 66b8ffff66bbff7f6621d87202 4
+0xdeadbeef 66b8ffff66bbff7f6621d87202 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JAE
+0x1 66b8ffff66bbff7f6621d87302 4
+0xdeadbeef 66b8ffff66bbff7f6621d87302 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JBE
+0x1 66b8ffff66bbff7f6621d87602 4
+0xdeadbeef 66b8ffff66bbff7f6621d87602 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JA
+0x1 66b8ffff66bbff7f6621d87702 4
+0xdeadbeef 66b8ffff66bbff7f6621d87702 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JS
+0x1 66b8ffff66bbff7f6621d87802 4
+0xdeadbeef 66b8ffff66bbff7f6621d87802 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JNS
+0x1 66b8ffff66bbff7f6621d87902 4
+0xdeadbeef 66b8ffff66bbff7f6621d87902 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JL
+0x1 66b8ffff66bbff7f6621d87c02 4
+0xdeadbeef 66b8ffff66bbff7f6621d87c02 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JGE
+0x1 66b8ffff66bbff7f6621d87d02 4
+0xdeadbeef 66b8ffff66bbff7f6621d87d02 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JLE
+0x1 66b8ffff66bbff7f6621d87e02 4
+0xdeadbeef 66b8ffff66bbff7f6621d87e02 4
+# asm: mov a=0xffff b=0x7fff ; AND16 ; JG
+0x1 66b8ffff66bbff7f6621d87f02 4
+0xdeadbeef 66b8ffff66bbff7f6621d87f02 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JE
+0x1 66b8008066bbff7f6621d87402 4
+0xdeadbeef 66b8008066bbff7f6621d87402 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JNE
+0x1 66b8008066bbff7f6621d87502 4
+0xdeadbeef 66b8008066bbff7f6621d87502 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JB
+0x1 66b8008066bbff7f6621d87202 4
+0xdeadbeef 66b8008066bbff7f6621d87202 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JAE
+0x1 66b8008066bbff7f6621d87302 4
+0xdeadbeef 66b8008066bbff7f6621d87302 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JBE
+0x1 66b8008066bbff7f6621d87602 4
+0xdeadbeef 66b8008066bbff7f6621d87602 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JA
+0x1 66b8008066bbff7f6621d87702 4
+0xdeadbeef 66b8008066bbff7f6621d87702 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JS
+0x1 66b8008066bbff7f6621d87802 4
+0xdeadbeef 66b8008066bbff7f6621d87802 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JNS
+0x1 66b8008066bbff7f6621d87902 4
+0xdeadbeef 66b8008066bbff7f6621d87902 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JL
+0x1 66b8008066bbff7f6621d87c02 4
+0xdeadbeef 66b8008066bbff7f6621d87c02 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JGE
+0x1 66b8008066bbff7f6621d87d02 4
+0xdeadbeef 66b8008066bbff7f6621d87d02 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JLE
+0x1 66b8008066bbff7f6621d87e02 4
+0xdeadbeef 66b8008066bbff7f6621d87e02 4
+# asm: mov a=0x8000 b=0x7fff ; AND16 ; JG
+0x1 66b8008066bbff7f6621d87f02 4
+0xdeadbeef 66b8008066bbff7f6621d87f02 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JE
+0x1 66b8ff7f66bb00806621d87402 4
+0xdeadbeef 66b8ff7f66bb00806621d87402 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JNE
+0x1 66b8ff7f66bb00806621d87502 4
+0xdeadbeef 66b8ff7f66bb00806621d87502 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JB
+0x1 66b8ff7f66bb00806621d87202 4
+0xdeadbeef 66b8ff7f66bb00806621d87202 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JAE
+0x1 66b8ff7f66bb00806621d87302 4
+0xdeadbeef 66b8ff7f66bb00806621d87302 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JBE
+0x1 66b8ff7f66bb00806621d87602 4
+0xdeadbeef 66b8ff7f66bb00806621d87602 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JA
+0x1 66b8ff7f66bb00806621d87702 4
+0xdeadbeef 66b8ff7f66bb00806621d87702 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JS
+0x1 66b8ff7f66bb00806621d87802 4
+0xdeadbeef 66b8ff7f66bb00806621d87802 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JNS
+0x1 66b8ff7f66bb00806621d87902 4
+0xdeadbeef 66b8ff7f66bb00806621d87902 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JL
+0x1 66b8ff7f66bb00806621d87c02 4
+0xdeadbeef 66b8ff7f66bb00806621d87c02 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JGE
+0x1 66b8ff7f66bb00806621d87d02 4
+0xdeadbeef 66b8ff7f66bb00806621d87d02 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JLE
+0x1 66b8ff7f66bb00806621d87e02 4
+0xdeadbeef 66b8ff7f66bb00806621d87e02 4
+# asm: mov a=0x7fff b=0x8000 ; AND16 ; JG
+0x1 66b8ff7f66bb00806621d87f02 4
+0xdeadbeef 66b8ff7f66bb00806621d87f02 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JE
+0x1 66b8000066bb01006621d87402 4
+0xdeadbeef 66b8000066bb01006621d87402 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JNE
+0x1 66b8000066bb01006621d87502 4
+0xdeadbeef 66b8000066bb01006621d87502 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JB
+0x1 66b8000066bb01006621d87202 4
+0xdeadbeef 66b8000066bb01006621d87202 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JAE
+0x1 66b8000066bb01006621d87302 4
+0xdeadbeef 66b8000066bb01006621d87302 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JBE
+0x1 66b8000066bb01006621d87602 4
+0xdeadbeef 66b8000066bb01006621d87602 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JA
+0x1 66b8000066bb01006621d87702 4
+0xdeadbeef 66b8000066bb01006621d87702 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JS
+0x1 66b8000066bb01006621d87802 4
+0xdeadbeef 66b8000066bb01006621d87802 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JNS
+0x1 66b8000066bb01006621d87902 4
+0xdeadbeef 66b8000066bb01006621d87902 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JL
+0x1 66b8000066bb01006621d87c02 4
+0xdeadbeef 66b8000066bb01006621d87c02 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JGE
+0x1 66b8000066bb01006621d87d02 4
+0xdeadbeef 66b8000066bb01006621d87d02 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JLE
+0x1 66b8000066bb01006621d87e02 4
+0xdeadbeef 66b8000066bb01006621d87e02 4
+# asm: mov a=0x0 b=0x1 ; AND16 ; JG
+0x1 66b8000066bb01006621d87f02 4
+0xdeadbeef 66b8000066bb01006621d87f02 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JE
+0x1 66b8ffff66bbffff6621d87402 4
+0xdeadbeef 66b8ffff66bbffff6621d87402 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JNE
+0x1 66b8ffff66bbffff6621d87502 4
+0xdeadbeef 66b8ffff66bbffff6621d87502 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JB
+0x1 66b8ffff66bbffff6621d87202 4
+0xdeadbeef 66b8ffff66bbffff6621d87202 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JAE
+0x1 66b8ffff66bbffff6621d87302 4
+0xdeadbeef 66b8ffff66bbffff6621d87302 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JBE
+0x1 66b8ffff66bbffff6621d87602 4
+0xdeadbeef 66b8ffff66bbffff6621d87602 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JA
+0x1 66b8ffff66bbffff6621d87702 4
+0xdeadbeef 66b8ffff66bbffff6621d87702 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JS
+0x1 66b8ffff66bbffff6621d87802 4
+0xdeadbeef 66b8ffff66bbffff6621d87802 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JNS
+0x1 66b8ffff66bbffff6621d87902 4
+0xdeadbeef 66b8ffff66bbffff6621d87902 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JL
+0x1 66b8ffff66bbffff6621d87c02 4
+0xdeadbeef 66b8ffff66bbffff6621d87c02 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JGE
+0x1 66b8ffff66bbffff6621d87d02 4
+0xdeadbeef 66b8ffff66bbffff6621d87d02 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JLE
+0x1 66b8ffff66bbffff6621d87e02 4
+0xdeadbeef 66b8ffff66bbffff6621d87e02 4
+# asm: mov a=0xffff b=0xffff ; AND16 ; JG
+0x1 66b8ffff66bbffff6621d87f02 4
+0xdeadbeef 66b8ffff66bbffff6621d87f02 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JE
+0x1 b800000000bb0000008039d87402 4
+0xdeadbeef b800000000bb0000008039d87402 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JNE
+0x1 b800000000bb0000008039d87502 4
+0xdeadbeef b800000000bb0000008039d87502 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JB
+0x1 b800000000bb0000008039d87202 4
+0xdeadbeef b800000000bb0000008039d87202 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JAE
+0x1 b800000000bb0000008039d87302 4
+0xdeadbeef b800000000bb0000008039d87302 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JBE
+0x1 b800000000bb0000008039d87602 4
+0xdeadbeef b800000000bb0000008039d87602 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JA
+0x1 b800000000bb0000008039d87702 4
+0xdeadbeef b800000000bb0000008039d87702 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JS
+0x1 b800000000bb0000008039d87802 4
+0xdeadbeef b800000000bb0000008039d87802 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JNS
+0x1 b800000000bb0000008039d87902 4
+0xdeadbeef b800000000bb0000008039d87902 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JL
+0x1 b800000000bb0000008039d87c02 4
+0xdeadbeef b800000000bb0000008039d87c02 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JGE
+0x1 b800000000bb0000008039d87d02 4
+0xdeadbeef b800000000bb0000008039d87d02 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JLE
+0x1 b800000000bb0000008039d87e02 4
+0xdeadbeef b800000000bb0000008039d87e02 4
+# asm: mov a=0x0 b=0x80000000 ; CMP32 ; JG
+0x1 b800000000bb0000008039d87f02 4
+0xdeadbeef b800000000bb0000008039d87f02 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JE
+0x1 b800000080bb0000000039d87402 4
+0xdeadbeef b800000080bb0000000039d87402 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JNE
+0x1 b800000080bb0000000039d87502 4
+0xdeadbeef b800000080bb0000000039d87502 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JB
+0x1 b800000080bb0000000039d87202 4
+0xdeadbeef b800000080bb0000000039d87202 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JAE
+0x1 b800000080bb0000000039d87302 4
+0xdeadbeef b800000080bb0000000039d87302 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JBE
+0x1 b800000080bb0000000039d87602 4
+0xdeadbeef b800000080bb0000000039d87602 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JA
+0x1 b800000080bb0000000039d87702 4
+0xdeadbeef b800000080bb0000000039d87702 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JS
+0x1 b800000080bb0000000039d87802 4
+0xdeadbeef b800000080bb0000000039d87802 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JNS
+0x1 b800000080bb0000000039d87902 4
+0xdeadbeef b800000080bb0000000039d87902 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JL
+0x1 b800000080bb0000000039d87c02 4
+0xdeadbeef b800000080bb0000000039d87c02 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JGE
+0x1 b800000080bb0000000039d87d02 4
+0xdeadbeef b800000080bb0000000039d87d02 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JLE
+0x1 b800000080bb0000000039d87e02 4
+0xdeadbeef b800000080bb0000000039d87e02 4
+# asm: mov a=0x80000000 b=0x0 ; CMP32 ; JG
+0x1 b800000080bb0000000039d87f02 4
+0xdeadbeef b800000080bb0000000039d87f02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JE
+0x1 b8ffffff7fbbffffffff39d87402 4
+0xdeadbeef b8ffffff7fbbffffffff39d87402 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JNE
+0x1 b8ffffff7fbbffffffff39d87502 4
+0xdeadbeef b8ffffff7fbbffffffff39d87502 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JB
+0x1 b8ffffff7fbbffffffff39d87202 4
+0xdeadbeef b8ffffff7fbbffffffff39d87202 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JAE
+0x1 b8ffffff7fbbffffffff39d87302 4
+0xdeadbeef b8ffffff7fbbffffffff39d87302 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JBE
+0x1 b8ffffff7fbbffffffff39d87602 4
+0xdeadbeef b8ffffff7fbbffffffff39d87602 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JA
+0x1 b8ffffff7fbbffffffff39d87702 4
+0xdeadbeef b8ffffff7fbbffffffff39d87702 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JS
+0x1 b8ffffff7fbbffffffff39d87802 4
+0xdeadbeef b8ffffff7fbbffffffff39d87802 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JNS
+0x1 b8ffffff7fbbffffffff39d87902 4
+0xdeadbeef b8ffffff7fbbffffffff39d87902 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JL
+0x1 b8ffffff7fbbffffffff39d87c02 4
+0xdeadbeef b8ffffff7fbbffffffff39d87c02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JGE
+0x1 b8ffffff7fbbffffffff39d87d02 4
+0xdeadbeef b8ffffff7fbbffffffff39d87d02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JLE
+0x1 b8ffffff7fbbffffffff39d87e02 4
+0xdeadbeef b8ffffff7fbbffffffff39d87e02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP32 ; JG
+0x1 b8ffffff7fbbffffffff39d87f02 4
+0xdeadbeef b8ffffff7fbbffffffff39d87f02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JE
+0x1 b8ffffffffbbffffff7f39d87402 4
+0xdeadbeef b8ffffffffbbffffff7f39d87402 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JNE
+0x1 b8ffffffffbbffffff7f39d87502 4
+0xdeadbeef b8ffffffffbbffffff7f39d87502 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JB
+0x1 b8ffffffffbbffffff7f39d87202 4
+0xdeadbeef b8ffffffffbbffffff7f39d87202 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JAE
+0x1 b8ffffffffbbffffff7f39d87302 4
+0xdeadbeef b8ffffffffbbffffff7f39d87302 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JBE
+0x1 b8ffffffffbbffffff7f39d87602 4
+0xdeadbeef b8ffffffffbbffffff7f39d87602 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JA
+0x1 b8ffffffffbbffffff7f39d87702 4
+0xdeadbeef b8ffffffffbbffffff7f39d87702 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JS
+0x1 b8ffffffffbbffffff7f39d87802 4
+0xdeadbeef b8ffffffffbbffffff7f39d87802 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JNS
+0x1 b8ffffffffbbffffff7f39d87902 4
+0xdeadbeef b8ffffffffbbffffff7f39d87902 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JL
+0x1 b8ffffffffbbffffff7f39d87c02 4
+0xdeadbeef b8ffffffffbbffffff7f39d87c02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JGE
+0x1 b8ffffffffbbffffff7f39d87d02 4
+0xdeadbeef b8ffffffffbbffffff7f39d87d02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JLE
+0x1 b8ffffffffbbffffff7f39d87e02 4
+0xdeadbeef b8ffffffffbbffffff7f39d87e02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP32 ; JG
+0x1 b8ffffffffbbffffff7f39d87f02 4
+0xdeadbeef b8ffffffffbbffffff7f39d87f02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JE
+0x1 b800000080bbffffff7f39d87402 4
+0xdeadbeef b800000080bbffffff7f39d87402 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JNE
+0x1 b800000080bbffffff7f39d87502 4
+0xdeadbeef b800000080bbffffff7f39d87502 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JB
+0x1 b800000080bbffffff7f39d87202 4
+0xdeadbeef b800000080bbffffff7f39d87202 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JAE
+0x1 b800000080bbffffff7f39d87302 4
+0xdeadbeef b800000080bbffffff7f39d87302 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JBE
+0x1 b800000080bbffffff7f39d87602 4
+0xdeadbeef b800000080bbffffff7f39d87602 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JA
+0x1 b800000080bbffffff7f39d87702 4
+0xdeadbeef b800000080bbffffff7f39d87702 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JS
+0x1 b800000080bbffffff7f39d87802 4
+0xdeadbeef b800000080bbffffff7f39d87802 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JNS
+0x1 b800000080bbffffff7f39d87902 4
+0xdeadbeef b800000080bbffffff7f39d87902 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JL
+0x1 b800000080bbffffff7f39d87c02 4
+0xdeadbeef b800000080bbffffff7f39d87c02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JGE
+0x1 b800000080bbffffff7f39d87d02 4
+0xdeadbeef b800000080bbffffff7f39d87d02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JLE
+0x1 b800000080bbffffff7f39d87e02 4
+0xdeadbeef b800000080bbffffff7f39d87e02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; CMP32 ; JG
+0x1 b800000080bbffffff7f39d87f02 4
+0xdeadbeef b800000080bbffffff7f39d87f02 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JE
+0x1 b800000000bb0100000039d87402 4
+0xdeadbeef b800000000bb0100000039d87402 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JNE
+0x1 b800000000bb0100000039d87502 4
+0xdeadbeef b800000000bb0100000039d87502 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JB
+0x1 b800000000bb0100000039d87202 4
+0xdeadbeef b800000000bb0100000039d87202 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JAE
+0x1 b800000000bb0100000039d87302 4
+0xdeadbeef b800000000bb0100000039d87302 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JBE
+0x1 b800000000bb0100000039d87602 4
+0xdeadbeef b800000000bb0100000039d87602 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JA
+0x1 b800000000bb0100000039d87702 4
+0xdeadbeef b800000000bb0100000039d87702 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JS
+0x1 b800000000bb0100000039d87802 4
+0xdeadbeef b800000000bb0100000039d87802 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JNS
+0x1 b800000000bb0100000039d87902 4
+0xdeadbeef b800000000bb0100000039d87902 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JL
+0x1 b800000000bb0100000039d87c02 4
+0xdeadbeef b800000000bb0100000039d87c02 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JGE
+0x1 b800000000bb0100000039d87d02 4
+0xdeadbeef b800000000bb0100000039d87d02 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JLE
+0x1 b800000000bb0100000039d87e02 4
+0xdeadbeef b800000000bb0100000039d87e02 4
+# asm: mov a=0x0 b=0x1 ; CMP32 ; JG
+0x1 b800000000bb0100000039d87f02 4
+0xdeadbeef b800000000bb0100000039d87f02 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JE
+0x1 b8ffffffffbbffffffff39d87402 4
+0xdeadbeef b8ffffffffbbffffffff39d87402 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JNE
+0x1 b8ffffffffbbffffffff39d87502 4
+0xdeadbeef b8ffffffffbbffffffff39d87502 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JB
+0x1 b8ffffffffbbffffffff39d87202 4
+0xdeadbeef b8ffffffffbbffffffff39d87202 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JAE
+0x1 b8ffffffffbbffffffff39d87302 4
+0xdeadbeef b8ffffffffbbffffffff39d87302 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JBE
+0x1 b8ffffffffbbffffffff39d87602 4
+0xdeadbeef b8ffffffffbbffffffff39d87602 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JA
+0x1 b8ffffffffbbffffffff39d87702 4
+0xdeadbeef b8ffffffffbbffffffff39d87702 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JS
+0x1 b8ffffffffbbffffffff39d87802 4
+0xdeadbeef b8ffffffffbbffffffff39d87802 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JNS
+0x1 b8ffffffffbbffffffff39d87902 4
+0xdeadbeef b8ffffffffbbffffffff39d87902 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JL
+0x1 b8ffffffffbbffffffff39d87c02 4
+0xdeadbeef b8ffffffffbbffffffff39d87c02 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JGE
+0x1 b8ffffffffbbffffffff39d87d02 4
+0xdeadbeef b8ffffffffbbffffffff39d87d02 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JLE
+0x1 b8ffffffffbbffffffff39d87e02 4
+0xdeadbeef b8ffffffffbbffffffff39d87e02 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP32 ; JG
+0x1 b8ffffffffbbffffffff39d87f02 4
+0xdeadbeef b8ffffffffbbffffffff39d87f02 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JE
+0x1 b800000000bb0000000039d87402 4
+0xdeadbeef b800000000bb0000000039d87402 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JNE
+0x1 b800000000bb0000000039d87502 4
+0xdeadbeef b800000000bb0000000039d87502 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JB
+0x1 b800000000bb0000000039d87202 4
+0xdeadbeef b800000000bb0000000039d87202 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JAE
+0x1 b800000000bb0000000039d87302 4
+0xdeadbeef b800000000bb0000000039d87302 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JBE
+0x1 b800000000bb0000000039d87602 4
+0xdeadbeef b800000000bb0000000039d87602 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JA
+0x1 b800000000bb0000000039d87702 4
+0xdeadbeef b800000000bb0000000039d87702 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JS
+0x1 b800000000bb0000000039d87802 4
+0xdeadbeef b800000000bb0000000039d87802 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JNS
+0x1 b800000000bb0000000039d87902 4
+0xdeadbeef b800000000bb0000000039d87902 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JL
+0x1 b800000000bb0000000039d87c02 4
+0xdeadbeef b800000000bb0000000039d87c02 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JGE
+0x1 b800000000bb0000000039d87d02 4
+0xdeadbeef b800000000bb0000000039d87d02 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JLE
+0x1 b800000000bb0000000039d87e02 4
+0xdeadbeef b800000000bb0000000039d87e02 4
+# asm: mov a=0x0 b=0x0 ; CMP32 ; JG
+0x1 b800000000bb0000000039d87f02 4
+0xdeadbeef b800000000bb0000000039d87f02 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JE
+0x1 b800000000bb0000008029d87402 4
+0xdeadbeef b800000000bb0000008029d87402 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JNE
+0x1 b800000000bb0000008029d87502 4
+0xdeadbeef b800000000bb0000008029d87502 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JB
+0x1 b800000000bb0000008029d87202 4
+0xdeadbeef b800000000bb0000008029d87202 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JAE
+0x1 b800000000bb0000008029d87302 4
+0xdeadbeef b800000000bb0000008029d87302 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JBE
+0x1 b800000000bb0000008029d87602 4
+0xdeadbeef b800000000bb0000008029d87602 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JA
+0x1 b800000000bb0000008029d87702 4
+0xdeadbeef b800000000bb0000008029d87702 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JS
+0x1 b800000000bb0000008029d87802 4
+0xdeadbeef b800000000bb0000008029d87802 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JNS
+0x1 b800000000bb0000008029d87902 4
+0xdeadbeef b800000000bb0000008029d87902 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JL
+0x1 b800000000bb0000008029d87c02 4
+0xdeadbeef b800000000bb0000008029d87c02 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JGE
+0x1 b800000000bb0000008029d87d02 4
+0xdeadbeef b800000000bb0000008029d87d02 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JLE
+0x1 b800000000bb0000008029d87e02 4
+0xdeadbeef b800000000bb0000008029d87e02 4
+# asm: mov a=0x0 b=0x80000000 ; SUB32 ; JG
+0x1 b800000000bb0000008029d87f02 4
+0xdeadbeef b800000000bb0000008029d87f02 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JE
+0x1 b800000080bb0000000029d87402 4
+0xdeadbeef b800000080bb0000000029d87402 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JNE
+0x1 b800000080bb0000000029d87502 4
+0xdeadbeef b800000080bb0000000029d87502 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JB
+0x1 b800000080bb0000000029d87202 4
+0xdeadbeef b800000080bb0000000029d87202 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JAE
+0x1 b800000080bb0000000029d87302 4
+0xdeadbeef b800000080bb0000000029d87302 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JBE
+0x1 b800000080bb0000000029d87602 4
+0xdeadbeef b800000080bb0000000029d87602 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JA
+0x1 b800000080bb0000000029d87702 4
+0xdeadbeef b800000080bb0000000029d87702 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JS
+0x1 b800000080bb0000000029d87802 4
+0xdeadbeef b800000080bb0000000029d87802 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JNS
+0x1 b800000080bb0000000029d87902 4
+0xdeadbeef b800000080bb0000000029d87902 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JL
+0x1 b800000080bb0000000029d87c02 4
+0xdeadbeef b800000080bb0000000029d87c02 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JGE
+0x1 b800000080bb0000000029d87d02 4
+0xdeadbeef b800000080bb0000000029d87d02 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JLE
+0x1 b800000080bb0000000029d87e02 4
+0xdeadbeef b800000080bb0000000029d87e02 4
+# asm: mov a=0x80000000 b=0x0 ; SUB32 ; JG
+0x1 b800000080bb0000000029d87f02 4
+0xdeadbeef b800000080bb0000000029d87f02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JE
+0x1 b8ffffff7fbbffffffff29d87402 4
+0xdeadbeef b8ffffff7fbbffffffff29d87402 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JNE
+0x1 b8ffffff7fbbffffffff29d87502 4
+0xdeadbeef b8ffffff7fbbffffffff29d87502 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JB
+0x1 b8ffffff7fbbffffffff29d87202 4
+0xdeadbeef b8ffffff7fbbffffffff29d87202 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JAE
+0x1 b8ffffff7fbbffffffff29d87302 4
+0xdeadbeef b8ffffff7fbbffffffff29d87302 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JBE
+0x1 b8ffffff7fbbffffffff29d87602 4
+0xdeadbeef b8ffffff7fbbffffffff29d87602 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JA
+0x1 b8ffffff7fbbffffffff29d87702 4
+0xdeadbeef b8ffffff7fbbffffffff29d87702 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JS
+0x1 b8ffffff7fbbffffffff29d87802 4
+0xdeadbeef b8ffffff7fbbffffffff29d87802 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JNS
+0x1 b8ffffff7fbbffffffff29d87902 4
+0xdeadbeef b8ffffff7fbbffffffff29d87902 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JL
+0x1 b8ffffff7fbbffffffff29d87c02 4
+0xdeadbeef b8ffffff7fbbffffffff29d87c02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JGE
+0x1 b8ffffff7fbbffffffff29d87d02 4
+0xdeadbeef b8ffffff7fbbffffffff29d87d02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JLE
+0x1 b8ffffff7fbbffffffff29d87e02 4
+0xdeadbeef b8ffffff7fbbffffffff29d87e02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB32 ; JG
+0x1 b8ffffff7fbbffffffff29d87f02 4
+0xdeadbeef b8ffffff7fbbffffffff29d87f02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JE
+0x1 b8ffffffffbbffffff7f29d87402 4
+0xdeadbeef b8ffffffffbbffffff7f29d87402 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JNE
+0x1 b8ffffffffbbffffff7f29d87502 4
+0xdeadbeef b8ffffffffbbffffff7f29d87502 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JB
+0x1 b8ffffffffbbffffff7f29d87202 4
+0xdeadbeef b8ffffffffbbffffff7f29d87202 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JAE
+0x1 b8ffffffffbbffffff7f29d87302 4
+0xdeadbeef b8ffffffffbbffffff7f29d87302 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JBE
+0x1 b8ffffffffbbffffff7f29d87602 4
+0xdeadbeef b8ffffffffbbffffff7f29d87602 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JA
+0x1 b8ffffffffbbffffff7f29d87702 4
+0xdeadbeef b8ffffffffbbffffff7f29d87702 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JS
+0x1 b8ffffffffbbffffff7f29d87802 4
+0xdeadbeef b8ffffffffbbffffff7f29d87802 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JNS
+0x1 b8ffffffffbbffffff7f29d87902 4
+0xdeadbeef b8ffffffffbbffffff7f29d87902 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JL
+0x1 b8ffffffffbbffffff7f29d87c02 4
+0xdeadbeef b8ffffffffbbffffff7f29d87c02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JGE
+0x1 b8ffffffffbbffffff7f29d87d02 4
+0xdeadbeef b8ffffffffbbffffff7f29d87d02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JLE
+0x1 b8ffffffffbbffffff7f29d87e02 4
+0xdeadbeef b8ffffffffbbffffff7f29d87e02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB32 ; JG
+0x1 b8ffffffffbbffffff7f29d87f02 4
+0xdeadbeef b8ffffffffbbffffff7f29d87f02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JE
+0x1 b800000080bbffffff7f29d87402 4
+0xdeadbeef b800000080bbffffff7f29d87402 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JNE
+0x1 b800000080bbffffff7f29d87502 4
+0xdeadbeef b800000080bbffffff7f29d87502 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JB
+0x1 b800000080bbffffff7f29d87202 4
+0xdeadbeef b800000080bbffffff7f29d87202 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JAE
+0x1 b800000080bbffffff7f29d87302 4
+0xdeadbeef b800000080bbffffff7f29d87302 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JBE
+0x1 b800000080bbffffff7f29d87602 4
+0xdeadbeef b800000080bbffffff7f29d87602 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JA
+0x1 b800000080bbffffff7f29d87702 4
+0xdeadbeef b800000080bbffffff7f29d87702 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JS
+0x1 b800000080bbffffff7f29d87802 4
+0xdeadbeef b800000080bbffffff7f29d87802 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JNS
+0x1 b800000080bbffffff7f29d87902 4
+0xdeadbeef b800000080bbffffff7f29d87902 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JL
+0x1 b800000080bbffffff7f29d87c02 4
+0xdeadbeef b800000080bbffffff7f29d87c02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JGE
+0x1 b800000080bbffffff7f29d87d02 4
+0xdeadbeef b800000080bbffffff7f29d87d02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JLE
+0x1 b800000080bbffffff7f29d87e02 4
+0xdeadbeef b800000080bbffffff7f29d87e02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; SUB32 ; JG
+0x1 b800000080bbffffff7f29d87f02 4
+0xdeadbeef b800000080bbffffff7f29d87f02 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JE
+0x1 b800000000bb0100000029d87402 4
+0xdeadbeef b800000000bb0100000029d87402 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JNE
+0x1 b800000000bb0100000029d87502 4
+0xdeadbeef b800000000bb0100000029d87502 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JB
+0x1 b800000000bb0100000029d87202 4
+0xdeadbeef b800000000bb0100000029d87202 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JAE
+0x1 b800000000bb0100000029d87302 4
+0xdeadbeef b800000000bb0100000029d87302 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JBE
+0x1 b800000000bb0100000029d87602 4
+0xdeadbeef b800000000bb0100000029d87602 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JA
+0x1 b800000000bb0100000029d87702 4
+0xdeadbeef b800000000bb0100000029d87702 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JS
+0x1 b800000000bb0100000029d87802 4
+0xdeadbeef b800000000bb0100000029d87802 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JNS
+0x1 b800000000bb0100000029d87902 4
+0xdeadbeef b800000000bb0100000029d87902 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JL
+0x1 b800000000bb0100000029d87c02 4
+0xdeadbeef b800000000bb0100000029d87c02 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JGE
+0x1 b800000000bb0100000029d87d02 4
+0xdeadbeef b800000000bb0100000029d87d02 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JLE
+0x1 b800000000bb0100000029d87e02 4
+0xdeadbeef b800000000bb0100000029d87e02 4
+# asm: mov a=0x0 b=0x1 ; SUB32 ; JG
+0x1 b800000000bb0100000029d87f02 4
+0xdeadbeef b800000000bb0100000029d87f02 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JE
+0x1 b8ffffffffbbffffffff29d87402 4
+0xdeadbeef b8ffffffffbbffffffff29d87402 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JNE
+0x1 b8ffffffffbbffffffff29d87502 4
+0xdeadbeef b8ffffffffbbffffffff29d87502 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JB
+0x1 b8ffffffffbbffffffff29d87202 4
+0xdeadbeef b8ffffffffbbffffffff29d87202 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JAE
+0x1 b8ffffffffbbffffffff29d87302 4
+0xdeadbeef b8ffffffffbbffffffff29d87302 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JBE
+0x1 b8ffffffffbbffffffff29d87602 4
+0xdeadbeef b8ffffffffbbffffffff29d87602 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JA
+0x1 b8ffffffffbbffffffff29d87702 4
+0xdeadbeef b8ffffffffbbffffffff29d87702 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JS
+0x1 b8ffffffffbbffffffff29d87802 4
+0xdeadbeef b8ffffffffbbffffffff29d87802 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JNS
+0x1 b8ffffffffbbffffffff29d87902 4
+0xdeadbeef b8ffffffffbbffffffff29d87902 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JL
+0x1 b8ffffffffbbffffffff29d87c02 4
+0xdeadbeef b8ffffffffbbffffffff29d87c02 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JGE
+0x1 b8ffffffffbbffffffff29d87d02 4
+0xdeadbeef b8ffffffffbbffffffff29d87d02 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JLE
+0x1 b8ffffffffbbffffffff29d87e02 4
+0xdeadbeef b8ffffffffbbffffffff29d87e02 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB32 ; JG
+0x1 b8ffffffffbbffffffff29d87f02 4
+0xdeadbeef b8ffffffffbbffffffff29d87f02 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JE
+0x1 b800000000bb0000000029d87402 4
+0xdeadbeef b800000000bb0000000029d87402 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JNE
+0x1 b800000000bb0000000029d87502 4
+0xdeadbeef b800000000bb0000000029d87502 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JB
+0x1 b800000000bb0000000029d87202 4
+0xdeadbeef b800000000bb0000000029d87202 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JAE
+0x1 b800000000bb0000000029d87302 4
+0xdeadbeef b800000000bb0000000029d87302 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JBE
+0x1 b800000000bb0000000029d87602 4
+0xdeadbeef b800000000bb0000000029d87602 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JA
+0x1 b800000000bb0000000029d87702 4
+0xdeadbeef b800000000bb0000000029d87702 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JS
+0x1 b800000000bb0000000029d87802 4
+0xdeadbeef b800000000bb0000000029d87802 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JNS
+0x1 b800000000bb0000000029d87902 4
+0xdeadbeef b800000000bb0000000029d87902 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JL
+0x1 b800000000bb0000000029d87c02 4
+0xdeadbeef b800000000bb0000000029d87c02 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JGE
+0x1 b800000000bb0000000029d87d02 4
+0xdeadbeef b800000000bb0000000029d87d02 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JLE
+0x1 b800000000bb0000000029d87e02 4
+0xdeadbeef b800000000bb0000000029d87e02 4
+# asm: mov a=0x0 b=0x0 ; SUB32 ; JG
+0x1 b800000000bb0000000029d87f02 4
+0xdeadbeef b800000000bb0000000029d87f02 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JE
+0x1 b800000000bb0000008085d87402 4
+0xdeadbeef b800000000bb0000008085d87402 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JNE
+0x1 b800000000bb0000008085d87502 4
+0xdeadbeef b800000000bb0000008085d87502 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JB
+0x1 b800000000bb0000008085d87202 4
+0xdeadbeef b800000000bb0000008085d87202 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JAE
+0x1 b800000000bb0000008085d87302 4
+0xdeadbeef b800000000bb0000008085d87302 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JBE
+0x1 b800000000bb0000008085d87602 4
+0xdeadbeef b800000000bb0000008085d87602 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JA
+0x1 b800000000bb0000008085d87702 4
+0xdeadbeef b800000000bb0000008085d87702 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JS
+0x1 b800000000bb0000008085d87802 4
+0xdeadbeef b800000000bb0000008085d87802 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JNS
+0x1 b800000000bb0000008085d87902 4
+0xdeadbeef b800000000bb0000008085d87902 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JL
+0x1 b800000000bb0000008085d87c02 4
+0xdeadbeef b800000000bb0000008085d87c02 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JGE
+0x1 b800000000bb0000008085d87d02 4
+0xdeadbeef b800000000bb0000008085d87d02 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JLE
+0x1 b800000000bb0000008085d87e02 4
+0xdeadbeef b800000000bb0000008085d87e02 4
+# asm: mov a=0x0 b=0x80000000 ; TEST32 ; JG
+0x1 b800000000bb0000008085d87f02 4
+0xdeadbeef b800000000bb0000008085d87f02 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JE
+0x1 b800000080bb0000000085d87402 4
+0xdeadbeef b800000080bb0000000085d87402 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JNE
+0x1 b800000080bb0000000085d87502 4
+0xdeadbeef b800000080bb0000000085d87502 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JB
+0x1 b800000080bb0000000085d87202 4
+0xdeadbeef b800000080bb0000000085d87202 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JAE
+0x1 b800000080bb0000000085d87302 4
+0xdeadbeef b800000080bb0000000085d87302 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JBE
+0x1 b800000080bb0000000085d87602 4
+0xdeadbeef b800000080bb0000000085d87602 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JA
+0x1 b800000080bb0000000085d87702 4
+0xdeadbeef b800000080bb0000000085d87702 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JS
+0x1 b800000080bb0000000085d87802 4
+0xdeadbeef b800000080bb0000000085d87802 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JNS
+0x1 b800000080bb0000000085d87902 4
+0xdeadbeef b800000080bb0000000085d87902 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JL
+0x1 b800000080bb0000000085d87c02 4
+0xdeadbeef b800000080bb0000000085d87c02 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JGE
+0x1 b800000080bb0000000085d87d02 4
+0xdeadbeef b800000080bb0000000085d87d02 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JLE
+0x1 b800000080bb0000000085d87e02 4
+0xdeadbeef b800000080bb0000000085d87e02 4
+# asm: mov a=0x80000000 b=0x0 ; TEST32 ; JG
+0x1 b800000080bb0000000085d87f02 4
+0xdeadbeef b800000080bb0000000085d87f02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JE
+0x1 b8ffffff7fbbffffffff85d87402 4
+0xdeadbeef b8ffffff7fbbffffffff85d87402 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JNE
+0x1 b8ffffff7fbbffffffff85d87502 4
+0xdeadbeef b8ffffff7fbbffffffff85d87502 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JB
+0x1 b8ffffff7fbbffffffff85d87202 4
+0xdeadbeef b8ffffff7fbbffffffff85d87202 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JAE
+0x1 b8ffffff7fbbffffffff85d87302 4
+0xdeadbeef b8ffffff7fbbffffffff85d87302 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JBE
+0x1 b8ffffff7fbbffffffff85d87602 4
+0xdeadbeef b8ffffff7fbbffffffff85d87602 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JA
+0x1 b8ffffff7fbbffffffff85d87702 4
+0xdeadbeef b8ffffff7fbbffffffff85d87702 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JS
+0x1 b8ffffff7fbbffffffff85d87802 4
+0xdeadbeef b8ffffff7fbbffffffff85d87802 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JNS
+0x1 b8ffffff7fbbffffffff85d87902 4
+0xdeadbeef b8ffffff7fbbffffffff85d87902 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JL
+0x1 b8ffffff7fbbffffffff85d87c02 4
+0xdeadbeef b8ffffff7fbbffffffff85d87c02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JGE
+0x1 b8ffffff7fbbffffffff85d87d02 4
+0xdeadbeef b8ffffff7fbbffffffff85d87d02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JLE
+0x1 b8ffffff7fbbffffffff85d87e02 4
+0xdeadbeef b8ffffff7fbbffffffff85d87e02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST32 ; JG
+0x1 b8ffffff7fbbffffffff85d87f02 4
+0xdeadbeef b8ffffff7fbbffffffff85d87f02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JE
+0x1 b8ffffffffbbffffff7f85d87402 4
+0xdeadbeef b8ffffffffbbffffff7f85d87402 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JNE
+0x1 b8ffffffffbbffffff7f85d87502 4
+0xdeadbeef b8ffffffffbbffffff7f85d87502 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JB
+0x1 b8ffffffffbbffffff7f85d87202 4
+0xdeadbeef b8ffffffffbbffffff7f85d87202 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JAE
+0x1 b8ffffffffbbffffff7f85d87302 4
+0xdeadbeef b8ffffffffbbffffff7f85d87302 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JBE
+0x1 b8ffffffffbbffffff7f85d87602 4
+0xdeadbeef b8ffffffffbbffffff7f85d87602 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JA
+0x1 b8ffffffffbbffffff7f85d87702 4
+0xdeadbeef b8ffffffffbbffffff7f85d87702 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JS
+0x1 b8ffffffffbbffffff7f85d87802 4
+0xdeadbeef b8ffffffffbbffffff7f85d87802 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JNS
+0x1 b8ffffffffbbffffff7f85d87902 4
+0xdeadbeef b8ffffffffbbffffff7f85d87902 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JL
+0x1 b8ffffffffbbffffff7f85d87c02 4
+0xdeadbeef b8ffffffffbbffffff7f85d87c02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JGE
+0x1 b8ffffffffbbffffff7f85d87d02 4
+0xdeadbeef b8ffffffffbbffffff7f85d87d02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JLE
+0x1 b8ffffffffbbffffff7f85d87e02 4
+0xdeadbeef b8ffffffffbbffffff7f85d87e02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST32 ; JG
+0x1 b8ffffffffbbffffff7f85d87f02 4
+0xdeadbeef b8ffffffffbbffffff7f85d87f02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JE
+0x1 b800000080bbffffff7f85d87402 4
+0xdeadbeef b800000080bbffffff7f85d87402 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JNE
+0x1 b800000080bbffffff7f85d87502 4
+0xdeadbeef b800000080bbffffff7f85d87502 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JB
+0x1 b800000080bbffffff7f85d87202 4
+0xdeadbeef b800000080bbffffff7f85d87202 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JAE
+0x1 b800000080bbffffff7f85d87302 4
+0xdeadbeef b800000080bbffffff7f85d87302 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JBE
+0x1 b800000080bbffffff7f85d87602 4
+0xdeadbeef b800000080bbffffff7f85d87602 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JA
+0x1 b800000080bbffffff7f85d87702 4
+0xdeadbeef b800000080bbffffff7f85d87702 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JS
+0x1 b800000080bbffffff7f85d87802 4
+0xdeadbeef b800000080bbffffff7f85d87802 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JNS
+0x1 b800000080bbffffff7f85d87902 4
+0xdeadbeef b800000080bbffffff7f85d87902 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JL
+0x1 b800000080bbffffff7f85d87c02 4
+0xdeadbeef b800000080bbffffff7f85d87c02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JGE
+0x1 b800000080bbffffff7f85d87d02 4
+0xdeadbeef b800000080bbffffff7f85d87d02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JLE
+0x1 b800000080bbffffff7f85d87e02 4
+0xdeadbeef b800000080bbffffff7f85d87e02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; TEST32 ; JG
+0x1 b800000080bbffffff7f85d87f02 4
+0xdeadbeef b800000080bbffffff7f85d87f02 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JE
+0x1 b800000000bb0100000085d87402 4
+0xdeadbeef b800000000bb0100000085d87402 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JNE
+0x1 b800000000bb0100000085d87502 4
+0xdeadbeef b800000000bb0100000085d87502 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JB
+0x1 b800000000bb0100000085d87202 4
+0xdeadbeef b800000000bb0100000085d87202 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JAE
+0x1 b800000000bb0100000085d87302 4
+0xdeadbeef b800000000bb0100000085d87302 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JBE
+0x1 b800000000bb0100000085d87602 4
+0xdeadbeef b800000000bb0100000085d87602 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JA
+0x1 b800000000bb0100000085d87702 4
+0xdeadbeef b800000000bb0100000085d87702 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JS
+0x1 b800000000bb0100000085d87802 4
+0xdeadbeef b800000000bb0100000085d87802 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JNS
+0x1 b800000000bb0100000085d87902 4
+0xdeadbeef b800000000bb0100000085d87902 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JL
+0x1 b800000000bb0100000085d87c02 4
+0xdeadbeef b800000000bb0100000085d87c02 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JGE
+0x1 b800000000bb0100000085d87d02 4
+0xdeadbeef b800000000bb0100000085d87d02 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JLE
+0x1 b800000000bb0100000085d87e02 4
+0xdeadbeef b800000000bb0100000085d87e02 4
+# asm: mov a=0x0 b=0x1 ; TEST32 ; JG
+0x1 b800000000bb0100000085d87f02 4
+0xdeadbeef b800000000bb0100000085d87f02 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JE
+0x1 b8ffffffffbbffffffff85d87402 4
+0xdeadbeef b8ffffffffbbffffffff85d87402 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JNE
+0x1 b8ffffffffbbffffffff85d87502 4
+0xdeadbeef b8ffffffffbbffffffff85d87502 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JB
+0x1 b8ffffffffbbffffffff85d87202 4
+0xdeadbeef b8ffffffffbbffffffff85d87202 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JAE
+0x1 b8ffffffffbbffffffff85d87302 4
+0xdeadbeef b8ffffffffbbffffffff85d87302 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JBE
+0x1 b8ffffffffbbffffffff85d87602 4
+0xdeadbeef b8ffffffffbbffffffff85d87602 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JA
+0x1 b8ffffffffbbffffffff85d87702 4
+0xdeadbeef b8ffffffffbbffffffff85d87702 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JS
+0x1 b8ffffffffbbffffffff85d87802 4
+0xdeadbeef b8ffffffffbbffffffff85d87802 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JNS
+0x1 b8ffffffffbbffffffff85d87902 4
+0xdeadbeef b8ffffffffbbffffffff85d87902 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JL
+0x1 b8ffffffffbbffffffff85d87c02 4
+0xdeadbeef b8ffffffffbbffffffff85d87c02 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JGE
+0x1 b8ffffffffbbffffffff85d87d02 4
+0xdeadbeef b8ffffffffbbffffffff85d87d02 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JLE
+0x1 b8ffffffffbbffffffff85d87e02 4
+0xdeadbeef b8ffffffffbbffffffff85d87e02 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST32 ; JG
+0x1 b8ffffffffbbffffffff85d87f02 4
+0xdeadbeef b8ffffffffbbffffffff85d87f02 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JE
+0x1 b800000000bb0000000085d87402 4
+0xdeadbeef b800000000bb0000000085d87402 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JNE
+0x1 b800000000bb0000000085d87502 4
+0xdeadbeef b800000000bb0000000085d87502 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JB
+0x1 b800000000bb0000000085d87202 4
+0xdeadbeef b800000000bb0000000085d87202 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JAE
+0x1 b800000000bb0000000085d87302 4
+0xdeadbeef b800000000bb0000000085d87302 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JBE
+0x1 b800000000bb0000000085d87602 4
+0xdeadbeef b800000000bb0000000085d87602 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JA
+0x1 b800000000bb0000000085d87702 4
+0xdeadbeef b800000000bb0000000085d87702 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JS
+0x1 b800000000bb0000000085d87802 4
+0xdeadbeef b800000000bb0000000085d87802 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JNS
+0x1 b800000000bb0000000085d87902 4
+0xdeadbeef b800000000bb0000000085d87902 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JL
+0x1 b800000000bb0000000085d87c02 4
+0xdeadbeef b800000000bb0000000085d87c02 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JGE
+0x1 b800000000bb0000000085d87d02 4
+0xdeadbeef b800000000bb0000000085d87d02 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JLE
+0x1 b800000000bb0000000085d87e02 4
+0xdeadbeef b800000000bb0000000085d87e02 4
+# asm: mov a=0x0 b=0x0 ; TEST32 ; JG
+0x1 b800000000bb0000000085d87f02 4
+0xdeadbeef b800000000bb0000000085d87f02 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JE
+0x1 b800000000bb0000008021d87402 4
+0xdeadbeef b800000000bb0000008021d87402 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JNE
+0x1 b800000000bb0000008021d87502 4
+0xdeadbeef b800000000bb0000008021d87502 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JB
+0x1 b800000000bb0000008021d87202 4
+0xdeadbeef b800000000bb0000008021d87202 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JAE
+0x1 b800000000bb0000008021d87302 4
+0xdeadbeef b800000000bb0000008021d87302 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JBE
+0x1 b800000000bb0000008021d87602 4
+0xdeadbeef b800000000bb0000008021d87602 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JA
+0x1 b800000000bb0000008021d87702 4
+0xdeadbeef b800000000bb0000008021d87702 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JS
+0x1 b800000000bb0000008021d87802 4
+0xdeadbeef b800000000bb0000008021d87802 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JNS
+0x1 b800000000bb0000008021d87902 4
+0xdeadbeef b800000000bb0000008021d87902 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JL
+0x1 b800000000bb0000008021d87c02 4
+0xdeadbeef b800000000bb0000008021d87c02 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JGE
+0x1 b800000000bb0000008021d87d02 4
+0xdeadbeef b800000000bb0000008021d87d02 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JLE
+0x1 b800000000bb0000008021d87e02 4
+0xdeadbeef b800000000bb0000008021d87e02 4
+# asm: mov a=0x0 b=0x80000000 ; AND32 ; JG
+0x1 b800000000bb0000008021d87f02 4
+0xdeadbeef b800000000bb0000008021d87f02 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JE
+0x1 b800000080bb0000000021d87402 4
+0xdeadbeef b800000080bb0000000021d87402 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JNE
+0x1 b800000080bb0000000021d87502 4
+0xdeadbeef b800000080bb0000000021d87502 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JB
+0x1 b800000080bb0000000021d87202 4
+0xdeadbeef b800000080bb0000000021d87202 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JAE
+0x1 b800000080bb0000000021d87302 4
+0xdeadbeef b800000080bb0000000021d87302 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JBE
+0x1 b800000080bb0000000021d87602 4
+0xdeadbeef b800000080bb0000000021d87602 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JA
+0x1 b800000080bb0000000021d87702 4
+0xdeadbeef b800000080bb0000000021d87702 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JS
+0x1 b800000080bb0000000021d87802 4
+0xdeadbeef b800000080bb0000000021d87802 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JNS
+0x1 b800000080bb0000000021d87902 4
+0xdeadbeef b800000080bb0000000021d87902 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JL
+0x1 b800000080bb0000000021d87c02 4
+0xdeadbeef b800000080bb0000000021d87c02 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JGE
+0x1 b800000080bb0000000021d87d02 4
+0xdeadbeef b800000080bb0000000021d87d02 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JLE
+0x1 b800000080bb0000000021d87e02 4
+0xdeadbeef b800000080bb0000000021d87e02 4
+# asm: mov a=0x80000000 b=0x0 ; AND32 ; JG
+0x1 b800000080bb0000000021d87f02 4
+0xdeadbeef b800000080bb0000000021d87f02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JE
+0x1 b8ffffff7fbbffffffff21d87402 4
+0xdeadbeef b8ffffff7fbbffffffff21d87402 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JNE
+0x1 b8ffffff7fbbffffffff21d87502 4
+0xdeadbeef b8ffffff7fbbffffffff21d87502 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JB
+0x1 b8ffffff7fbbffffffff21d87202 4
+0xdeadbeef b8ffffff7fbbffffffff21d87202 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JAE
+0x1 b8ffffff7fbbffffffff21d87302 4
+0xdeadbeef b8ffffff7fbbffffffff21d87302 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JBE
+0x1 b8ffffff7fbbffffffff21d87602 4
+0xdeadbeef b8ffffff7fbbffffffff21d87602 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JA
+0x1 b8ffffff7fbbffffffff21d87702 4
+0xdeadbeef b8ffffff7fbbffffffff21d87702 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JS
+0x1 b8ffffff7fbbffffffff21d87802 4
+0xdeadbeef b8ffffff7fbbffffffff21d87802 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JNS
+0x1 b8ffffff7fbbffffffff21d87902 4
+0xdeadbeef b8ffffff7fbbffffffff21d87902 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JL
+0x1 b8ffffff7fbbffffffff21d87c02 4
+0xdeadbeef b8ffffff7fbbffffffff21d87c02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JGE
+0x1 b8ffffff7fbbffffffff21d87d02 4
+0xdeadbeef b8ffffff7fbbffffffff21d87d02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JLE
+0x1 b8ffffff7fbbffffffff21d87e02 4
+0xdeadbeef b8ffffff7fbbffffffff21d87e02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND32 ; JG
+0x1 b8ffffff7fbbffffffff21d87f02 4
+0xdeadbeef b8ffffff7fbbffffffff21d87f02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JE
+0x1 b8ffffffffbbffffff7f21d87402 4
+0xdeadbeef b8ffffffffbbffffff7f21d87402 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JNE
+0x1 b8ffffffffbbffffff7f21d87502 4
+0xdeadbeef b8ffffffffbbffffff7f21d87502 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JB
+0x1 b8ffffffffbbffffff7f21d87202 4
+0xdeadbeef b8ffffffffbbffffff7f21d87202 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JAE
+0x1 b8ffffffffbbffffff7f21d87302 4
+0xdeadbeef b8ffffffffbbffffff7f21d87302 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JBE
+0x1 b8ffffffffbbffffff7f21d87602 4
+0xdeadbeef b8ffffffffbbffffff7f21d87602 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JA
+0x1 b8ffffffffbbffffff7f21d87702 4
+0xdeadbeef b8ffffffffbbffffff7f21d87702 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JS
+0x1 b8ffffffffbbffffff7f21d87802 4
+0xdeadbeef b8ffffffffbbffffff7f21d87802 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JNS
+0x1 b8ffffffffbbffffff7f21d87902 4
+0xdeadbeef b8ffffffffbbffffff7f21d87902 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JL
+0x1 b8ffffffffbbffffff7f21d87c02 4
+0xdeadbeef b8ffffffffbbffffff7f21d87c02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JGE
+0x1 b8ffffffffbbffffff7f21d87d02 4
+0xdeadbeef b8ffffffffbbffffff7f21d87d02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JLE
+0x1 b8ffffffffbbffffff7f21d87e02 4
+0xdeadbeef b8ffffffffbbffffff7f21d87e02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND32 ; JG
+0x1 b8ffffffffbbffffff7f21d87f02 4
+0xdeadbeef b8ffffffffbbffffff7f21d87f02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JE
+0x1 b800000080bbffffff7f21d87402 4
+0xdeadbeef b800000080bbffffff7f21d87402 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JNE
+0x1 b800000080bbffffff7f21d87502 4
+0xdeadbeef b800000080bbffffff7f21d87502 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JB
+0x1 b800000080bbffffff7f21d87202 4
+0xdeadbeef b800000080bbffffff7f21d87202 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JAE
+0x1 b800000080bbffffff7f21d87302 4
+0xdeadbeef b800000080bbffffff7f21d87302 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JBE
+0x1 b800000080bbffffff7f21d87602 4
+0xdeadbeef b800000080bbffffff7f21d87602 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JA
+0x1 b800000080bbffffff7f21d87702 4
+0xdeadbeef b800000080bbffffff7f21d87702 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JS
+0x1 b800000080bbffffff7f21d87802 4
+0xdeadbeef b800000080bbffffff7f21d87802 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JNS
+0x1 b800000080bbffffff7f21d87902 4
+0xdeadbeef b800000080bbffffff7f21d87902 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JL
+0x1 b800000080bbffffff7f21d87c02 4
+0xdeadbeef b800000080bbffffff7f21d87c02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JGE
+0x1 b800000080bbffffff7f21d87d02 4
+0xdeadbeef b800000080bbffffff7f21d87d02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JLE
+0x1 b800000080bbffffff7f21d87e02 4
+0xdeadbeef b800000080bbffffff7f21d87e02 4
+# asm: mov a=0x80000000 b=0x7fffffff ; AND32 ; JG
+0x1 b800000080bbffffff7f21d87f02 4
+0xdeadbeef b800000080bbffffff7f21d87f02 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JE
+0x1 b800000000bb0100000021d87402 4
+0xdeadbeef b800000000bb0100000021d87402 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JNE
+0x1 b800000000bb0100000021d87502 4
+0xdeadbeef b800000000bb0100000021d87502 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JB
+0x1 b800000000bb0100000021d87202 4
+0xdeadbeef b800000000bb0100000021d87202 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JAE
+0x1 b800000000bb0100000021d87302 4
+0xdeadbeef b800000000bb0100000021d87302 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JBE
+0x1 b800000000bb0100000021d87602 4
+0xdeadbeef b800000000bb0100000021d87602 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JA
+0x1 b800000000bb0100000021d87702 4
+0xdeadbeef b800000000bb0100000021d87702 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JS
+0x1 b800000000bb0100000021d87802 4
+0xdeadbeef b800000000bb0100000021d87802 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JNS
+0x1 b800000000bb0100000021d87902 4
+0xdeadbeef b800000000bb0100000021d87902 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JL
+0x1 b800000000bb0100000021d87c02 4
+0xdeadbeef b800000000bb0100000021d87c02 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JGE
+0x1 b800000000bb0100000021d87d02 4
+0xdeadbeef b800000000bb0100000021d87d02 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JLE
+0x1 b800000000bb0100000021d87e02 4
+0xdeadbeef b800000000bb0100000021d87e02 4
+# asm: mov a=0x0 b=0x1 ; AND32 ; JG
+0x1 b800000000bb0100000021d87f02 4
+0xdeadbeef b800000000bb0100000021d87f02 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JE
+0x1 b8ffffffffbbffffffff21d87402 4
+0xdeadbeef b8ffffffffbbffffffff21d87402 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JNE
+0x1 b8ffffffffbbffffffff21d87502 4
+0xdeadbeef b8ffffffffbbffffffff21d87502 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JB
+0x1 b8ffffffffbbffffffff21d87202 4
+0xdeadbeef b8ffffffffbbffffffff21d87202 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JAE
+0x1 b8ffffffffbbffffffff21d87302 4
+0xdeadbeef b8ffffffffbbffffffff21d87302 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JBE
+0x1 b8ffffffffbbffffffff21d87602 4
+0xdeadbeef b8ffffffffbbffffffff21d87602 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JA
+0x1 b8ffffffffbbffffffff21d87702 4
+0xdeadbeef b8ffffffffbbffffffff21d87702 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JS
+0x1 b8ffffffffbbffffffff21d87802 4
+0xdeadbeef b8ffffffffbbffffffff21d87802 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JNS
+0x1 b8ffffffffbbffffffff21d87902 4
+0xdeadbeef b8ffffffffbbffffffff21d87902 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JL
+0x1 b8ffffffffbbffffffff21d87c02 4
+0xdeadbeef b8ffffffffbbffffffff21d87c02 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JGE
+0x1 b8ffffffffbbffffffff21d87d02 4
+0xdeadbeef b8ffffffffbbffffffff21d87d02 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JLE
+0x1 b8ffffffffbbffffffff21d87e02 4
+0xdeadbeef b8ffffffffbbffffffff21d87e02 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND32 ; JG
+0x1 b8ffffffffbbffffffff21d87f02 4
+0xdeadbeef b8ffffffffbbffffffff21d87f02 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JE
+0x1 b800000000bb0000000021d87402 4
+0xdeadbeef b800000000bb0000000021d87402 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JNE
+0x1 b800000000bb0000000021d87502 4
+0xdeadbeef b800000000bb0000000021d87502 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JB
+0x1 b800000000bb0000000021d87202 4
+0xdeadbeef b800000000bb0000000021d87202 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JAE
+0x1 b800000000bb0000000021d87302 4
+0xdeadbeef b800000000bb0000000021d87302 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JBE
+0x1 b800000000bb0000000021d87602 4
+0xdeadbeef b800000000bb0000000021d87602 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JA
+0x1 b800000000bb0000000021d87702 4
+0xdeadbeef b800000000bb0000000021d87702 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JS
+0x1 b800000000bb0000000021d87802 4
+0xdeadbeef b800000000bb0000000021d87802 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JNS
+0x1 b800000000bb0000000021d87902 4
+0xdeadbeef b800000000bb0000000021d87902 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JL
+0x1 b800000000bb0000000021d87c02 4
+0xdeadbeef b800000000bb0000000021d87c02 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JGE
+0x1 b800000000bb0000000021d87d02 4
+0xdeadbeef b800000000bb0000000021d87d02 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JLE
+0x1 b800000000bb0000000021d87e02 4
+0xdeadbeef b800000000bb0000000021d87e02 4
+# asm: mov a=0x0 b=0x0 ; AND32 ; JG
+0x1 b800000000bb0000000021d87f02 4
+0xdeadbeef b800000000bb0000000021d87f02 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JE
+0x1 48c7c00000000048c7c3000000804839d87402 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87402 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JNE
+0x1 48c7c00000000048c7c3000000804839d87502 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87502 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JB
+0x1 48c7c00000000048c7c3000000804839d87202 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87202 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JAE
+0x1 48c7c00000000048c7c3000000804839d87302 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87302 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JBE
+0x1 48c7c00000000048c7c3000000804839d87602 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87602 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JA
+0x1 48c7c00000000048c7c3000000804839d87702 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87702 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JS
+0x1 48c7c00000000048c7c3000000804839d87802 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87802 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JNS
+0x1 48c7c00000000048c7c3000000804839d87902 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87902 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JL
+0x1 48c7c00000000048c7c3000000804839d87c02 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87c02 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JGE
+0x1 48c7c00000000048c7c3000000804839d87d02 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87d02 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JLE
+0x1 48c7c00000000048c7c3000000804839d87e02 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87e02 4
+# asm: mov a=0x0 b=0x80000000 ; CMP64 ; JG
+0x1 48c7c00000000048c7c3000000804839d87f02 4
+0xdeadbeef 48c7c00000000048c7c3000000804839d87f02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JE
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87402 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87402 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JNE
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87502 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87502 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JB
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87202 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87202 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JAE
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87302 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87302 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JBE
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87602 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87602 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JA
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87702 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87702 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JS
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87802 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87802 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JNS
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87902 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87902 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JL
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87c02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87c02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JGE
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87d02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87d02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JLE
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87e02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87e02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; CMP64 ; JG
+0x1 48c7c0ffffff7f48c7c3ffffffff4839d87f02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4839d87f02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JE
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87402 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87402 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JNE
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87502 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87502 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JB
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87202 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87202 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JAE
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87302 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87302 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JBE
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87602 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87602 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JA
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87702 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87702 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JS
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87802 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87802 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JNS
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87902 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87902 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JL
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87c02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87c02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JGE
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87d02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87d02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JLE
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87e02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87e02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; CMP64 ; JG
+0x1 48c7c0ffffffff48c7c3ffffff7f4839d87f02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4839d87f02 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JE
+0x1 48c7c00000000048c7c3010000004839d87402 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87402 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JNE
+0x1 48c7c00000000048c7c3010000004839d87502 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87502 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JB
+0x1 48c7c00000000048c7c3010000004839d87202 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87202 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JAE
+0x1 48c7c00000000048c7c3010000004839d87302 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87302 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JBE
+0x1 48c7c00000000048c7c3010000004839d87602 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87602 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JA
+0x1 48c7c00000000048c7c3010000004839d87702 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87702 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JS
+0x1 48c7c00000000048c7c3010000004839d87802 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87802 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JNS
+0x1 48c7c00000000048c7c3010000004839d87902 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87902 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JL
+0x1 48c7c00000000048c7c3010000004839d87c02 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87c02 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JGE
+0x1 48c7c00000000048c7c3010000004839d87d02 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87d02 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JLE
+0x1 48c7c00000000048c7c3010000004839d87e02 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87e02 4
+# asm: mov a=0x0 b=0x1 ; CMP64 ; JG
+0x1 48c7c00000000048c7c3010000004839d87f02 4
+0xdeadbeef 48c7c00000000048c7c3010000004839d87f02 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JE
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87402 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87402 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JNE
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87502 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87502 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JB
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87202 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87202 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JAE
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87302 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87302 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JBE
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87602 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87602 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JA
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87702 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87702 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JS
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87802 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87802 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JNS
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87902 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87902 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JL
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87c02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87c02 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JGE
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87d02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87d02 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JLE
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87e02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87e02 4
+# asm: mov a=0xffffffff b=0xffffffff ; CMP64 ; JG
+0x1 48c7c0ffffffff48c7c3ffffffff4839d87f02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4839d87f02 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JE
+0x1 48c7c00000000048c7c3000000004839d87402 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87402 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JNE
+0x1 48c7c00000000048c7c3000000004839d87502 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87502 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JB
+0x1 48c7c00000000048c7c3000000004839d87202 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87202 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JAE
+0x1 48c7c00000000048c7c3000000004839d87302 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87302 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JBE
+0x1 48c7c00000000048c7c3000000004839d87602 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87602 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JA
+0x1 48c7c00000000048c7c3000000004839d87702 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87702 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JS
+0x1 48c7c00000000048c7c3000000004839d87802 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87802 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JNS
+0x1 48c7c00000000048c7c3000000004839d87902 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87902 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JL
+0x1 48c7c00000000048c7c3000000004839d87c02 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87c02 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JGE
+0x1 48c7c00000000048c7c3000000004839d87d02 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87d02 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JLE
+0x1 48c7c00000000048c7c3000000004839d87e02 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87e02 4
+# asm: mov a=0x0 b=0x0 ; CMP64 ; JG
+0x1 48c7c00000000048c7c3000000004839d87f02 4
+0xdeadbeef 48c7c00000000048c7c3000000004839d87f02 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JE
+0x1 48c7c00000000048c7c3000000804829d87402 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87402 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JNE
+0x1 48c7c00000000048c7c3000000804829d87502 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87502 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JB
+0x1 48c7c00000000048c7c3000000804829d87202 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87202 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JAE
+0x1 48c7c00000000048c7c3000000804829d87302 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87302 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JBE
+0x1 48c7c00000000048c7c3000000804829d87602 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87602 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JA
+0x1 48c7c00000000048c7c3000000804829d87702 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87702 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JS
+0x1 48c7c00000000048c7c3000000804829d87802 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87802 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JNS
+0x1 48c7c00000000048c7c3000000804829d87902 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87902 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JL
+0x1 48c7c00000000048c7c3000000804829d87c02 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87c02 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JGE
+0x1 48c7c00000000048c7c3000000804829d87d02 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87d02 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JLE
+0x1 48c7c00000000048c7c3000000804829d87e02 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87e02 4
+# asm: mov a=0x0 b=0x80000000 ; SUB64 ; JG
+0x1 48c7c00000000048c7c3000000804829d87f02 4
+0xdeadbeef 48c7c00000000048c7c3000000804829d87f02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JE
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87402 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87402 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JNE
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87502 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87502 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JB
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87202 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87202 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JAE
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87302 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87302 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JBE
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87602 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87602 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JA
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87702 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87702 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JS
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87802 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87802 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JNS
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87902 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87902 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JL
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87c02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87c02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JGE
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87d02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87d02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JLE
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87e02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87e02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; SUB64 ; JG
+0x1 48c7c0ffffff7f48c7c3ffffffff4829d87f02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4829d87f02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JE
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87402 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87402 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JNE
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87502 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87502 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JB
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87202 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87202 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JAE
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87302 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87302 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JBE
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87602 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87602 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JA
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87702 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87702 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JS
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87802 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87802 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JNS
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87902 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87902 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JL
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87c02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87c02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JGE
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87d02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87d02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JLE
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87e02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87e02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; SUB64 ; JG
+0x1 48c7c0ffffffff48c7c3ffffff7f4829d87f02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4829d87f02 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JE
+0x1 48c7c00000000048c7c3010000004829d87402 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87402 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JNE
+0x1 48c7c00000000048c7c3010000004829d87502 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87502 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JB
+0x1 48c7c00000000048c7c3010000004829d87202 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87202 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JAE
+0x1 48c7c00000000048c7c3010000004829d87302 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87302 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JBE
+0x1 48c7c00000000048c7c3010000004829d87602 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87602 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JA
+0x1 48c7c00000000048c7c3010000004829d87702 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87702 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JS
+0x1 48c7c00000000048c7c3010000004829d87802 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87802 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JNS
+0x1 48c7c00000000048c7c3010000004829d87902 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87902 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JL
+0x1 48c7c00000000048c7c3010000004829d87c02 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87c02 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JGE
+0x1 48c7c00000000048c7c3010000004829d87d02 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87d02 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JLE
+0x1 48c7c00000000048c7c3010000004829d87e02 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87e02 4
+# asm: mov a=0x0 b=0x1 ; SUB64 ; JG
+0x1 48c7c00000000048c7c3010000004829d87f02 4
+0xdeadbeef 48c7c00000000048c7c3010000004829d87f02 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JE
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87402 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87402 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JNE
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87502 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87502 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JB
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87202 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87202 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JAE
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87302 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87302 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JBE
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87602 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87602 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JA
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87702 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87702 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JS
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87802 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87802 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JNS
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87902 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87902 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JL
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87c02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87c02 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JGE
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87d02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87d02 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JLE
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87e02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87e02 4
+# asm: mov a=0xffffffff b=0xffffffff ; SUB64 ; JG
+0x1 48c7c0ffffffff48c7c3ffffffff4829d87f02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4829d87f02 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JE
+0x1 48c7c00000000048c7c3000000004829d87402 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87402 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JNE
+0x1 48c7c00000000048c7c3000000004829d87502 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87502 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JB
+0x1 48c7c00000000048c7c3000000004829d87202 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87202 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JAE
+0x1 48c7c00000000048c7c3000000004829d87302 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87302 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JBE
+0x1 48c7c00000000048c7c3000000004829d87602 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87602 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JA
+0x1 48c7c00000000048c7c3000000004829d87702 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87702 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JS
+0x1 48c7c00000000048c7c3000000004829d87802 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87802 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JNS
+0x1 48c7c00000000048c7c3000000004829d87902 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87902 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JL
+0x1 48c7c00000000048c7c3000000004829d87c02 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87c02 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JGE
+0x1 48c7c00000000048c7c3000000004829d87d02 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87d02 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JLE
+0x1 48c7c00000000048c7c3000000004829d87e02 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87e02 4
+# asm: mov a=0x0 b=0x0 ; SUB64 ; JG
+0x1 48c7c00000000048c7c3000000004829d87f02 4
+0xdeadbeef 48c7c00000000048c7c3000000004829d87f02 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JE
+0x1 48c7c00000000048c7c3000000804885d87402 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87402 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JNE
+0x1 48c7c00000000048c7c3000000804885d87502 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87502 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JB
+0x1 48c7c00000000048c7c3000000804885d87202 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87202 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JAE
+0x1 48c7c00000000048c7c3000000804885d87302 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87302 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JBE
+0x1 48c7c00000000048c7c3000000804885d87602 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87602 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JA
+0x1 48c7c00000000048c7c3000000804885d87702 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87702 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JS
+0x1 48c7c00000000048c7c3000000804885d87802 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87802 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JNS
+0x1 48c7c00000000048c7c3000000804885d87902 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87902 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JL
+0x1 48c7c00000000048c7c3000000804885d87c02 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87c02 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JGE
+0x1 48c7c00000000048c7c3000000804885d87d02 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87d02 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JLE
+0x1 48c7c00000000048c7c3000000804885d87e02 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87e02 4
+# asm: mov a=0x0 b=0x80000000 ; TEST64 ; JG
+0x1 48c7c00000000048c7c3000000804885d87f02 4
+0xdeadbeef 48c7c00000000048c7c3000000804885d87f02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JE
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87402 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87402 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JNE
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87502 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87502 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JB
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87202 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87202 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JAE
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87302 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87302 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JBE
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87602 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87602 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JA
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87702 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87702 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JS
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87802 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87802 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JNS
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87902 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87902 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JL
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87c02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87c02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JGE
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87d02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87d02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JLE
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87e02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87e02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; TEST64 ; JG
+0x1 48c7c0ffffff7f48c7c3ffffffff4885d87f02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4885d87f02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JE
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87402 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87402 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JNE
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87502 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87502 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JB
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87202 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87202 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JAE
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87302 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87302 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JBE
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87602 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87602 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JA
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87702 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87702 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JS
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87802 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87802 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JNS
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87902 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87902 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JL
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87c02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87c02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JGE
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87d02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87d02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JLE
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87e02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87e02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; TEST64 ; JG
+0x1 48c7c0ffffffff48c7c3ffffff7f4885d87f02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4885d87f02 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JE
+0x1 48c7c00000000048c7c3010000004885d87402 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87402 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JNE
+0x1 48c7c00000000048c7c3010000004885d87502 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87502 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JB
+0x1 48c7c00000000048c7c3010000004885d87202 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87202 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JAE
+0x1 48c7c00000000048c7c3010000004885d87302 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87302 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JBE
+0x1 48c7c00000000048c7c3010000004885d87602 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87602 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JA
+0x1 48c7c00000000048c7c3010000004885d87702 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87702 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JS
+0x1 48c7c00000000048c7c3010000004885d87802 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87802 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JNS
+0x1 48c7c00000000048c7c3010000004885d87902 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87902 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JL
+0x1 48c7c00000000048c7c3010000004885d87c02 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87c02 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JGE
+0x1 48c7c00000000048c7c3010000004885d87d02 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87d02 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JLE
+0x1 48c7c00000000048c7c3010000004885d87e02 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87e02 4
+# asm: mov a=0x0 b=0x1 ; TEST64 ; JG
+0x1 48c7c00000000048c7c3010000004885d87f02 4
+0xdeadbeef 48c7c00000000048c7c3010000004885d87f02 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JE
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87402 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87402 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JNE
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87502 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87502 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JB
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87202 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87202 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JAE
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87302 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87302 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JBE
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87602 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87602 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JA
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87702 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87702 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JS
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87802 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87802 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JNS
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87902 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87902 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JL
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87c02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87c02 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JGE
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87d02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87d02 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JLE
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87e02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87e02 4
+# asm: mov a=0xffffffff b=0xffffffff ; TEST64 ; JG
+0x1 48c7c0ffffffff48c7c3ffffffff4885d87f02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4885d87f02 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JE
+0x1 48c7c00000000048c7c3000000004885d87402 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87402 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JNE
+0x1 48c7c00000000048c7c3000000004885d87502 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87502 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JB
+0x1 48c7c00000000048c7c3000000004885d87202 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87202 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JAE
+0x1 48c7c00000000048c7c3000000004885d87302 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87302 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JBE
+0x1 48c7c00000000048c7c3000000004885d87602 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87602 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JA
+0x1 48c7c00000000048c7c3000000004885d87702 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87702 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JS
+0x1 48c7c00000000048c7c3000000004885d87802 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87802 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JNS
+0x1 48c7c00000000048c7c3000000004885d87902 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87902 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JL
+0x1 48c7c00000000048c7c3000000004885d87c02 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87c02 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JGE
+0x1 48c7c00000000048c7c3000000004885d87d02 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87d02 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JLE
+0x1 48c7c00000000048c7c3000000004885d87e02 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87e02 4
+# asm: mov a=0x0 b=0x0 ; TEST64 ; JG
+0x1 48c7c00000000048c7c3000000004885d87f02 4
+0xdeadbeef 48c7c00000000048c7c3000000004885d87f02 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JE
+0x1 48c7c00000000048c7c3000000804821d87402 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87402 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JNE
+0x1 48c7c00000000048c7c3000000804821d87502 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87502 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JB
+0x1 48c7c00000000048c7c3000000804821d87202 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87202 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JAE
+0x1 48c7c00000000048c7c3000000804821d87302 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87302 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JBE
+0x1 48c7c00000000048c7c3000000804821d87602 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87602 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JA
+0x1 48c7c00000000048c7c3000000804821d87702 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87702 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JS
+0x1 48c7c00000000048c7c3000000804821d87802 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87802 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JNS
+0x1 48c7c00000000048c7c3000000804821d87902 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87902 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JL
+0x1 48c7c00000000048c7c3000000804821d87c02 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87c02 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JGE
+0x1 48c7c00000000048c7c3000000804821d87d02 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87d02 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JLE
+0x1 48c7c00000000048c7c3000000804821d87e02 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87e02 4
+# asm: mov a=0x0 b=0x80000000 ; AND64 ; JG
+0x1 48c7c00000000048c7c3000000804821d87f02 4
+0xdeadbeef 48c7c00000000048c7c3000000804821d87f02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JE
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87402 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87402 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JNE
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87502 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87502 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JB
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87202 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87202 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JAE
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87302 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87302 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JBE
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87602 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87602 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JA
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87702 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87702 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JS
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87802 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87802 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JNS
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87902 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87902 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JL
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87c02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87c02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JGE
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87d02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87d02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JLE
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87e02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87e02 4
+# asm: mov a=0x7fffffff b=0xffffffff ; AND64 ; JG
+0x1 48c7c0ffffff7f48c7c3ffffffff4821d87f02 4
+0xdeadbeef 48c7c0ffffff7f48c7c3ffffffff4821d87f02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JE
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87402 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87402 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JNE
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87502 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87502 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JB
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87202 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87202 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JAE
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87302 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87302 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JBE
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87602 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87602 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JA
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87702 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87702 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JS
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87802 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87802 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JNS
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87902 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87902 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JL
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87c02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87c02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JGE
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87d02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87d02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JLE
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87e02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87e02 4
+# asm: mov a=0xffffffff b=0x7fffffff ; AND64 ; JG
+0x1 48c7c0ffffffff48c7c3ffffff7f4821d87f02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffff7f4821d87f02 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JE
+0x1 48c7c00000000048c7c3010000004821d87402 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87402 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JNE
+0x1 48c7c00000000048c7c3010000004821d87502 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87502 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JB
+0x1 48c7c00000000048c7c3010000004821d87202 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87202 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JAE
+0x1 48c7c00000000048c7c3010000004821d87302 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87302 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JBE
+0x1 48c7c00000000048c7c3010000004821d87602 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87602 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JA
+0x1 48c7c00000000048c7c3010000004821d87702 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87702 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JS
+0x1 48c7c00000000048c7c3010000004821d87802 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87802 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JNS
+0x1 48c7c00000000048c7c3010000004821d87902 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87902 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JL
+0x1 48c7c00000000048c7c3010000004821d87c02 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87c02 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JGE
+0x1 48c7c00000000048c7c3010000004821d87d02 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87d02 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JLE
+0x1 48c7c00000000048c7c3010000004821d87e02 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87e02 4
+# asm: mov a=0x0 b=0x1 ; AND64 ; JG
+0x1 48c7c00000000048c7c3010000004821d87f02 4
+0xdeadbeef 48c7c00000000048c7c3010000004821d87f02 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JE
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87402 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87402 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JNE
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87502 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87502 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JB
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87202 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87202 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JAE
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87302 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87302 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JBE
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87602 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87602 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JA
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87702 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87702 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JS
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87802 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87802 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JNS
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87902 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87902 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JL
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87c02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87c02 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JGE
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87d02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87d02 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JLE
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87e02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87e02 4
+# asm: mov a=0xffffffff b=0xffffffff ; AND64 ; JG
+0x1 48c7c0ffffffff48c7c3ffffffff4821d87f02 4
+0xdeadbeef 48c7c0ffffffff48c7c3ffffffff4821d87f02 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JE
+0x1 48c7c00000000048c7c3000000004821d87402 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87402 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JNE
+0x1 48c7c00000000048c7c3000000004821d87502 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87502 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JB
+0x1 48c7c00000000048c7c3000000004821d87202 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87202 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JAE
+0x1 48c7c00000000048c7c3000000004821d87302 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87302 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JBE
+0x1 48c7c00000000048c7c3000000004821d87602 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87602 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JA
+0x1 48c7c00000000048c7c3000000004821d87702 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87702 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JS
+0x1 48c7c00000000048c7c3000000004821d87802 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87802 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JNS
+0x1 48c7c00000000048c7c3000000004821d87902 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87902 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JL
+0x1 48c7c00000000048c7c3000000004821d87c02 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87c02 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JGE
+0x1 48c7c00000000048c7c3000000004821d87d02 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87d02 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JLE
+0x1 48c7c00000000048c7c3000000004821d87e02 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87e02 4
+# asm: mov a=0x0 b=0x0 ; AND64 ; JG
+0x1 48c7c00000000048c7c3000000004821d87f02 4
+0xdeadbeef 48c7c00000000048c7c3000000004821d87f02 4
