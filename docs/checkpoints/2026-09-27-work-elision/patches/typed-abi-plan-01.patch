@@ -1,0 +1,114 @@
+--- a/src/hb_abi_native_v1.c
++++ b/src/hb_abi_native_v1.c
+@@ -31,7 +31,7 @@
+ 
+ /* Проверка описателя целиком до любой записи: версия, размер, цель, счёт, каждая
+  * активная позиция валидна, неактивные — NONE/0, результат NONE/0 или валидный скаляр. */
+-static hb_result_t validate_sig(const hb_abi_native_sig_v1_t *sig, uint64_t masks[HB_ABI_NATIVE_MAX_ARGS_V1],
++static hb_result_t validate_sig_uncached(const hb_abi_native_sig_v1_t *sig, uint64_t masks[HB_ABI_NATIVE_MAX_ARGS_V1],
+                                 uint64_t *ret_mask)
+ {
+     if (!sig) return HB_ERR_INVALID_ARG;
+@@ -61,6 +61,8 @@
+     }
+     return HB_OK;
+ }
++
++#include "abi-plan.inc"
+ 
+ hb_result_t hb_abi_native_lower_v1(const hb_context_t *ctx, const hb_abi_native_sig_v1_t *sig,
+                                    hb_abi_native_image_v1_t *out)
+--- a/src/hb_abi_x64_v1.c
++++ b/src/hb_abi_x64_v1.c
+@@ -1,3 +1,5 @@
++#include "hb_env.h"
++#include <string.h>
+ #include "hb_abi_x64_v1.h"
+ #include "hb_memory.h"
+ #include <stdlib.h>
+@@ -69,7 +71,10 @@
+      * avoiding needless allocation, this bounds impossible huge-count calls. */
+     if (!hb_memory_can_write_span(ctx->memory, entry_rsp, frame_bytes))
+         return HB_ERR_MEMORY_FAULT;
+-    uint8_t *frame = calloc(frame_bytes, 1);
++    uint8_t local_frame[256];
++    const int local = hb_env_flag("MACRUNNER_HB_TYPED_ABI_SCRATCH", 0) && frame_bytes <= sizeof(local_frame);
++    uint8_t *frame = local ? local_frame : calloc(frame_bytes, 1);
++    if (local) memset(frame, 0, frame_bytes);
+     if (!frame) return HB_ERR_OUT_OF_MEMORY;
+     store_le64(frame, request.return_pc);
+     for (size_t i = 0; i < tail; ++i) {
+@@ -77,13 +82,13 @@
+         uint64_t mask;
+         hb_result_t result = scalar_mask(value.kind, value.width_bytes, &mask);
+         if (result != HB_OK) {
+-            free(frame);
++            if (!local) free(frame);
+             return result;
+         }
+         store_le64(frame + 40 + 8 * i, value.bits & mask);
+     }
+     hb_result_t result = hb_memory_write(ctx->memory, entry_rsp, frame, frame_bytes);
+-    free(frame);
++    if (!local) free(frame);
+     if (result != HB_OK) return HB_ERR_MEMORY_FAULT;
+ 
+     uint64_t *gpr[4] = {&ctx->regs.x64.rcx, &ctx->regs.x64.rdx,
+--- /dev/null
++++ b/src/abi-plan.inc
+@@ -0,0 +1,55 @@
++/* Exact validated signature/mask plan. No argument values or native targets are
++ * cached; packing keeps its existing descriptor reads and memory callbacks. */
++#include <signal.h>
++#include "hb_env.h"
++#define HB_ABI_PLAN_SLOTS 4u
++#ifndef HB_ABI_PLAN_TEST_HIT
++#define HB_ABI_PLAN_TEST_HIT() ((void)0)
++#endif
++typedef struct {
++    hb_abi_native_sig_v1_t signature;
++    uint64_t masks[HB_ABI_NATIVE_MAX_ARGS_V1], return_mask;
++    unsigned valid;
++} hb_abi_mask_plan;
++static __thread hb_abi_mask_plan hb_abi_plans[HB_ABI_PLAN_SLOTS];
++static __thread unsigned hb_abi_next_plan;
++static __thread volatile sig_atomic_t hb_abi_plan_busy;
++
++static hb_result_t validate_sig(const hb_abi_native_sig_v1_t *sig,
++    uint64_t masks[HB_ABI_NATIVE_MAX_ARGS_V1], uint64_t *ret_mask)
++{
++    /* Preserve short descriptor/prefix error handling before reading a full key. */
++    if (!hb_env_flag("MACRUNNER_HB_TYPED_ABI_PLAN", 0) || !sig ||
++        sig->abi_version != HB_ABI_NATIVE_V1 || sig->struct_size != sizeof(*sig) ||
++        sig->target_abi != HB_ABI_NATIVE_TARGET_AAPCS64_WIN_V1 || sig->flags ||
++        sig->reserved || sig->argument_count > HB_ABI_NATIVE_MAX_ARGS_V1 ||
++        hb_abi_plan_busy)
++        return validate_sig_uncached(sig, masks, ret_mask);
++    hb_abi_plan_busy=1;
++    /* A signal on this thread may reenter: keep normal TLS accesses inside
++     * the busy interval even under compiler motion. No hardware lock needed. */
++    __atomic_signal_fence(__ATOMIC_SEQ_CST);
++    hb_abi_native_sig_v1_t key=*sig;
++    for (unsigned i=0;i<HB_ABI_PLAN_SLOTS;++i) {
++        const hb_abi_mask_plan *plan=&hb_abi_plans[i];
++        if (plan->valid && !memcmp(&plan->signature,&key,sizeof(key))) {
++            memcpy(masks,plan->masks,sizeof(plan->masks));
++            *ret_mask=plan->return_mask;
++            HB_ABI_PLAN_TEST_HIT();
++            __atomic_signal_fence(__ATOMIC_SEQ_CST);
++            hb_abi_plan_busy=0;
++            return HB_OK;
++        }
++    }
++    hb_result_t result=validate_sig_uncached(&key,masks,ret_mask);
++    if (result==HB_OK) {
++        hb_abi_mask_plan *plan=&hb_abi_plans[hb_abi_next_plan++ % HB_ABI_PLAN_SLOTS];
++        plan->signature=key;
++        memcpy(plan->masks,masks,sizeof(plan->masks));
++        plan->return_mask=*ret_mask;
++        plan->valid=1;
++    }
++    __atomic_signal_fence(__ATOMIC_SEQ_CST);
++    hb_abi_plan_busy=0;
++    return result;
++}

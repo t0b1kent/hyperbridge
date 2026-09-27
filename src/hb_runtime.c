@@ -14,6 +14,8 @@ static inline int runtime_gate_flag(enum hb_gate_id id, int default_value)
 }
 
 #include "hb_runtime.h"
+#include "hb_native_entry_witness.h"
+#include "hb_code_witness_runtime_v1.h"
 #include "hb_pair_rmw.h"
 #include <pthread.h>
 #include <mach/mach_time.h>
@@ -131,6 +133,7 @@ typedef struct hb_jit_signal_fault_frame {
     hb_jit_runtime_t* rt;
     hb_context_t* ctx;
     hb_block_cache_entry_t* entry;
+    const hb_native_entry_descriptor_t *validation_descriptor;
     /* ★★★★★ 05.09.2026 — СНИМКА КОНТЕКСТА В КАДРЕ БОЛЬШЕ НЕТ.
      *
      * Здесь лежал `hb_context_t snapshot` (2616 байт), из которого путь отказа откатывал
@@ -1744,9 +1747,11 @@ static hb_ir_block_t* block_clone_for_cache(const hb_ir_block_t* block) {
 #include "hb_smc_exact_owner.inc"
 
 static void ripmap_release(hb_block_cache_entry_t* entry);
+static void native_entry_revoke(hb_block_cache_entry_t* entry);
 
 static void block_cache_release_owned_block(hb_block_cache_entry_t* entry,
                                             const hb_ir_block_t* replacement) {
+    native_entry_revoke(entry);
     smc_snapshot_release(entry);
     if (!entry || !entry->owns_block || !entry->block || entry->block == replacement)
         return;
@@ -5432,6 +5437,8 @@ static int hb_smc_track_writable_enabled(void) {
     return cached;
 }
 
+#include "hb_native_entry_witness_runtime.inc"
+
 static void smc_track_entry(hb_jit_runtime_t* rt, hb_block_cache_entry_t* entry,
                             const hb_ir_block_t* block) {
     uint64_t start = 0;
@@ -7115,6 +7122,7 @@ struct hb_arena_reclaim {
 };
 
 static int arena_reclaim_mode(void) {
+    if (native_entry_enabled()) return 0; /* no executable-storage reuse in prototype */
     static int cached = -1;
     if (cached < 0) {
         const char* v = hb_gate( HB_GATE_HB_ARENA_RECLAIM );
@@ -8437,6 +8445,11 @@ hb_jit_runtime_t* hb_jit_runtime_create(hb_context_t* ctx) {
  * разрушено. Если живых единицы, виновата НЕ сумма, а ЧАСТОТА создания. */
 void hb_jit_runtime_destroy(hb_jit_runtime_t* rt) {
     if (!rt) return;
+    if (native_entry_enabled()) {
+        if (rt->native_entry_run_depth || (rt->native_entry_owner_thread &&
+            rt->native_entry_owner_thread != (uintptr_t)pthread_self())) return;
+        if (native_entry_reset_checked(rt, rt->ctx, HB_POVTOR_M_PROCHEE) != HB_OK) return;
+    }
     {
         static unsigned long long dev;
         unsigned long long n = __atomic_sub_fetch(&hb_jit_runtimes_live, 1, __ATOMIC_RELAXED);
@@ -8462,6 +8475,7 @@ void hb_jit_runtime_destroy(hb_jit_runtime_t* rt) {
     hb_cache_close(rt->persistent_cache);
     hb_jit_buffer_destroy(rt->jit_mem);
     block_cache_destroy(rt->block_cache);
+    native_entry_destroy(rt);
     smc_exact_report_destroy();
     free(rt->jit_signal_quarantine);
     if (rt->l1_table) munmap(rt->l1_table, l1_table_bytes());
@@ -8483,8 +8497,33 @@ void hb_jit_runtime_reset(hb_jit_runtime_t* rt, hb_context_t* ctx) {
  * Место передаётся ПАРАМЕТРОМ, а не выставляется отдельным вызовом заранее: пара
  * «пометить, потом сделать» рассыпается молча, стоит появиться раннему возврату между
  * ними, и учёт начинает врать, не ломаясь. */
-void hb_jit_runtime_reset_at(hb_jit_runtime_t* rt, hb_context_t* ctx, int mesto) {
-    if (!rt) return;
+static hb_result_t native_entry_reset_checked(hb_jit_runtime_t* rt, hb_context_t* ctx, int mesto) {
+    if (!rt) return HB_ERR_INVALID_ARG;
+    if (native_entry_enabled()) {
+        /* No borrowed native pointer may be live in this owner runtime.
+         * Other runtimes own disjoint emitted sites; global clears are misses. */
+        if (rt->native_entry_run_depth || g_jit_signal_fault_frame ||
+            (rt->native_entry_owner_thread && rt->native_entry_owner_thread != (uintptr_t)pthread_self()))
+            return HB_ERR_INVALID_ARG;
+        /* Unpatching writes into MAP_JIT memory. Enable writes before any
+         * route/cache mutation, without rewinding the arena or freeing code. */
+        if (rt->jit_mem) {
+            hb_result_t writable = hb_jit_buffer_make_writable(rt->jit_mem);
+            if (writable != HB_OK) return writable;
+        }
+        hb_ic_slots_clear_all();
+        hb_context_t *contexts[2] = {rt->ctx, ctx};
+        for (unsigned i = 0; i < 2; ++i) if (contexts[i]) {
+            contexts[i]->indirect_ic_native_code = 0;
+            contexts[i]->indirect_ic_guest_addr = 0;
+            contexts[i]->indirect_ic_slot = 0;
+            contexts[i]->callret_fill = 0;
+            contexts[i]->callret_sp = 0;
+        }
+        /* Unlink direct edges and revoke metadata while code is still intact. */
+        if (rt->block_cache) block_cache_reset(rt->block_cache);
+        native_entry_destroy(rt);
+    }
     t_reset_mesto = (mesto >= 0 && mesto < HB_POVTOR_M_N) ? mesto : HB_POVTOR_M_PROCHEE;
     rt->ctx = ctx;
     if (rt->l1_table) {  /* арена перематывается — все родные входы таблицы недействительны */
@@ -8493,7 +8532,15 @@ void hb_jit_runtime_reset_at(hb_jit_runtime_t* rt, hb_context_t* ctx, int mesto)
                        MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
         if (t == MAP_FAILED) memset(rt->l1_table, 0, l1_table_bytes());
     }
-    if (rt->jit_mem) hb_jit_buffer_reset(rt->jit_mem);
+    if (rt->jit_mem) {
+        hb_result_t reset = hb_jit_buffer_reset(rt->jit_mem);
+        if (native_entry_enabled() && reset != HB_OK) { rt->code_cache_full = true; return reset; }
+    }
+    if (native_entry_enabled() && rt->callret_stack) {
+        size_t bytes = (size_t)1u << HB_CALLRET_BITS;
+        memset(rt->callret_stack, 0, bytes);
+        rt->callret_sp_saved = (uint64_t)(uintptr_t)rt->callret_stack + bytes / 2u;
+    }
     /* Арена перемотана: свободные куски и карантин указывают в место, которое вершина
      * сейчас займёт заново, — забыть их ДО первого занесения. */
     arena_reclaim_forget(rt);
@@ -8501,7 +8548,7 @@ void hb_jit_runtime_reset_at(hb_jit_runtime_t* rt, hb_context_t* ctx, int mesto)
     rt->scalar_access_enabled = ctx && ctx->scalar_access;
     rt->pair_access_enabled = ctx && ctx->pair_access;
     rt->exec_access_enabled = ctx && ctx->exec_access;
-    if (rt->block_cache) block_cache_reset(rt->block_cache);
+    if (rt->block_cache && !native_entry_enabled()) block_cache_reset(rt->block_cache);
     /* Кеш очищен целиком — ждущие объявления инвалидации применять не к чему. */
     rt->inval_seen = __atomic_load_n(&g_inval_seq, __ATOMIC_ACQUIRE);
     rt->hot_trace_blocks = 0;
@@ -8509,6 +8556,15 @@ void hb_jit_runtime_reset_at(hb_jit_runtime_t* rt, hb_context_t* ctx, int mesto)
     rt->code_cache_full = false;
     rt->code_cache_full_reports = 0;
     t_reset_mesto = HB_POVTOR_M_PROCHEE;
+    if (native_entry_enabled() && rt->jit_mem) {
+        hb_result_t executable = hb_jit_buffer_commit(rt->jit_mem);
+        if (executable != HB_OK) { rt->code_cache_full = true; return executable; }
+    }
+    return HB_OK;
+}
+
+void hb_jit_runtime_reset_at(hb_jit_runtime_t *rt, hb_context_t *ctx, int place) {
+    (void)native_entry_reset_checked(rt, ctx, place);
 }
 
 /* Find block by guest address */
@@ -9332,6 +9388,9 @@ void hb_runtime_set_chain_skip_smc_tracked(bool on) {
 }
 
 static inline bool chain_target_refused_smc(const hb_block_cache_entry_t* entry) {
+    if (native_entry_enabled())
+        return !entry || !entry->native_entry_desc ||
+               !__atomic_load_n(&entry->native_entry_desc->live, __ATOMIC_ACQUIRE);
     return entry && entry->smc_hash && __atomic_load_n(&g_chain_skip_smc_tracked, __ATOMIC_ACQUIRE);
 }
 
@@ -10815,6 +10874,7 @@ static void jit_aa_mono_4ee14b_transparency_probe(hb_jit_runtime_t* rt,
     frame.rt = rt;
     frame.ctx = ctx;
     frame.entry = cached;
+    frame.validation_descriptor = NULL;
     frame.steps = steps;
     frame.blocks_executed = blocks_executed;
     frame.aa_enabled = false;
@@ -11114,6 +11174,31 @@ int hb_jit_runtime_handle_signal_fault(uint64_t pc, uint64_t fault_addr, int sig
         return 0;
     }
 
+#if defined(__APPLE__) && defined(__aarch64__)
+    if (native_entry_enabled() && host_context) {
+        const ucontext_t *uc = host_context;
+        if (uc->uc_mcontext) {
+            uint64_t actual_pc = uc->uc_mcontext->__ss.__pc;
+            unsigned width = 0;
+            const hb_native_entry_descriptor_t *d = native_entry_prefix_at(frame->rt, actual_pc, &width);
+            if (d) {
+                /* Only the actual fault PC may claim a validator load. A Wine
+                 * LR retry or another prefix/helper fault must never replay IR. */
+                if (pc != actual_pc || !width || (signal != SIGSEGV && signal != SIGBUS)) return 0;
+                uint64_t address = uc->uc_mcontext->__ss.__x[12];
+                if (address < d->span_start || address - d->span_start >= d->span_len ||
+                    width > d->span_len - (size_t)(address - d->span_start) ||
+                    fault_addr < address || fault_addr - address >= width) return 0;
+                frame->validation_descriptor = d;
+                int claimed = jit_signal_fault_claim(frame, actual_pc, actual_pc, fault_addr,
+                    signal, 0, false, false, host_context);
+                if (!claimed) frame->validation_descriptor = NULL;
+                return claimed;
+            }
+            if (native_entry_prefix_at(frame->rt, pc, NULL)) return 0;
+        }
+    }
+#endif
     native_start = (uintptr_t)frame->entry->native_code;
     native_end = native_start + frame->entry->native_size;
     slab_start = (uintptr_t)frame->rt->jit_mem->executable;
@@ -11550,6 +11635,21 @@ static inline void mr_dc_after(unsigned long long t0)
  * У всех четырёх мест вызова непустой блок УЖЕ вычислен строками выше:
  * `stable_block = cached->block ?: block` (9688, 9891, 10254, 10528). Принимаем его
  * параметром и переигрываем им, когда entry->block пуст. */
+/* Guard rejection reaches this function only after the native frame unwinds.
+ * Eviction can now unlink entries without freeing a body that is executing. */
+static hb_result_t native_entry_reject_return(hb_jit_runtime_t* rt, hb_exec_result_t* out,
+                                              uint64_t steps, uint64_t blocks) {
+    hb_block_cache_entry_t* rejected = block_cache_find(rt->block_cache, rt->native_entry_reject_pc);
+    if (rejected) block_cache_evict_entry(rt, rt->block_cache, rejected, HB_DEATH_SMC);
+    ++rt->native_entry_fresh_fetch_returns;
+    out->result = HB_OK;
+    out->steps_executed = steps;
+    out->blocks_executed = blocks;
+    out->faulted = false;
+    /* Return to the adapter so its IR is freshly lifted before another entry. */
+    return HB_OK;
+}
+
 static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
                                                    const hb_ir_func_t* func,
                                                    hb_block_cache_entry_t* cached,
@@ -11569,6 +11669,7 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
         return HB_ERR_INVALID_ARG;
 
     ctx = rt->ctx;
+    rt->native_entry_rejected = false;
     /* MacRunner 2026-08-18, лейн ЛЕСТНИЦА итерация 2538: гейт переехал на МЕСТО ВЫЗОВА.
      * Замер (2 снимка, 24738 выборок рабочего потока): при ВЫКЛЮЧЕННЫХ гейтах эти два
      * зонда стоили 1,89 % — и платилось не тело, а ПРОЛОГ. У transparency_probe в кадре
@@ -11632,6 +11733,7 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
     frame.rt = rt;
     frame.ctx = ctx;
     frame.entry = cached;
+    frame.validation_descriptor = NULL;
     frame.steps = steps;
     frame.blocks_executed = blocks_executed;
     frame.signal = 0;
@@ -11690,6 +11792,16 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
         hb_pair_rmw_end(ctx);
         *jit_signal_slot(ctx) = frame.prev;
         frame.stale_cookie = 0;
+        return HB_OK;
+    }
+
+    if (frame.validation_descriptor) {
+        /* Validation has executed no target guest instruction or accounting.
+         * Escape before guard retirement, fault maps, cached-IR replay or any
+         * guest fault-packet update. The caller evicts after this unwind. */
+        *jit_signal_slot(ctx) = frame.prev;
+        frame.stale_cookie = 0;
+        hb_native_entry_guard(ctx, frame.validation_descriptor, HB_CODE_WITNESS_REJECT_VALIDATION_FAULT);
         return HB_OK;
     }
 
@@ -13527,6 +13639,7 @@ static uint64_t promote_hot_threshold(void) {
 
 static void try_promote_hot_block_families(hb_jit_runtime_t* rt, hb_context_t* ctx,
                                            const hb_ir_block_t* block) {
+    if (native_entry_enabled()) return; /* specialized bodies lack the common guard prefix */
     if (ctx && (ctx->scalar_access || ctx->pair_access)) return; /* Access observation required. */
     if (!promote_families_enabled()) return;
     /* Одна попытка на блок: семь распознавателей с выделением буфера каждый — слишком
@@ -13771,7 +13884,7 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
             size_t emitted_size = 0;
             hb_result_t r;
 
-        if (!ctx->scalar_access && !ctx->pair_access && rt->persistent_cache &&
+        if (!native_entry_enabled() && !ctx->scalar_access && !ctx->pair_access && rt->persistent_cache &&
                 persistent_cache_key_for_block(rt, block, &persistent_key) == HB_OK) {
                 hb_cache_entry_t* disk_entry = NULL;
                 have_persistent_key = true;
@@ -13836,8 +13949,11 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
                     return HB_ERR_OUT_OF_MEMORY;
                 }
 
+                code_buf->native_entry_frame48 = native_entry_enabled();
+                code_buf->native_entry_desc = native_entry_prepare(rt, compile_block, func);
                 r = hb_arm64_codegen_block_with_cfg(cg, compile_block, func->cfg, code_buf);
                 hb_arm64_codegen_destroy(cg);
+                if (r == HB_OK && !native_entry_code_valid(code_buf)) r = HB_ERR_UNSUPPORTED_FEATURE;
                 if (r == HB_OK && hb_codegen_should_fail_now()) r = HB_ERR_UNSUPPORTED_OPCODE;
                 if (r != HB_OK) {
                     codegen_fail_note(compile_block, r);
@@ -13937,6 +14053,7 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
                  * MACRUNNER_HB_NO_SNAPSHOT=1 это чтение происходило на КАЖДОМ переведённом
                  * блоке — вот почему у обоих гейтов не могло быть верного замера.
                  * Порядок закреплён: копия карты, и только потом освобождение буфера. */
+                native_entry_bind(cached, code_buf);
                 ripmap_attach(cached, code_buf);
                 hb_codegen_buffer_destroy(code_buf);
                 if (!cached) {
@@ -14324,6 +14441,7 @@ static hb_result_t hb_jit_runtime_run_exec_unit(hb_jit_runtime_t* rt,
             return set_runtime_fault_result(out, ctx, HB_ERR_OUT_OF_MEMORY, 0, 0,
                                             "EXEC unit allocation failed");
         }
+        code->native_entry_frame48 = native_entry_enabled();
         r = hb_arm64_codegen_block_with_cfg(cg, owned, func->cfg, code);
         hb_arm64_codegen_destroy(cg);
         if (r == HB_OK && hb_codegen_should_fail_now()) r = HB_ERR_UNSUPPORTED_OPCODE;
@@ -14496,6 +14614,24 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
     int outer;
     hb_context_t* l1_ctx = rt ? rt->ctx : NULL;
     uint64_t l1_saved = 0, cr_saved = 0, crf_saved = 0;
+    if (native_entry_enabled() && rt) {
+        if (rt->native_entry_run_depth || (rt->native_entry_owner_thread &&
+            rt->native_entry_owner_thread != (uintptr_t)pthread_self())) {
+            if (out) { memset(out, 0, sizeof(*out)); out->result = HB_ERR_UNSUPPORTED_FEATURE; }
+            return HB_ERR_UNSUPPORTED_FEATURE;
+        }
+        if (rt->code_cache_full || (rt->ctx &&
+            (rt->scalar_access_enabled != (rt->ctx->scalar_access != NULL) ||
+             rt->pair_access_enabled != (rt->ctx->pair_access != NULL) ||
+             rt->exec_access_enabled != (rt->ctx->exec_access != NULL)))) {
+            hb_result_t reset = native_entry_reset_checked(rt, rt->ctx, HB_POVTOR_M_PROCHEE);
+            if (reset != HB_OK) {
+                if (out) { memset(out, 0, sizeof(*out)); out->result = reset; }
+                return reset;
+            }
+        }
+        rt->native_entry_run_depth = 1;
+    }
     /* Режим FPCR хоста = MXCSR гостя на входе в выпущенный код (см. hb_host_fpcr_apply_mxcsr). */
     if (rt && rt->ctx) hb_host_fpcr_apply_mxcsr(rt->ctx->mxcsr);
     /* Claude 27.09.2026: выпущенный код видит таблицу переходов ТОЙ среды, что его исполняет, и только
@@ -14524,6 +14660,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
         l1_ctx->callret_sp = cr_saved;
         l1_ctx->callret_fill = crf_saved;
     }
+    if (native_entry_enabled() && rt) rt->native_entry_run_depth = 0;
     return r;
 }
 
@@ -14578,7 +14715,7 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
     /* По архитектуре ГОСТЯ — см. runtime_block_chain_enabled_for. */
     int block_chain = runtime_block_chain_enabled_for(rt && rt->ctx ? rt->ctx->arch
                                                                   : HB_ARCH_X64);
-    int single_lookup_gate = runtime_single_lookup_enabled();
+    int single_lookup_gate = native_entry_enabled() || runtime_single_lookup_enabled();
     int indirect_ic_gate = runtime_indirect_ic_enabled();
     const int disp_census_on = disp_census_enabled();
     if (disp_census_on) t_dcs_runs++;
@@ -14614,6 +14751,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
     uint64_t steps = 0;
     uint64_t blocks_executed = 0;
     bool chain_accounting = block_chain != 0;
+    const bool guard_accounting = native_entry_enabled() && ctx->arch == HB_ARCH_X64 &&
+                                  ctx->mode == HB_MODE_64BIT;
     /* ★★★★★ MacRunner 2026-08-25 — СЦЕПЛЕНИЕ ПРИ НЕНУЛЕВОМ ПРЕДЕЛЕ ШАГОВ.
      *
      * Прежнее условие требовало `step_limit == 0`, и это выключало сцепление ВСЕГДА: предел
@@ -14822,10 +14961,10 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             if (cached->block)
                 block = (hb_ir_block_t*)cached->block;
             trace_jit_cached_watch_block_once(rt, cached);
-        bool native_accounting = ctx->scalar_access || ctx->pair_access ||
+        bool native_accounting = guard_accounting || ctx->scalar_access || ctx->pair_access ||
                                      (chain_accounting && entry_has_chain_slot(cached, NULL));
-            uint64_t before_steps = native_accounting ? ctx->step_count : 0;
-            uint64_t before_blocks = native_accounting ? ctx->block_count : 0;
+            uint64_t before_steps = (native_accounting || native_entry_enabled()) ? ctx->step_count : 0;
+            uint64_t before_blocks = (native_accounting || native_entry_enabled()) ? ctx->block_count : 0;
             uint64_t before_rcx = ctx->regs.x64.rcx;
             uint64_t before_rdx = ctx->regs.x64.rdx;
             uint64_t before_rbp = ctx->regs.x64.rbp;
@@ -14895,11 +15034,23 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                                                                       steps, blocks_executed);
             mr_dc_after(mr_dc_t0);
             if (run_result != HB_OK || out->faulted) return run_result;
+            if (rt->native_entry_rejected)
+                return native_entry_reject_return(rt, out,
+                    steps + ctx->step_count - before_steps,
+                    blocks_executed - (!chain_accounting && blocks_executed ? 1 : 0) +
+                    ctx->block_count - before_blocks);
             trace_jit_hot_block_tick(rt, cached);
             if (disp_census_on) disp_census_note(rt, ctx);
             if (native_accounting) {
                 uint64_t block_delta = ctx->block_count - before_blocks;
                 uint64_t step_delta = ctx->step_count - before_steps;
+                if (guard_accounting && !chain_accounting && blocks_executed) --blocks_executed;
+                if (guard_accounting && !block_delta) {
+                    out->result = HB_OK;
+                    out->steps_executed = steps;
+                    out->blocks_executed = blocks_executed;
+                    return HB_OK; /* deadline exit before any guest block executed */
+                }
                 /* Свидетель для вопроса «дошли ли до переходника по цепочке» — см.
                  * (*tls_last_run_entry). Пишется БЕЗУСЛОВНО, и при block_delta==0 тоже:
                  * иначе «один блок» и «не считалось» слились бы в одно значение. */
@@ -14984,7 +15135,7 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             size_t emitted_size = 0;
             hb_result_t r;
 
-            if (!ctx->scalar_access && !ctx->pair_access && rt->persistent_cache &&
+            if (!native_entry_enabled() && !ctx->scalar_access && !ctx->pair_access && rt->persistent_cache &&
                 persistent_cache_key_for_block(rt, block, &persistent_key) == HB_OK) {
                 hb_cache_entry_t* disk_entry = NULL;
                 have_persistent_key = true;
@@ -15049,8 +15200,11 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                     return HB_ERR_OUT_OF_MEMORY;
                 }
 
+                code_buf->native_entry_frame48 = native_entry_enabled();
+                code_buf->native_entry_desc = native_entry_prepare(rt, compile_block, func);
                 r = hb_arm64_codegen_block_with_cfg(cg, compile_block, func->cfg, code_buf);
                 hb_arm64_codegen_destroy(cg);
+                if (r == HB_OK && !native_entry_code_valid(code_buf)) r = HB_ERR_UNSUPPORTED_FEATURE;
                 if (r == HB_OK && hb_codegen_should_fail_now()) r = HB_ERR_UNSUPPORTED_OPCODE;
                 if (r != HB_OK) {
                     codegen_fail_note(compile_block, r);
@@ -15144,6 +15298,7 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                  * MACRUNNER_HB_NO_SNAPSHOT=1 это чтение происходило на КАЖДОМ переведённом
                  * блоке — вот почему у обоих гейтов не могло быть верного замера.
                  * Порядок закреплён: копия карты, и только потом освобождение буфера. */
+                native_entry_bind(cached, code_buf);
                 ripmap_attach(cached, code_buf);
                 hb_codegen_buffer_destroy(code_buf);
                 if (!cached) {
@@ -15192,10 +15347,10 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             trace_jit_cached_watch_block_once(rt, cached);
 
             /* Execute */
-        bool native_accounting = ctx->scalar_access || ctx->pair_access ||
+        bool native_accounting = guard_accounting || ctx->scalar_access || ctx->pair_access ||
                                      (chain_accounting && entry_has_chain_slot(cached, NULL));
-            uint64_t before_steps = native_accounting ? ctx->step_count : 0;
-            uint64_t before_blocks = native_accounting ? ctx->block_count : 0;
+            uint64_t before_steps = (native_accounting || native_entry_enabled()) ? ctx->step_count : 0;
+            uint64_t before_blocks = (native_accounting || native_entry_enabled()) ? ctx->block_count : 0;
             uint64_t before_rcx = ctx->regs.x64.rcx;
             uint64_t before_rdx = ctx->regs.x64.rdx;
             uint64_t before_rbp = ctx->regs.x64.rbp;
@@ -15253,11 +15408,23 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                                                                       steps, blocks_executed);
             mr_dc_after(mr_dc_t0);
             if (run_result != HB_OK || out->faulted) return run_result;
+            if (rt->native_entry_rejected)
+                return native_entry_reject_return(rt, out,
+                    steps + ctx->step_count - before_steps,
+                    blocks_executed - (!chain_accounting && blocks_executed ? 1 : 0) +
+                    ctx->block_count - before_blocks);
             trace_jit_hot_block_tick(rt, cached);
             if (disp_census_on) disp_census_note(rt, ctx);
             if (native_accounting) {
                 uint64_t block_delta = ctx->block_count - before_blocks;
                 uint64_t step_delta = ctx->step_count - before_steps;
+                if (guard_accounting && !chain_accounting && blocks_executed) --blocks_executed;
+                if (guard_accounting && !block_delta) {
+                    out->result = HB_OK;
+                    out->steps_executed = steps;
+                    out->blocks_executed = blocks_executed;
+                    return HB_OK; /* deadline exit before any guest block executed */
+                }
                 /* Свидетель для вопроса «дошли ли до переходника по цепочке» — см.
                  * (*tls_last_run_entry). Пишется БЕЗУСЛОВНО, и при block_delta==0 тоже:
                  * иначе «один блок» и «не считалось» слились бы в одно значение. */

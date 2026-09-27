@@ -154,7 +154,15 @@ static bool finite_arithmetic(const uint8_t lhs[10], const uint8_t rhs[10],
             .exceptionFlags = 0,
             .roundingPrecision = state.roundingPrecision
         };
-        extFloat80_t truncated = finite_evaluate(&truncated_state, a, b, operation);
+        /* Truncation is already the first trial under RC=3. Reuse its exact
+         * value and exception flags; repeating SoftFloat cannot add evidence. */
+        extFloat80_t truncated;
+        if (state.roundingMode == softfloat_round_minMag) {
+            truncated = result;
+            truncated_state = state;
+        } else {
+            truncated = finite_evaluate(&truncated_state, a, b, operation);
+        }
         /* A rounded minimum-normal result can hide a tiny exact result. The
          * truncation must also be normal to retain the underflow boundary. */
         if (truncated_state.exceptionFlags != softfloat_flag_inexact ||
@@ -226,7 +234,13 @@ bool hb_x87_finite_sqrt(const uint8_t input[10], uint16_t control_word,
             .exceptionFlags = 0,
             .roundingPrecision = state.roundingPrecision
         };
-        extFloat80_t truncated = extF80_sqrt(&truncated_state, a);
+        extFloat80_t truncated;
+        if (state.roundingMode == softfloat_round_minMag) {
+            truncated = result;
+            truncated_state = state;
+        } else {
+            truncated = extF80_sqrt(&truncated_state, a);
+        }
         /* Both trials stay normal for positive normal inputs; retain the
          * explicit boundary before reporting a precision-only result. */
         if (truncated_state.exceptionFlags != softfloat_flag_inexact ||

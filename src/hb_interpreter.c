@@ -2947,6 +2947,22 @@ static hb_result_t x87_fld_st(hb_context_t* ctx, const hb_ir_operand_t* op) {
         /* Read before TOP changes: ST7 aliases the push destination. */
         r = hb_x87_save_st_ext80(x87, index, raw);
         if (r != HB_OK) return r;
+        /* Without a raw shadow, save_st_ext80 encodes this binary64 value
+         * exactly. A finite value therefore already is its own canonical
+         * preview: do not narrow the just-created raw80 bytes back again.
+         * Raw-shadow values and NaNs retain the general classification path. */
+        uint64_t bits;
+        memcpy(&bits, &x87->st[source], sizeof(bits));
+        if (!(x87->st_ext_valid & (1u << source)) &&
+            (bits & UINT64_C(0x7ff0000000000000)) != UINT64_C(0x7ff0000000000000)) {
+            double preview;
+            memcpy(&preview, &bits, sizeof(preview));
+            unsigned destination = (x87->top - 1u) & 7u;
+            bool empty = ((x87->tag_word >> (destination * 2u)) & 3u) == 3u;
+            r = hb_x87_push_f64_ext(x87, preview, raw);
+            if (r == HB_OK && empty) x87->status_word &= (uint16_t)~0x0200u;
+            return x87_push_result(ctx, r);
+        }
         return x87_push_result(ctx, hb_x87_push_raw_ext80(x87, raw));
     }
     r = hb_x87_st_f64(x87, index, &value);

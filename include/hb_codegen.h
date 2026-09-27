@@ -10,6 +10,12 @@
 extern "C" {
 #endif
 
+/* Runtime-owned, immutable byte witness. A nonnull descriptor requests the
+ * guarded frame48 entry ABI; it must outlive every possible native entry. */
+typedef struct hb_native_entry_descriptor hb_native_entry_descriptor_t;
+int hb_native_entry_guard(hb_context_t* ctx,
+                          const hb_native_entry_descriptor_t* descriptor, uint32_t reason);
+
 /* MacRunner 2026-07-29 — RELOCATION TABLE.
  *
  * The persistent cache has to turn absolute host addresses in emitted code into something a
@@ -266,6 +272,14 @@ typedef struct {
     int ea_want_fused;/* вызывающий выпускает доступ сам и умеет слитную форму */
     int ea_guest32;   /* X21 держит ГОСТЕВОЙ адрес: база окна ещё не прибавлена */
     int ea_known32;   /* адрес гостя уже 32-битный: обрезка не нужна (2026-08-24) */
+    const hb_native_entry_descriptor_t* native_entry_desc;
+    uint32_t native_entry_guard_off;
+    uint32_t native_entry_guard_call_off;
+    uint32_t native_entry_guard_continue_off;
+    uint8_t native_entry_guard_emitted;
+    /* All runtime-produced sources must share the target's chained ABI,
+     * including ordinary fallback bodies without a byte descriptor. */
+    uint8_t native_entry_frame48;
 } hb_codegen_buffer_t;
 
 /* ARM64 codegen */

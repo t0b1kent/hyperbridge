@@ -662,7 +662,10 @@ static bool try_run_wine_x86_strcmp(hb_context_t* ctx, const uint8_t* code,
         }
         if (!done) { lhs += (uint32_t)n; rhs += (uint32_t)n; }
     }
-    for (;;) {
+    /* The terminating chunk already determined the unsigned-byte ordering.
+     * Preserve legacy repeated reads for externally handled memory, where a
+     * callback or grow handler may observe or change the access sequence. */
+    if (mem->special_read || mem->special_grow) for (;;) {
         uint8_t a = 0, b = 0;
 
         if (hb_memory_read_u8(mem, lhs, &a) != HB_OK ||
@@ -1226,7 +1229,11 @@ hb_result_t hb_wow64cpu_simulate(hb_wow64_thread_t* thread,
                 while (len < max_code_bytes) {
                     uint32_t guest = pc + (uint32_t)len;
                     if (!hb_memory_can_exec(ctx->memory, guest, 1)) break;
-                    r = hb_memory_fetch(ctx->memory, guest, &code[len]);
+                    /* EXEC was checked above. Keep the checked data read and
+                     * its callback/fault behavior without a second EXEC lookup.
+                     * A denied speculative byte still exits without noting a
+                     * new fetch fault, as it did before this change. */
+                    r = hb_memory_read_u8(ctx->memory, guest, &code[len]);
                     if (r != HB_OK) break;
                     len++;
                 }

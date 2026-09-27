@@ -15,6 +15,7 @@ static inline int hb_jit_gate_flag(enum hb_gate_id id, int default_value)
 }
 
 #include "hb_codegen.h"
+#include "hb_native_entry_witness.h"
 #include <mach/mach_time.h>
 #include "hb_regalloc.h"
 #include "hb_contract_telemetry.h"
@@ -3980,14 +3981,18 @@ static int pin_guest32_base_enabled(void) {
     return cached;
 }
 
+#include "hb_native_entry_witness_emit.inc"
+
 static void emit_prologue(hb_codegen_buffer_t* buf) {
     /* Lean mode: scratch has been remapped into the caller-saved bank, so there is nothing to preserve and no
      * frame to build. Verified over 529 347 call-free blocks: none touches the stack outside this frame, none
      * writes x24-x28, none writes x30. The MOV is remapped along with everything else. */
-    bool frame = !(g_lean_frame_on && buf->rmap_active == HB_RMAP_ARMED) || g_lean_remap_only;
+    bool frame = buf->native_entry_desc || buf->native_entry_frame48 ||
+                 !(g_lean_frame_on && buf->rmap_active == HB_RMAP_ARMED) || g_lean_remap_only;
     /* Пустой набор = закреплять нечего: кадр остаётся прежним, 48 байт. Это не мелочь —
      * по замеру таких блоков большинство, и расширенный кадр им был бы чистым убытком. */
-    bool sra = sra_should_arm(buf, frame) && buf->sra_mask != 0;
+    bool sra = !buf->native_entry_desc && !buf->native_entry_frame48 &&
+               sra_should_arm(buf, frame) && buf->sra_mask != 0;
     /* Расширенный кадр нужен ТОЛЬКО банку callee-saved: банк caller-saved ничего не
      * сохраняет, и кадр у него прежний, 48 байт. */
     bool big_frame = sra && buf->sra_bank != HB_SRA_BANK_SCRATCH;
@@ -4025,6 +4030,7 @@ static void emit_prologue(hb_codegen_buffer_t* buf) {
         }
     }
     emit_mov_reg(buf, 19, 0); /* MOV X19, X0 (ctx) */
+    emit_native_entry_guard(buf);
     /* ★ Закрепить базу окна гостя в X24 — ТОЛЬКО ЗДЕСЬ, после того как x19 стал ctx.
      * Первая попытка ставила загрузку в начале emit_prologue, за 22 строки до
      * `MOV X19, X0`, — читалось из мусора, и приёмка ВИСЛА. Разбор у
@@ -24560,6 +24566,26 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_noclose(hb_arm64_codegen_t* c
 
 hb_result_t hb_arm64_codegen_block_with_cfg(hb_arm64_codegen_t* cg, const hb_ir_block_t* block,
                                             const hb_ir_cfg_t* cfg, hb_codegen_buffer_t* out) {
+    if (out) {
+        out->native_entry_guard_emitted = 0;
+        out->native_entry_guard_off = 0;
+        out->native_entry_guard_call_off = 0;
+        out->native_entry_guard_continue_off = 0;
+        if (out->native_entry_desc) {
+            /* The private EXEC ABI carries a second live argument in X1.
+             * Guarded entries initially support ordinary x64 frame48 only. */
+            if (!cg || !cg->ctx || cg->ctx->arch != HB_ARCH_X64 ||
+                cg->ctx->exec_access || out->size)
+                return HB_ERR_INVALID_ARG;
+        }
+        if (out->native_entry_desc || out->native_entry_frame48) {
+            out->rmap_active = 0;
+            out->sra_mask = 0;
+            out->sra_armed = 0;
+            out->sra_slot_ready = 0;
+            out->sra_spill_forced_on = 0;
+        }
+    }
     if (cg && cg->ctx && cg->ctx->exec_access) {
         /* The private EXEC entry takes out* in X1. Do not run ordinary
          * lean/remap/SRA/dead-lazy preparation or a second emission pass: a
@@ -24651,7 +24677,8 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_noclose(hb_arm64_codegen_t* c
     struct timespec a, b;
     hb_result_t r;
     clock_gettime(CLOCK_MONOTONIC, &a);
-    if (lean_frame_enabled() && out && out->size == 0) {
+    if (lean_frame_enabled() && out && !out->native_entry_desc &&
+        !out->native_entry_frame48 && out->size == 0) {
         size_t reloc0 = out->reloc_count;
         out->sra_mask = 0;   /* необнулённый буфер — см. ниже */
         lean_frame_arm(out);
@@ -24739,7 +24766,8 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_noclose(hb_arm64_codegen_t* c
         /* Второй проход: набор выбран по ФАКТИЧЕСКИ выпущенному коду первого прохода.
          * Выпускаем заново только если есть что закреплять — блоков без выгодного регистра
          * большинство, и им второй проход не платится. */
-        if (r == HB_OK && out && sra_enabled() &&
+        if (r == HB_OK && out && !out->native_entry_desc &&
+            !out->native_entry_frame48 && sra_enabled() &&
             (out->arch == HB_ARCH_X64 || (out->arch == HB_ARCH_X86 && sra_i386_enabled()))) {
             /* ★ БАНК СНИМАЕТСЯ ДО СБРОСА `emitted_call`. Признак «зовёт помощника»
              * принадлежит ПЕРВОМУ проходу; после сброса он всегда 0, и банк бы всегда
@@ -24983,6 +25011,17 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
     }
     if (scalar_access_block(cg ? cg->ctx : NULL, block)) {
         emit_prologue(out);
+        if (out->native_entry_desc) {
+            /* A guarded target can be reached without another dispatcher
+             * budget check. This helper counts its actual completed steps
+             * and one block itself, so check deadlines without charging it. */
+            emit_ldr_x(out, 20, 19, (uint32_t)offsetof(hb_context_t, block_count));
+            emit_srok_vyhod(out, 20, (uint32_t)offsetof(hb_context_t, block_deadline),
+                            HB_ERR_BLOCK_LIMIT);
+            emit_ldr_x(out, 22, 19, (uint32_t)offsetof(hb_context_t, step_count));
+            emit_srok_vyhod(out, 22, (uint32_t)offsetof(hb_context_t, step_deadline),
+                            HB_ERR_STEP_LIMIT);
+        }
         emit_mov_reg(out, 0, 19);
         emit_mov_imm64(out, 1, (uint64_t)(uintptr_t)block);
         emit_call_helper(out, (void*)hb_jit_scalar_access_block);

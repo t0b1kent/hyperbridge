@@ -6,6 +6,7 @@
 #include "hb_fault.h"
 #include "hb_ir.h"
 #include "hb_codegen.h"
+#include "hb_code_witness_v1.h"
 #include "hb_cache.h"
 
 #ifdef __cplusplus
@@ -69,6 +70,7 @@ typedef struct {
     uint64_t smc_hash;
     uint32_t smc_span_len;
     struct hb_smc_snapshot* smc_snapshot; /* private immutable byte owner */
+    hb_native_entry_descriptor_t* native_entry_desc; /* experimental body incarnation */
     /* Итерация 979: отпечаток ПОКОЛЕНИЯ страницы (приказ 123). Сравнение одного числа
      * заменяет хеш по всем байтам блока, когда защита страниц включена. */
     uint32_t smc_gen;
@@ -268,6 +270,22 @@ typedef struct {
     uint64_t* l1_table;
     uint64_t* callret_stack;     /* Claude 27.09.2026 — кольцо теневого стека вызовов (MACRUNNER_HB_CALLRET) */
     uint64_t callret_sp_saved;   /* вершина кольца между прогонами этой среды */
+    /* Experimental native-entry guard. Descriptors are revoked on cache release
+     * and retained until runtime destruction; no stale native pointer may be
+     * called after destruction. This runtime remains single-owner/thread. */
+    hb_native_entry_descriptor_t* native_entry_descriptors;
+    uint32_t native_entry_run_depth;
+    bool native_entry_callback_contract;
+    bool native_entry_rejected;
+    uint64_t native_entry_reject_pc;
+    uint64_t native_entry_prepared, native_entry_accepted, native_entry_rejects;
+    uint64_t native_entry_changed, native_entry_unreadable, native_entry_revoked;
+    uint64_t native_entry_ineligible, native_entry_budget_fallback;
+    hb_code_witness_query_cb native_entry_query;
+    void *native_entry_query_opaque;
+    uintptr_t native_entry_owner_thread;
+    uint32_t native_entry_reject_reason;
+    uint64_t native_entry_published, native_entry_fresh_fetch_returns;
 }hb_jit_runtime_t;
 
 hb_jit_runtime_t* hb_jit_runtime_create(hb_context_t* ctx);

@@ -1,0 +1,189 @@
+--- a/src/hb_arm64_codegen.c
++++ b/src/hb_arm64_codegen.c
+@@ -24564,6 +24564,8 @@
+                                             const hb_ir_block_t* block,
+                                             const hb_ir_cfg_t* cfg, hb_codegen_buffer_t* out);
+ 
++#include "hb_local_state_pass.inc"
++
+ hb_result_t hb_arm64_codegen_block_with_cfg(hb_arm64_codegen_t* cg, const hb_ir_block_t* block,
+                                             const hb_ir_cfg_t* cfg, hb_codegen_buffer_t* out) {
+     if (out) {
+@@ -24650,6 +24652,7 @@
+                     (unsigned long long)g_deadlazy_hist[2], (unsigned long long)g_deadlazy_hist[3]);
+     }
+     epi_close_pending(out);
++    if (r == HB_OK) hb_local_state_finish(out);
+     if (r == HB_OK) g_cg_emit_instrs += (unsigned long long)g_cg_last_instrs;
+     return r;
+ }
+--- a/src/hb_runtime.c
++++ b/src/hb_runtime.c
+@@ -6991,6 +6991,8 @@
+                        + offsetof(hb_context_t, regs) * 7u;
+             mix = (mix ^ (uint64_t)lay) * HB_KEY_FNV_PRIME;
+         }
++        mix = (mix ^ (uint64_t)hb_env_flag("MACRUNNER_HB_GPR_WRITE_THROUGH", 0)) * HB_KEY_FNV_PRIME;
++        mix = (mix ^ (uint64_t)hb_env_flag("MACRUNNER_HB_PURE_FLAG_STORES", 0)) * HB_KEY_FNV_PRIME;
+         /* Финальное перемешивание (murmur3 fmix64): без него младшие биты FNV слабо
+          * расходятся, и соседние сочетания давали бы близкие номера. */
+         mix ^= mix >> 33; mix *= 0xff51afd7ed558ccdull;
+--- a/src/hb_local_state_pass.inc
++++ b/src/hb_local_state_pass.inc
+@@ -0,0 +1,156 @@
++/* Two opt-in local transformations after all branch fixups. Stores to guest
++ * registers stay canonical. No byte offsets, branches or fault maps move.
++ * Unknown words are proof boundaries, never guessed register definitions. */
++typedef struct { uint32_t off; unsigned bytes; } hb_ls_value_t;
++typedef struct { uint32_t off; unsigned bytes; size_t word; } hb_ls_store_t;
++typedef struct { size_t loads, flag_stores; } hb_ls_result_t;
++
++static bool hb_ls_overlap(uint32_t a, unsigned an, uint32_t b, unsigned bn) {
++    return a < b + bn && b < a + an;
++}
++static bool hb_ls_gpr(uint32_t off, unsigned bytes) {
++    uint32_t first = (uint32_t)offsetof(hb_context_t, regs.x64.rax);
++    return (bytes == 4 || bytes == 8) && off >= first &&
++           off + bytes <= first + 16 * 8 && ((off - first) & 7u) == 0;
++}
++static bool hb_ls_lazy(uint32_t off, unsigned bytes) {
++    uint32_t first = (uint32_t)offsetof(hb_context_t, lazy_flags);
++    return off >= first && off + bytes <= first + sizeof(hb_lazy_flags_t);
++}
++static int64_t hb_ls_sx(uint32_t n, unsigned bits) {
++    return (int64_t)(int32_t)(n << (32 - bits)) >> (32 - bits);
++}
++static bool hb_ls_integer_dp(uint32_t w) {
++    if ((w & 0x1f000000u) == 0x11000000u || /* ADD/SUB immediate */
++        (w & 0x1f800000u) == 0x12000000u || /* logical immediate */
++        (w & 0x1f800000u) == 0x12800000u || /* wide immediate */
++        (w & 0x1f800000u) == 0x13000000u || /* bitfield */
++        (w & 0x1f800000u) == 0x13800000u || /* extract */
++        (w & 0x1f000000u) == 0x0a000000u || /* logical shifted register */
++        (w & 0x1f000000u) == 0x0b000000u || /* ADD/SUB shifted/extended */
++        (w & 0x1fe0fc00u) == 0x1a000000u || /* ADC/SBC */
++        (w & 0x1fe00000u) == 0x1a800000u || /* conditional select */
++        (w & 0x1f000000u) == 0x1b000000u)   /* multiply-add family */
++        return true;
++    switch (w & 0x7ffffc00u) { /* Defined basic one-source operations, no PAC. */
++        case 0x5ac00000u: case 0x5ac00400u: case 0x5ac00800u:
++        case 0x5ac00c00u: case 0x5ac01000u: case 0x5ac01400u: return true;
++    }
++    switch (w & 0x1fe0fc00u) { /* shifts and integer division (zero does not trap). */
++        case 0x1ac02000u: case 0x1ac02400u: case 0x1ac02800u:
++        case 0x1ac02c00u: case 0x1ac00800u: case 0x1ac00c00u: return true;
++    }
++    return false;
++}
++
++static hb_ls_result_t hb_local_state_words(uint8_t *code, size_t size,
++                                          size_t begin, bool gpr, bool flags) {
++    hb_ls_result_t result = {0, 0};
++    hb_ls_value_t value[31] = {{0}};
++    hb_ls_store_t pending[32] = {{0}};
++    if (!code || (size & 3) || (begin & 3) || begin > size || size > 1024 * 1024)
++        return result;
++    size_t count = size / 4;
++    uint8_t *join = calloc(count ? count : 1, 1);
++    if (!join) return result;
++    /* Both forward and backward destinations invalidate fallthrough facts.
++     * Dynamic transfers clear all facts; supported native entries are before
++     * begin, never into an arbitrary word of a published body. */
++    for (size_t i = 0; i < count; ++i) {
++        uint32_t w; int64_t delta = 0; bool branch = true;
++        memcpy(&w, code + i * 4, 4);
++        if ((w & 0x7c000000u) == 0x14000000u) delta = hb_ls_sx(w & 0x3ffffffu, 26);
++        else if ((w & 0xff000010u) == 0x54000000u ||
++                 (w & 0x7e000000u) == 0x34000000u)
++            delta = hb_ls_sx((w >> 5) & 0x7ffffu, 19);
++        else if ((w & 0x7e000000u) == 0x36000000u)
++            delta = hb_ls_sx((w >> 5) & 0x3fffu, 14);
++        else branch = false;
++        int64_t dest = (int64_t)i + delta;
++        if (branch && dest >= 0 && (uint64_t)dest < count) join[dest] = 1;
++    }
++    for (size_t i = begin / 4; i < count; ++i) {
++        uint32_t w; memcpy(&w, code + i * 4, 4);
++        if (join[i]) { memset(value, 0, sizeof(value)); memset(pending, 0, sizeof(pending)); }
++        unsigned rt = w & 31u, rn = (w >> 5) & 31u;
++        bool memory = false, load = false, pair = false;
++        unsigned bytes = 0; uint32_t off = 0;
++        /* Unsigned-offset integer load/store, no sign-extension or writeback. */
++        if ((w & 0x3f000000u) == 0x39000000u && ((w >> 22) & 3u) <= 1u) {
++            memory = true; load = ((w >> 22) & 1u) != 0;
++            bytes = 1u << (w >> 30); off = ((w >> 10) & 4095u) * bytes;
++        } else if ((w & 0x7f800000u) == 0x29000000u) {
++            /* Offset (not pre/post-index) integer pairs, 32 or 64 bits. */
++            int64_t pair_off = hb_ls_sx((w >> 15) & 127u, 7) * ((w >> 31) ? 8 : 4);
++            if (pair_off >= 0) {
++                memory = pair = true; load = (w & 0x00400000u) != 0;
++                bytes = (w >> 31) ? 16 : 8; off = (uint32_t)pair_off;
++            }
++        }
++        if (memory && rn == 19 && off + bytes <= sizeof(hb_context_t)) {
++            if (load) {
++                for (unsigned k = 0; k < 32; ++k)
++                    if (pending[k].bytes && hb_ls_overlap(off, bytes, pending[k].off, pending[k].bytes))
++                        pending[k].bytes = 0;
++                if (!pair && rt < 31 && hb_ls_gpr(off, bytes)) {
++                    int src = -1;
++                    for (unsigned k = 0; k < 31; ++k)
++                        if (value[k].bytes >= bytes && value[k].off == off) { src = (int)k; break; }
++                    if (gpr && src >= 0) {
++                        /* A same-register W move must still zero the upper half. */
++                        uint32_t replacement = bytes == 8 && (unsigned)src == rt ? 0xd503201fu :
++                            (bytes == 8 ? 0xaa0003e0u : 0x2a0003e0u) | ((uint32_t)src << 16) | rt;
++                        memcpy(code + i * 4, &replacement, 4); result.loads++;
++                    }
++                    value[rt] = (hb_ls_value_t){off, bytes};
++                } else if (rt < 31) value[rt].bytes = 0;
++                if (pair && ((w >> 10) & 31u) < 31) value[(w >> 10) & 31u].bytes = 0;
++                if (rt == 19 || (pair && ((w >> 10) & 31u) == 19)) goto barrier;
++            } else {
++                for (unsigned k = 0; k < 31; ++k)
++                    if (value[k].bytes && hb_ls_overlap(off, bytes, value[k].off, value[k].bytes)) value[k].bytes = 0;
++                /* Write-through: retain every GPR store, then remember its source. */
++                if (!pair && rt < 31 && hb_ls_gpr(off, bytes)) value[rt] = (hb_ls_value_t){off, bytes};
++                for (unsigned k = 0; k < 32; ++k) {
++                    if (!pending[k].bytes || !hb_ls_overlap(off, bytes, pending[k].off, pending[k].bytes)) continue;
++                    if (flags && off <= pending[k].off && off + bytes >= pending[k].off + pending[k].bytes) {
++                        uint32_t nop = 0xd503201fu;
++                        memcpy(code + pending[k].word * 4, &nop, 4); result.flag_stores++;
++                    }
++                    pending[k].bytes = 0;
++                }
++                if (flags && hb_ls_lazy(off, bytes)) for (unsigned k = 0; k < 32; ++k)
++                    if (!pending[k].bytes) { pending[k] = (hb_ls_store_t){off, bytes, i}; break; }
++            }
++            continue;
++        }
++        /* All other memory instructions (including guest loads) can fault or
++         * alias state. Calls, branch words and unknown opcodes also end proof. */
++        if (w == 0xd503201fu || w == 0xd5033bbfu || w == 0xd50339bfu || w == 0xd5033abfu) continue;
++        /* Explicit integer classes: one destination, no fault or helper. */
++        if (hb_ls_integer_dp(w)) {
++            if (rt == 19) goto barrier;
++            hb_ls_value_t moved = {0};
++            if ((w & 0x7fe0ffe0u) == 0x2a0003e0u) {
++                unsigned rm = (w >> 16) & 31u;
++                if (rm < 31) moved = value[rm];
++                if (!(w >> 31) && moved.bytes > 4) moved.bytes = 4;
++            }
++            if (rt < 31) value[rt] = moved;
++            continue;
++        }
++barrier:
++        memset(value, 0, sizeof(value)); memset(pending, 0, sizeof(pending));
++    }
++    free(join);
++    return result;
++}
++
++static void hb_local_state_finish(hb_codegen_buffer_t *out) {
++    bool gpr = hb_env_flag("MACRUNNER_HB_GPR_WRITE_THROUGH", 0);
++    bool flags = hb_env_flag("MACRUNNER_HB_PURE_FLAG_STORES", 0);
++    if ((!gpr && !flags) || !out || out->arch != HB_ARCH_X64 || out->sra_mask ||
++        out->sra_armed || out->rmap_active || lean_frame_enabled()) return;
++    size_t begin = out->native_entry_guard_emitted ? out->native_entry_guard_continue_off : 0;
++    (void)hb_local_state_words(out->code, out->size, begin, gpr, flags);
++}

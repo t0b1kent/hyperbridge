@@ -2454,7 +2454,9 @@ static void bump_generation(hb_memory_t* mem, hb_region_t* r) {
     if (r) r->gen = mem->generation;
 }
 
+static void hb_ms_check_insert(hb_memory_t*, hb_gva_t, size_t);
 static void insert_region_head(hb_memory_t* mem, hb_region_t* r) {
+    hb_ms_check_insert(mem, r->base, r->size);
     r->next = mem->regions;
     mem->regions = r;
     r->tree_left = NULL;
@@ -2761,6 +2763,8 @@ static bool check_perm_region(hb_memory_t* mem, hb_gva_t addr, size_t size, hb_p
  * to reach its successor's seed. */
 static uint64_t g_memory_epoch_seq;
 
+#include "hb_metadata_snapshot.inc"
+
 hb_memory_t* hb_memory_create(size_t max_size) {
     hb_memory_t* mem = calloc(1, sizeof(hb_memory_t));
     if (!mem) return NULL;
@@ -2769,10 +2773,11 @@ hb_memory_t* hb_memory_create(size_t max_size) {
     mem->max_size = max_size;
     mem->hot_gen = __atomic_add_fetch(&g_memory_epoch_seq, 1, __ATOMIC_RELAXED) << 32;
     mem->add_gen = mem->hot_gen;   /* same ABA protection for the negative cache */
+    hb_ms_create(mem);
     return mem;
 }
 
-void hb_memory_destroy(hb_memory_t* mem) {
+static void hb_memory_destroy_snapshot_impl(hb_memory_t* mem) {
     if (!mem) return;
     hb_region_t* r = mem->regions;
     while (r) {
@@ -2839,7 +2844,7 @@ uint8_t* hb_memory_perm_map(hb_memory_t* mem) {
     return mem ? mem->perm_map : NULL;
 }
 
-void hb_memory_perm_map_set(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+static void hb_memory_perm_map_set_snapshot_impl(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
     size_t first, last, i;
     if (!mem || !size) return;
     hb_memory_perm_map_ensure(mem);
@@ -2854,7 +2859,7 @@ void hb_memory_perm_map_set(hb_memory_t* mem, hb_gva_t base, size_t size, hb_per
     for (i = first; i <= last; i++) mem->perm_map[i] = (uint8_t)perm;
 }
 
-hb_result_t hb_memory_map(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+static hb_result_t hb_memory_map_snapshot_impl(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
     if (!mem) return HB_ERR_INVALID_ARG;
     if (!size || range_overflows(base, page_align(size))) return HB_ERR_INVALID_ARG;
     size_t alloc_size = page_align(size);
@@ -2917,7 +2922,7 @@ hb_result_t hb_memory_map(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_
 
 int (*hb_guest_region_query_cb)(uint64_t, uint64_t*, uint64_t*, uint32_t*) = NULL;
 
-hb_result_t hb_memory_map_private(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+static hb_result_t hb_memory_map_private_snapshot_impl(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
     if (!mem || !base) return HB_ERR_INVALID_ARG;
     size_t alloc_size = page_align(size);
     if (!alloc_size || range_overflows(base, alloc_size)) return HB_ERR_INVALID_ARG;
@@ -3040,7 +3045,7 @@ static hb_result_t hb_memory_sync_live_range_inner(hb_memory_t* mem, hb_gva_t ba
     return HB_OK;
 }
 
-hb_result_t hb_memory_sync_live_range(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+static hb_result_t hb_memory_sync_live_range_snapshot_impl(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
     unsigned long long n = __atomic_add_fetch(&mm_slr_calls, 1, __ATOMIC_RELAXED);
     bool timed = (n & MM_CLOCK_MASK) == 0;
     unsigned long long t0 = timed ? mm_now_ns() : 0;
@@ -3062,7 +3067,7 @@ static void* g_guest32_shared_base;
 static hb_memory_t* g_guest32_mem;
 static uintptr_t g_guest32_host_base;
 
-hb_result_t hb_memory_guest32_reserve(hb_memory_t* mem) {
+static hb_result_t hb_memory_guest32_reserve_snapshot_impl(hb_memory_t* mem) {
     const size_t reserve_size = (size_t)(HB_GUEST32_SIZE * 2ULL);
     uintptr_t raw_base;
     uintptr_t aligned;
@@ -3381,7 +3386,7 @@ static hb_result_t guest32_apply_host_prot(hb_memory_t* mem, hb_gva_t start, hb_
     return HB_OK;
 }
 
-hb_result_t hb_memory_guest32_map(hb_memory_t* mem, uint32_t base, size_t size, hb_perm_t perm) {
+static hb_result_t hb_memory_guest32_map_snapshot_impl(hb_memory_t* mem, uint32_t base, size_t size, hb_perm_t perm) {
     size_t alloc_size;
     void* host;
     hb_region_t* r;
@@ -3433,7 +3438,7 @@ hb_result_t hb_memory_guest32_map(hb_memory_t* mem, uint32_t base, size_t size, 
     return HB_OK;
 }
 
-hb_result_t hb_memory_guest32_protect(hb_memory_t* mem, uint32_t base, size_t size, hb_perm_t perm) {
+static hb_result_t hb_memory_guest32_protect_snapshot_impl(hb_memory_t* mem, uint32_t base, size_t size, hb_perm_t perm) {
     hb_gva_t start;
     hb_gva_t top;
     hb_result_t res;
@@ -3533,7 +3538,7 @@ hb_result_t hb_memory_guest32_protect(hb_memory_t* mem, uint32_t base, size_t si
  *
  * Возвращает HB_OK, если область нашлась и защита применена — тогда вызывающий обязан
  * вернуться из обработчика БЕЗ сдвига pc, и команда исполнится заново. */
-hb_result_t hb_memory_guest32_resync_protection(hb_memory_t* mem, uint32_t guest_addr) {
+static hb_result_t hb_memory_guest32_resync_protection_snapshot_impl(hb_memory_t* mem, uint32_t guest_addr) {
     hb_region_t* r;
 
     if (!mem) return HB_ERR_INVALID_ARG;
@@ -3555,7 +3560,7 @@ hb_result_t hb_memory_guest32_resync_by_host(uint64_t host_addr) {
                                                (uint32_t)((uintptr_t)host_addr - base));
 }
 
-hb_result_t hb_memory_guest32_unmap(hb_memory_t* mem, uint32_t base, size_t size) {
+static hb_result_t hb_memory_guest32_unmap_snapshot_impl(hb_memory_t* mem, uint32_t base, size_t size) {
     hb_gva_t start;
     hb_gva_t top;
     hb_result_t res;
@@ -3606,7 +3611,7 @@ uint64_t hb_memory_region_generation(hb_memory_t* mem, hb_gva_t addr) {
     return r ? r->gen : 0;
 }
 
-hb_result_t hb_memory_unmap(hb_memory_t* mem, hb_gva_t base) {
+static hb_result_t hb_memory_unmap_snapshot_impl(hb_memory_t* mem, hb_gva_t base) {
     if (!mem) return HB_ERR_INVALID_ARG;
     hb_region_t** p = &mem->regions;
     while (*p) {
@@ -3636,7 +3641,7 @@ hb_result_t hb_memory_unmap(hb_memory_t* mem, hb_gva_t base) {
  * обработки гостевых отказов (HK, 42-я секунда, см. hb_memory_read_nofault). Здесь области
  * режутся по краям и снимается всё внутри — тот же приём, что у hb_memory_guest32_unmap.
  * Собственную подложку (allocated) снимаем сами: region_free её не трогает. */
-hb_result_t hb_memory_unmap_range(hb_memory_t* mem, hb_gva_t base, size_t size) {
+static hb_result_t hb_memory_unmap_range_snapshot_impl(hb_memory_t* mem, hb_gva_t base, size_t size) {
     hb_gva_t start, top;
     hb_result_t res;
     bool touched_exec = false, any = false;
@@ -4036,7 +4041,7 @@ static hb_result_t hb_memory_protect_inner(hb_memory_t* mem, hb_gva_t base, size
     return HB_OK;
 }
 
-hb_result_t hb_memory_protect(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+static hb_result_t hb_memory_protect_snapshot_impl(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
     unsigned long long n = __atomic_add_fetch(&mm_mp_calls, 1, __ATOMIC_RELAXED);
     bool timed = (n & MM_CLOCK_MASK) == 0;
     unsigned long long t0 = timed ? mm_now_ns() : 0;
@@ -4953,7 +4958,9 @@ grow_retry:
 
 static void* hb_memory_host_ptr_inner(hb_memory_t* mem, hb_gva_t addr, size_t size, hb_perm_t perm) {
     hb_region_t* region;
+    void *snapshot_result;
     int dv_hit = macrunner_hb_datadiverge_hit((uint64_t)addr, size);
+    if (!dv_hit && hb_ms_host_ptr(mem, addr, size, perm, &snapshot_result)) return snapshot_result;
 
     if (!mem || !size) return NULL;
     if (!normalize_guest32_mirror_addr(mem, &addr, size)) return NULL;
@@ -4980,11 +4987,11 @@ static void* hb_memory_host_ptr_inner(hb_memory_t* mem, hb_gva_t addr, size_t si
     return (void*)(uintptr_t)addr;
 }
 
-void hb_memory_set_identity_writes_special(hb_memory_t* mem, bool on) {
+static void hb_memory_set_identity_writes_special_snapshot_impl(hb_memory_t* mem, bool on) {
     if (mem) mem->identity_writes_special = on;
 }
 
-void hb_memory_set_special_handlers(hb_memory_t* mem,
+static void hb_memory_set_special_handlers_snapshot_impl(hb_memory_t* mem,
                                     hb_result_t (*read_fn)(void* user, hb_gva_t addr, void* out, size_t size),
                                     hb_result_t (*write_fn)(void* user, hb_gva_t addr, const void* in, size_t size),
                                     void* user) {
@@ -5012,12 +5019,12 @@ void macrunner_hb_memory_debug_handlers(const hb_memory_t* mem,
     if (out_user)  *out_user  = mem ? mem->special_user : NULL;
 }
 
-void hb_memory_set_grow_handler(hb_memory_t* mem, bool (*grow_fn)(void* user, hb_gva_t addr)) {
+static void hb_memory_set_grow_handler_snapshot_impl(hb_memory_t* mem, bool (*grow_fn)(void* user, hb_gva_t addr)) {
     if (!mem) return;
     mem->special_grow = grow_fn;
 }
 
-void hb_memory_set_atomic_cmpxchg128_handler(hb_memory_t* mem,
+static void hb_memory_set_atomic_cmpxchg128_handler_snapshot_impl(hb_memory_t* mem,
                                             hb_memory_atomic_cmpxchg128_fn callback,
                                             void* user) {
     if (!mem) return;
@@ -5314,4 +5321,125 @@ hb_result_t hb_memory_setup_heap(hb_memory_t* mem, hb_gva_t base, size_t size) {
     mem->heap_base = rg->base;
     mem->heap_size = rg->size;
     return HB_OK;
+}
+
+/* New snapshot synchronization wraps public metadata mutations, including nested calls. */
+void hb_memory_destroy(hb_memory_t* mem) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_ms_retire(snapshot_state); /* Guest32/signal resync never takes a new metadata lock. */
+    hb_memory_destroy_snapshot_impl(mem);
+    hb_ms_write_end(snapshot_state);
+}
+
+void hb_memory_perm_map_set(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_memory_perm_map_set_snapshot_impl(mem, base, size, perm);
+    hb_ms_write_end(snapshot_state);
+}
+
+hb_result_t hb_memory_map(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_map_snapshot_impl(mem, base, size, perm);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_map_private(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_map_private_snapshot_impl(mem, base, size, perm);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_sync_live_range(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_sync_live_range_snapshot_impl(mem, base, size, perm);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_guest32_reserve(hb_memory_t* mem) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_ms_retire(snapshot_state); /* Guest32/signal resync never takes a new metadata lock. */
+    hb_result_t result = hb_memory_guest32_reserve_snapshot_impl(mem);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_guest32_map(hb_memory_t* mem, uint32_t base, size_t size, hb_perm_t perm) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_guest32_map_snapshot_impl(mem, base, size, perm);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_guest32_protect(hb_memory_t* mem, uint32_t base, size_t size, hb_perm_t perm) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_guest32_protect_snapshot_impl(mem, base, size, perm);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_guest32_resync_protection(hb_memory_t* mem, uint32_t guest_addr) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_guest32_resync_protection_snapshot_impl(mem, guest_addr);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_guest32_unmap(hb_memory_t* mem, uint32_t base, size_t size) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_guest32_unmap_snapshot_impl(mem, base, size);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_unmap(hb_memory_t* mem, hb_gva_t base) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_unmap_snapshot_impl(mem, base);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_unmap_range(hb_memory_t* mem, hb_gva_t base, size_t size) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_unmap_range_snapshot_impl(mem, base, size);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+hb_result_t hb_memory_protect(hb_memory_t* mem, hb_gva_t base, size_t size, hb_perm_t perm) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_result_t result = hb_memory_protect_snapshot_impl(mem, base, size, perm);
+    hb_ms_write_end(snapshot_state);
+    return result;
+}
+
+void hb_memory_set_identity_writes_special(hb_memory_t* mem, bool on) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_memory_set_identity_writes_special_snapshot_impl(mem, on);
+    hb_ms_write_end(snapshot_state);
+}
+
+void hb_memory_set_special_handlers(hb_memory_t* mem,
+                                    hb_result_t (*read_fn)(void* user, hb_gva_t addr, void* out, size_t size),
+                                    hb_result_t (*write_fn)(void* user, hb_gva_t addr, const void* in, size_t size),
+                                    void* user) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_memory_set_special_handlers_snapshot_impl(mem, read_fn, write_fn, user);
+    hb_ms_write_end(snapshot_state);
+}
+
+void hb_memory_set_grow_handler(hb_memory_t* mem, bool (*grow_fn)(void* user, hb_gva_t addr)) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_memory_set_grow_handler_snapshot_impl(mem, grow_fn);
+    hb_ms_write_end(snapshot_state);
+}
+
+void hb_memory_set_atomic_cmpxchg128_handler(hb_memory_t* mem,
+                                            hb_memory_atomic_cmpxchg128_fn callback,
+                                            void* user) {
+    hb_ms_state *snapshot_state = hb_ms_write_begin(mem);
+    hb_memory_set_atomic_cmpxchg128_handler_snapshot_impl(mem, callback, user);
+    hb_ms_write_end(snapshot_state);
 }
