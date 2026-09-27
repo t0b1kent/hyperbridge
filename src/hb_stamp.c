@@ -1,2 +1,2 @@
 /* ПОРОЖДЁННЫЙ ФАЙЛ — правки затираются сборкой. См. STAMP_C в Makefile. */
-const char hb_build_stamp[] = "a36e9e58ed99";
+const char hb_build_stamp[] = "9dc9846186c0";
