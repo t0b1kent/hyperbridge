@@ -541,6 +541,44 @@ simd-native-diff-test: $(SIMD_NATIVE_DIFF_TEST_BIN)
 $(LOCK_RACE_TEST_BIN): tests/hb_lock_race.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $< $(STATIC_LIB) -lpthread -o $@
 
+# Native 128-bit compare/exchange, including helper bypass and all lazy flags.
+CAS128_NATIVE_TEST_BIN = tests/hb_cas128_native_test
+CAS128_RACE_TEST_BIN = tests/hb_cas128_race
+CAS128_FAULT_TEST_BIN = tests/hb_cas128_fault_test
+CAS128_TEST_ENV = MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_STATIC_LAZY_COND=1
+
+$(CAS128_NATIVE_TEST_BIN): tests/hb_cas128_native_test.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+$(CAS128_RACE_TEST_BIN): tests/hb_cas128_race.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -lpthread -o $@
+
+$(CAS128_FAULT_TEST_BIN): tests/hb_cas128_fault_test.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+.PHONY: cas128-native-test cas128-fault-test sra-mem-base-test
+cas128-native-test: $(CAS128_NATIVE_TEST_BIN) $(CAS128_RACE_TEST_BIN)
+	$(CAS128_TEST_ENV) MACRUNNER_HB_NATIVE_CAS128=0 ./$(CAS128_NATIVE_TEST_BIN)
+	$(CAS128_TEST_ENV) MACRUNNER_HB_NATIVE_CAS128=1 ./$(CAS128_NATIVE_TEST_BIN)
+	$(CAS128_TEST_ENV) MACRUNNER_HB_NATIVE_CAS128=1 MACRUNNER_HB_STATIC_REGS=1 MACRUNNER_HB_LEAN_FRAME=1 MACRUNNER_HB_FLAG_LIVENESS=1 ./$(CAS128_NATIVE_TEST_BIN)
+	$(CAS128_TEST_ENV) MACRUNNER_HB_NATIVE_CAS128=1 MACRUNNER_HB_TEST_MEM_NATIVE_FLIP=1 ./$(CAS128_NATIVE_TEST_BIN)
+	$(CAS128_TEST_ENV) MACRUNNER_HB_NATIVE_CAS128=0 ./$(CAS128_RACE_TEST_BIN)
+	$(CAS128_TEST_ENV) MACRUNNER_HB_NATIVE_CAS128=1 ./$(CAS128_RACE_TEST_BIN)
+
+cas128-fault-test: $(CAS128_FAULT_TEST_BIN)
+	./$(CAS128_FAULT_TEST_BIN)
+	./$(CAS128_FAULT_TEST_BIN) skew
+
+sra-mem-base-test:
+	python3 tests/hb_sra_mem_base_test.py
+
+test: cas128-native-test cas128-fault-test sra-mem-base-test
+
+.PHONY: clean-cas128-tests
+clean: clean-cas128-tests
+clean-cas128-tests:
+	rm -f $(CAS128_NATIVE_TEST_BIN) $(CAS128_RACE_TEST_BIN) $(CAS128_FAULT_TEST_BIN) $(CAS128_NATIVE_TEST_BIN).d $(CAS128_RACE_TEST_BIN).d $(CAS128_FAULT_TEST_BIN).d
+
 .PHONY: winemetal-compute-v1-test clean-winemetal-compute-v1-test
 winemetal-compute-v1-test: $(WINEMETAL_COMPUTE_TEST_BIN)
 	./$(WINEMETAL_COMPUTE_TEST_BIN)

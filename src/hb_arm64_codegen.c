@@ -3656,6 +3656,15 @@ static int sra_host_of(const hb_codegen_buffer_t* buf, int guest) {
  * Перебор намеренно ГРУБЫЙ: лишнее срабатывание стоит лишь потерянной возможности
  * закрепления, пропущенное — порчи состояния. */
 static int sra_insn_mem_base(uint32_t w) {
+    /* Exclusive/ordered loads and stores share the 001000 major class with
+     * CAS/CASP. Size, acquire/release, pair and register fields vary, but Rn
+     * remains bits 9:5. Atomic RMW and LDAPR share 111000, bit 21=1, bits
+     * 11:10=00 (register-offset loads instead have 11:10=10). Check the whole
+     * classes: a missing STLR or CASPAL veto loses pinned state on a fault.
+     * tests/hb_sra_mem_base_test.py checks assembler-produced words and
+     * deliberately removes each classification below as a negative control. */
+    if ((w & 0x3F000000u) == 0x08000000u) return (int)((w >> 5) & 0x1Fu); /* sra-memory-class: exclusive */
+    if ((w & 0x3F200C00u) == 0x38200000u) return (int)((w >> 5) & 0x1Fu); /* sra-memory-class: lse */
     /* формы с непосредственным смещением (включая пары и векторные) */
     switch (w & 0xFFC00000u) {
         case 0xF9400000u: case 0xF9000000u:   /* LDR/STR  X   */
@@ -24808,6 +24817,88 @@ static bool emit_locked_xchg_family_lse(hb_codegen_buffer_t* out, const hb_ir_in
     return true;
 }
 
+static uint64_t g_native_cas128_emitted;
+uint64_t hb_codegen_native_cas128_emitted(void) {
+    return __atomic_load_n(&g_native_cas128_emitted, __ATOMIC_RELAXED);
+}
+
+/* CMPXCHG16B is represented by CMPXCHG8B with a 128-bit memory operand.
+ * The aligned x64 path relies on the host MMU exactly like other native stores;
+ * CASPAL checks write permission even when its comparison fails. A 16-byte
+ * aligned operand cannot straddle a host page. Misalignment must still reach
+ * the old helper, which reports x86 #GP before changing memory or registers.
+ *
+ * x0:x1 and x2:x3 are even, consecutive pairs under both register maps. Keep
+ * the original expected value in x22:x23. clang -c -arch arm64 / otool -t:
+ * caspal x0,x1,x2,x3,[x21] = 4860fea2; [x13] = 4860fda2 (lean map).
+ * CASPAL also gives the unlocked form atomicity, which is permitted by x86.
+ * No provider, page query, flag materializer, or retry loop on the aligned arm.
+ */
+static bool emit_native_cas128(hb_codegen_buffer_t* out, const hb_ir_instr_t* instr) {
+    hb_ir_operand_t shape;
+    const uint32_t lz = (uint32_t)offsetof(hb_context_t, lazy_flags);
+    size_t misaligned, equal, no_pending, done;
+    if (!instr || !hb_jit_gate_flag(HB_GATE_HB_NATIVE_CAS128, 0) ||
+        out->arch != HB_ARCH_X64 || instr->op != HB_IR_CMPXCHG8B ||
+        instr->dst.type != HB_OP_MEM || instr->dst.size != HB_SIZE_128)
+        return false;
+    /* Reuse the scalar address/diagnostic policy without teaching every scalar
+     * emitter to accept 128-bit data. Width/alignment are handled here. */
+    shape = instr->dst;
+    shape.size = HB_SIZE_64;
+    if (!jit_direct_mem_codegen_enabled(out) || !store_perm_checked_by_host_mmu(out) ||
+        !direct_user_mem_store_raw_allowed(out, &shape)) return false;
+
+    emit_direct_mem_addr(out, &instr->dst);
+    ea_materialize(out);
+    (void)emit_tst_imm64(out, 21, 15);
+    misaligned = emit_bcond_deferred(out, 1 /* NE */);
+    emit_ldr_x(out, 0, 19, (uint32_t)reg_off(out, HB_REG_RAX));
+    emit_ldr_x(out, 1, 19, (uint32_t)reg_off(out, HB_REG_RDX));
+    emit_ldr_x(out, 2, 19, (uint32_t)reg_off(out, HB_REG_RBX));
+    emit_ldr_x(out, 3, 19, (uint32_t)reg_off(out, HB_REG_RCX));
+    emit_mov_reg(out, 22, 0);
+    emit_mov_reg(out, 23, 1);
+    if (instr->is_locked) emit_dmb_ish(out);
+    emit_u32(out, 0x4860fc02u | ((uint32_t)hb_rm(out, 21) << 5));
+    out->x0_holds_ctx = 0;  /* CASP writes Rs:Rs+1, not the usual low Rt field. */
+    if (instr->is_locked) emit_dmb_ish(out);
+    emit_eor_reg(out, 22, 0, 22);
+    emit_eor_reg(out, 23, 1, 23);
+    emit_orr_reg(out, 22, 22, 23);
+    emit_cmp_imm(out, 22, 0);
+    emit_cset_w(out, 16, hb_jit_gate_flag(HB_GATE_HB_TEST_MEM_NATIVE_FLIP, 0) ? 1 : 0);
+    emit_strb_w(out, 16, 19, (uint32_t)offsetof(hb_context_t, flags) +
+                            (uint32_t)offsetof(hb_flags_t, zf));
+    equal = emit_bcond_deferred(out, 0 /* EQ */);
+    emit_str_x(out, 0, 19, (uint32_t)reg_off(out, HB_REG_RAX));
+    emit_str_x(out, 1, 19, (uint32_t)reg_off(out, HB_REG_RDX));
+    (void)patch_bcond(out, equal, 0, out->size);
+
+    /* Preserve the pending producer of the other five flags. Materialization
+     * checks unsupported_mask BEFORE materialized_mask, so clear ZF there too. */
+    emit_ldrb_w(out, 17, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, pending));
+    no_pending = emit_cbz_x_deferred(out, 17);
+    emit_mov_imm_compact(out, 16, HB_FLAG_BIT_ZF);
+    emit_ldr_w(out, 17, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, valid_mask));
+    emit_orr_reg(out, 17, 17, 16);
+    emit_str_w(out, 17, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, valid_mask));
+    emit_ldr_w(out, 17, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, unsupported_mask));
+    emit_bic_reg(out, 17, 17, 16);
+    emit_str_w(out, 17, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, unsupported_mask));
+    emit_ldr_w(out, 17, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, materialized_mask));
+    emit_orr_reg(out, 17, 17, 16);
+    emit_str_w(out, 17, 19, lz + (uint32_t)offsetof(hb_lazy_flags_t, materialized_mask));
+    (void)patch_cbz_x(out, no_pending, 17, out->size);
+    done = emit_b_deferred(out);
+    (void)patch_bcond(out, misaligned, 1, out->size);
+    (void)emit_atomic_ir_helper(out, instr);
+    (void)patch_b(out, done, out->size);
+    g_cg_note_cur.valid = 0;  /* ZF now overrides the statically known producer. */
+    __atomic_add_fetch(&g_native_cas128_emitted, 1, __ATOMIC_RELAXED);
+    return true;
+}
+
 hb_result_t hb_arm64_codegen_instr(hb_arm64_codegen_t* cg, const hb_ir_instr_t* instr, hb_codegen_buffer_t* out) {
     bool lk_serialize;
     hb_result_t r;
@@ -24815,6 +24906,7 @@ hb_result_t hb_arm64_codegen_instr(hb_arm64_codegen_t* cg, const hb_ir_instr_t* 
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     if (cg && cg->ctx && scalar_move_to_interp(cg->ctx, instr))
         return emit_interp_ir_helper(out, instr);
+    if (emit_native_cas128(out, instr)) return HB_OK;
     /* Атомарная команда содержит упорядочивание в себе (суффикс AL), поэтому ни барьеры,
      * ни общая блокировка ей не нужны — в отличие от неатомарного пути ниже. */
     if ((instr->is_locked || instr->op == HB_IR_XCHG) && hb_lse_atomics_enabled() &&
@@ -25966,6 +26058,7 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
          * DMB-bracketed atomic helper, so bracket every other lock-flagged op with DMB ISH here
          * — Mono hazard-pointer loops (`lock or [rsp],r`) livelock on ARM64 without it. */
         const hb_ir_instr_t* lk_instr = &block->instrs[i];
+        if (emit_native_cas128(out, lk_instr)) continue;
         /* MacRunner 19.08, лейн ЛЕСТНИЦА итерация 2545 по приказу 208 (находка лейна ЧТЕЦ).
          * Проверка LSE жила в hb_arm64_codegen_instr, у которой НОЛЬ вызовов — сверено
          * двумя способами независимо: по исходникам (3 упоминания на 4 деревьях, все три
