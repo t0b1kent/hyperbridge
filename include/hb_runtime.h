@@ -483,6 +483,19 @@ void hb_codegen_set_scalar_native_range(uint64_t lo, uint64_t hi);
 void hb_codegen_set_live_write_generation(const uint64_t* generation);
 bool hb_jit_runtime_has_block(hb_jit_runtime_t* rt, uint64_t pc);
 void hb_runtime_set_chain_skip_smc_tracked(bool on);
+
+/* Claude 27.09.2026 — РОДНЫЕ БЫСТРЫЕ ПУТИ. Гостевой адрес, по которому лежит НЕ гостевой код (например,
+ * ARM64EC-функция Wine, куда прыгает x64-переходник экспорта), и обработчик, исполняющий её короткий
+ * путь прямо в диспетчере: вместо выхода наружу, перехода unix<->PE и обратного входа. Обработчик
+ * возвращает 1, если вызов обслужен и контекст уже стоит на адресе возврата (rax, rsp, pc/rip), и 0 —
+ * тогда диспетчер выходит наружу как прежде. Регистрация до 32 адресов, повтор адреса не дублируется. */
+typedef int (*hb_native_fastpath_fn)(hb_context_t* ctx, void* arg);
+int hb_runtime_register_native_fastpath(uint64_t guest_addr, hb_native_fastpath_fn fn, void* arg);
+uint64_t hb_runtime_native_fastpath_hits(void);   /* обслужено этим потоком */
+int hb_runtime_native_fastpath_index(uint64_t guest_addr);   /* номер в таблице или -1 */
+/* Помощник выпущенного кода: обслужить вызов номер idx прямо из блока (1 — обслужен, контекст на
+ * адресе возврата; 0 — нет, выпущенный код выходит в диспетчер как прежде). */
+uint64_t hb_jit_helper_native_fastpath(hb_context_t* ctx, uint64_t idx);
 void hb_runtime_set_chain_x64_disabled(bool on);
 void hb_codegen_set_no_idioms(bool on);
 void hb_codegen_set_scalar_native_loads_only(bool on);

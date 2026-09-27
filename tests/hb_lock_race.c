@@ -61,11 +61,30 @@ int main(void) {
     g_data = mmap(NULL, g_page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     for (g_wide = 0; g_wide < 2; g_wide++) {
         size_t n = 0;
-        /* mov ecx, ITER ; loop: lock add dword/qword [rdi], 1 ; dec ecx ; jnz loop */
+        /* RACE_OP=add (умолчание): mov ecx, ITER ; loop: lock add [rdi], 1 ; dec ecx ; jnz loop
+         * RACE_OP=xadd: mov ecx, ITER ; mov edx, 1 ; loop: lock xadd [rdi], edx ; mov edx, 1 ; dec ecx ; jnz loop
+         * RACE_OP=cas:  mov ecx, ITER ; loop: mov rax,[rdi] ; retry: lea rdx,[rax+1] ; lock cmpxchg [rdi],rdx ;
+         *               jnz retry ; dec ecx ; jnz loop            (32-битная ширина — те же команды без REX.W) */
+        const char* op = getenv("RACE_OP");
+        int lock = !getenv("NOLOCK");                /* NOLOCK=1 — отрицательный контроль: приращения ОБЯЗАНЫ теряться */
         g_code[n++] = 0xb9; memcpy(g_code + n, &(uint32_t){ ITER }, 4); n += 4;
+        if (op && !strcmp(op, "xadd")) { g_code[n++] = 0xba; memcpy(g_code + n, &(uint32_t){ 1 }, 4); n += 4; }
         size_t loop = n;
-        if (!getenv("NOLOCK")) g_code[n++] = 0xf0;   /* NOLOCK=1 — отрицательный контроль: без LOCK приращения ОБЯЗАНЫ теряться */
-        if (g_wide) g_code[n++] = 0x48; g_code[n++] = 0x83; g_code[n++] = 0x07; g_code[n++] = 0x01;
+        if (op && !strcmp(op, "xadd")) {
+            if (lock) g_code[n++] = 0xf0;
+            if (g_wide) g_code[n++] = 0x48; g_code[n++] = 0x0f; g_code[n++] = 0xc1; g_code[n++] = 0x17;   /* xadd [rdi], edx/rdx */
+            g_code[n++] = 0xba; memcpy(g_code + n, &(uint32_t){ 1 }, 4); n += 4;                          /* mov edx, 1 */
+        } else if (op && !strcmp(op, "cas")) {
+            if (g_wide) g_code[n++] = 0x48; g_code[n++] = 0x8b; g_code[n++] = 0x07;                      /* mov eax/rax, [rdi] */
+            size_t retry = n;
+            if (g_wide) g_code[n++] = 0x48; g_code[n++] = 0x8d; g_code[n++] = 0x50; g_code[n++] = 0x01;  /* lea edx/rdx, [rax+1] */
+            if (lock) g_code[n++] = 0xf0;
+            if (g_wide) g_code[n++] = 0x48; g_code[n++] = 0x0f; g_code[n++] = 0xb1; g_code[n++] = 0x17;  /* cmpxchg [rdi], edx/rdx */
+            g_code[n++] = 0x75; g_code[n] = (uint8_t)(retry - (n + 1)); n++;                             /* jnz retry */
+        } else {
+            if (lock) g_code[n++] = 0xf0;
+            if (g_wide) g_code[n++] = 0x48; g_code[n++] = 0x83; g_code[n++] = 0x07; g_code[n++] = 0x01;
+        }
         g_code[n++] = 0xff; g_code[n++] = 0xc9;                                  /* dec ecx */
         g_code[n++] = 0x75; g_code[n] = (uint8_t)(loop - (n + 1)); n++;        /* jnz loop */
         g_len = n;

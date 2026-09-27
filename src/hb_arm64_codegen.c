@@ -8089,7 +8089,30 @@ static void emit_direct_mem128_load_to_x20_x22(hb_codegen_buffer_t* buf) {
     emit_dmb_ishld(buf);
 }
 
+static bool store_perm_checked_by_host_mmu(const hb_codegen_buffer_t* buf);
+
+/* ★ Claude 27.09.2026 — 128-БИТНАЯ ЗАПИСЬ x64 СЫРОЙ, КАК YMM И СКАЛЯРНЫЕ (гейт MACRUNNER_HB_NATIVE_XMM_STORE,
+ * умолчание 0). Профиль меню HK после родных быстрых путей: hb_jit_helper_store_u128 ->
+ * write_bytes_tso — 6,4 % главного потока, КАЖДАЯ запись XMM в память через помощника. Довод
+ * помощника ниже (Mono пишет код MOVDQU в страницы RX) закрыт тем же механизмом, что и у YMM
+ * (emit_native_ymm_store) и прямых скалярных записей x64: тождественное отображение, запись в
+ * страницу без права ловит MMU хозяина, и команда точно возобновляется через интерпретатор,
+ * у которого hb_memory_write с переходом W^X и учётом изменяемого кода. DMB ISH перед — как
+ * release у hb_jit_helper_write_bytes_tso. i386 — прежний помощник (там хозяйская страница окна
+ * шире прав гостя, см. store_perm_checked_by_host_mmu). */
+static int native_xmm_store_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_NATIVE_XMM_STORE, 0);
+}
+
 static void emit_direct_mem128_store_from_x20_x22(hb_codegen_buffer_t* buf) {
+    if (native_xmm_store_enabled() && buf->arch == HB_ARCH_X64 && store_perm_checked_by_host_mmu(buf)) {
+        ea_materialize(buf);
+        emit_dmb_ish(buf);
+        emit_stp_x(buf, 20, 22, 21, 0);              /* STP X20, X22, [X21] */
+        if (jit_direct_store_fence_enabled()) emit_dmb_ish(buf);
+        jit_native_mem_count(1);
+        return;
+    }
     /* Direct STR/STR is only correct for ordinary writable data.  Mono emits
      * x64 code with MOVDQA/MOVDQU stores into live pages whose HB metadata is
      * RWX while the current Mach mapping is RX.  A raw store bypasses
@@ -9104,6 +9127,33 @@ static void emit_l1_table_probe(hb_codegen_buffer_t* buf, int target_reg) {
 }
 
 static void emit_indirect_ic_probe(hb_codegen_buffer_t* buf, int target_reg);
+
+/* ★ Claude 27.09.2026 — РОДНОЙ БЫСТРЫЙ ПУТЬ ПРЯМО ИЗ БЛОКА (гейт MACRUNNER_HB_NATIVE_FASTPATH_INLINE,
+ * умолчание 0; действует, когда адаптер зарегистрировал адреса — MACRUNNER_HB_NATIVE_FASTPATH).
+ *
+ * Прямой JMP x64-заглушки экспорта (FFS) в ARM64EC-функцию Wine прежде кончал блок выходом в
+ * диспетчер, и тот обслуживал вызов (native_fastpath_try) — один оборот диспетчера на вызов;
+ * в меню HK это ~145 тыс./с, половина входов главного потока. Здесь блок сам зовёт обработчик
+ * помощником и при успехе уходит по адресу возврата через слот места/таблицу потока; при отказе
+ * (секция занята и т.п.) — прежний выход с pc = цель, дальше диспетчер и настоящая функция.
+ * Закреплённые регистры обвязка перечитывает целиком (маска 0xFFFF): обработчик меняет rax/rsp. */
+static int jit_nfp_inline_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_NATIVE_FASTPATH_INLINE, 0);
+}
+
+static void emit_native_fastpath_call(hb_codegen_buffer_t* buf, uint64_t target, unsigned idx) {
+    size_t slow, done;
+    emit_mov_reg(buf, 0, 19);
+    emit_mov_imm_compact(buf, 1, idx);
+    emit_call_helper(buf, (void*)hb_jit_helper_native_fastpath);
+    slow = emit_cbz_x_deferred(buf, 0);
+    emit_ldr_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
+    emit_indirect_ic_probe(buf, 20);                /* попадание — прямо в блок места возврата */
+    done = emit_b_deferred(buf);                    /* промах — выход с pc = адрес возврата */
+    (void)patch_cbz_x(buf, slow, 0, buf->size);
+    emit_set_pc_imm64(buf, target);                 /* не обслужен — как прежде: выход на цель */
+    (void)patch_b(buf, done, buf->size);
+}
 
 /* ★ Claude 27.09.2026 — ТЕНЕВОЙ СТЕК ВЫЗОВОВ, УРОВЕНЬ 4 ДЛЯ RET (гейт MACRUNNER_HB_CALLRET, умолчание 0).
  *
@@ -16156,6 +16206,13 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 emit_call_helper(buf, (void*)hb_jit_helper_exec_jmp_operand);
                 emit_return_if_helper_failed(buf);
                 return HB_OK;
+            }
+            if (jit_nfp_inline_enabled()) {
+                int nfp = hb_runtime_native_fastpath_index(instr->target);
+                if (nfp >= 0) {
+                    emit_native_fastpath_call(buf, instr->target, (unsigned)nfp);
+                    return HB_OK;
+                }
             }
             emit_set_pc_imm64(buf, instr->target);
             return HB_OK;
@@ -24064,6 +24121,87 @@ static bool emit_locked_rmw_lse(hb_codegen_buffer_t* out, const hb_ir_instr_t* i
     return true;
 }
 
+/* ★ Claude 27.09.2026 — XCHG r/m, LOCK XADD, LOCK CMPXCHG ОДНОЙ КОМАНДОЙ LSE (гейт MACRUNNER_HB_LSE_XCHG,
+ * умолчание 0; действует вместе с MACRUNNER_HB_LSE_ATOMICS).
+ *
+ * Профиль меню HK: эти операции шли в hb_jit_helper_exec_atomic_ir, а тот перед каждой спрашивал
+ * охрану пары (pair_preaccess -> Wine get_basic_memory_info: блокировка виртуальной памяти, два
+ * sigprocmask, чтение ответа wineserver) — вместе с CMPXCHG16B около 10 % главного потока. Путь LSE
+ * для ADD/SUB/AND/OR/XOR охрану не зовёт; здесь то же для обмена: SWPAL, LDADDAL, CASAL (AL — полный
+ * барьер, как у LOCK). Семантика — hb_interpreter.c: XCHG и XADD возвращают в регистр старое значение,
+ * XADD ставит флаги ADD(старое, регистр); CMPXCHG — флаги CMP(аккумулятор, старое), RAX пишется ТОЛЬКО
+ * при несовпадении (32 бита — с обнулением верха). Только 32/64 бита, операнд-память; прочее — прежним путём.
+ * XCHG с памятью неделим и без LOCK, поэтому берётся всегда. Кодировки сверены ассемблером хозяина:
+ * swpal x20,x22,[x23]=f8f482f6, casal x20,x22,[x23]=c8f4fef6, ldaddal x20,x22,[x23]=f8f402f6. */
+static int lse_xchg_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_LSE_XCHG, 0);
+}
+
+static bool emit_locked_xchg_family_lse(hb_codegen_buffer_t* out, const hb_ir_instr_t* instr) {
+    hb_ir_operand_t reg, rax;
+    bool is64;
+    size_t eq;
+    if (!instr || !lse_xchg_enabled()) return false;
+    if (instr->op != HB_IR_XCHG && instr->op != HB_IR_XADD && instr->op != HB_IR_CMPXCHG) return false;
+    if (instr->op != HB_IR_XCHG && !instr->is_locked) return false;
+    if (instr->dst.type != HB_OP_MEM || !is_plain_gpr_reg_operand(&instr->src2)) return false;
+    if (instr->dst.size != HB_SIZE_32 && instr->dst.size != HB_SIZE_64) return false;
+    if (!jit_direct_mem_codegen_enabled(out) || !direct_user_mem_load_allowed(out, &instr->dst))
+        return false;
+    is64 = (instr->dst.size == HB_SIZE_64);
+    reg = instr->src2;
+    reg.size = instr->dst.size;
+
+    emit_direct_mem_addr(out, &instr->dst);   /* адрес -> x21 */
+    ea_materialize(out);
+    emit_mov_reg(out, 23, 21);                /* адрес -> x23 */
+    if (!emit_load_gpr_sized_to_x20(out, &reg)) return false;   /* x20 = регистр-операнд */
+
+    if (instr->op == HB_IR_XCHG) {
+        emit_u32(out, (is64 ? 0xf8e08000u : 0xb8e08000u) | (20u << 16) | (23u << 5) | 22u);  /* SWPAL */
+        emit_mov_reg(out, 20, 22);
+        emit_store_x20_to_gpr_sized(out, &reg);   /* регистр = старое */
+        return true;
+    }
+    if (instr->op == HB_IR_XADD) {
+        emit_u32(out, (is64 ? 0xf8e00000u : 0xb8e00000u) | (20u << 16) | (23u << 5) | 22u);  /* LDADDAL */
+        if (!g_lazy_flags_skip) {
+            emit_mov_reg(out, 21, 20);            /* правый = исходный регистр */
+            emit_mov_reg(out, 20, 22);            /* левый = старое */
+            emit_add_reg(out, 22, 20, 21);
+            emit_mask_x_reg_to_size(out, 22, 23, instr->dst.size);
+            emit_note_lazy_from_x20_x21_x22(out, HB_LAZY_FLAGS_ADD, instr->dst.size);
+        } else {
+            emit_mov_reg(out, 20, 22);
+        }
+        /* отрицательный контроль MACRUNNER_HB_TEST_MEM_NATIVE_FLIP: в регистр — сумма вместо старого */
+        if (hb_jit_gate_flag( HB_GATE_HB_TEST_MEM_NATIVE_FLIP, 0) && !g_lazy_flags_skip) emit_mov_reg(out, 20, 22);
+        emit_store_x20_to_gpr_sized(out, &reg);   /* регистр = старое (в x20) */
+        return true;
+    }
+    /* CMPXCHG [m], reg: ожидаемое — RAX нужной ширины, новое — регистр. */
+    rax = (hb_ir_operand_t){ .type = HB_OP_REG, .reg = HB_REG_RAX, .size = instr->dst.size };
+    emit_mov_reg(out, 16, 20);                /* x16 = новое */
+    if (!emit_load_gpr_sized_to_x20(out, &rax)) return false;   /* x20 = ожидаемое */
+    emit_mov_reg(out, 22, 20);
+    emit_u32(out, (is64 ? 0xc8e0fc00u : 0x88e0fc00u) | (22u << 16) | (23u << 5) | 16u);  /* CASAL x22,x16,[x23] */
+    emit_mov_reg(out, 21, 22);                /* x21 = старое */
+    emit_cmp_reg(out, 20, 21);
+    /* отрицательный контроль MACRUNNER_HB_TEST_MEM_NATIVE_FLIP: условие перевёрнуто */
+    eq = emit_bcond_deferred(out, hb_jit_gate_flag( HB_GATE_HB_TEST_MEM_NATIVE_FLIP, 0) ? 1 : 0);   /* EQ: RAX не трогаем */
+    emit_mov_reg(out, 23, 20);                /* сохранить ожидаемое */
+    emit_mov_reg(out, 20, 21);
+    emit_store_x20_to_gpr_sized(out, &rax);   /* RAX = старое */
+    emit_mov_reg(out, 20, 23);
+    (void)patch_bcond(out, eq, hb_jit_gate_flag( HB_GATE_HB_TEST_MEM_NATIVE_FLIP, 0) ? 1 : 0, out->size);
+    if (!g_lazy_flags_skip) {
+        emit_sub_reg(out, 22, 20, 21);        /* результат CMP: ожидаемое - старое */
+        emit_mask_x_reg_to_size(out, 22, 23, instr->dst.size);
+        emit_note_lazy_from_x20_x21_x22(out, HB_LAZY_FLAGS_CMP, instr->dst.size);
+    }
+    return true;
+}
+
 hb_result_t hb_arm64_codegen_instr(hb_arm64_codegen_t* cg, const hb_ir_instr_t* instr, hb_codegen_buffer_t* out) {
     bool lk_serialize;
     hb_result_t r;
@@ -24073,6 +24211,9 @@ hb_result_t hb_arm64_codegen_instr(hb_arm64_codegen_t* cg, const hb_ir_instr_t* 
         return emit_interp_ir_helper(out, instr);
     /* Атомарная команда содержит упорядочивание в себе (суффикс AL), поэтому ни барьеры,
      * ни общая блокировка ей не нужны — в отличие от неатомарного пути ниже. */
+    if ((instr->is_locked || instr->op == HB_IR_XCHG) && hb_lse_atomics_enabled() &&
+        emit_locked_xchg_family_lse(out, instr))
+        return HB_OK;
     if (instr->is_locked && hb_lse_atomics_enabled()) {
         if (instr->op == HB_IR_SUB) { if (emit_locked_sub_atomic(out, instr)) return HB_OK; }
         else if (emit_locked_rmw_lse(out, instr)) return HB_OK;
@@ -25214,6 +25355,11 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
         const bool lk_schitat =
             lk_instr->is_locked && !hb_lock_rmw_uses_atomic_helper(lk_instr) &&
             (i == 0 || block->instrs[i - 1].guest_addr != lk_instr->guest_addr);
+        /* Claude 27.09.2026: XCHG r/m, LOCK XADD, LOCK CMPXCHG одной командой LSE (MACRUNNER_HB_LSE_XCHG) —
+         * здесь, а не в hb_arm64_codegen_instr: у той вызовов нет (разбор выше). */
+        if ((lk_instr->is_locked || lk_instr->op == HB_IR_XCHG) && hb_lse_atomics_enabled() &&
+            emit_locked_xchg_family_lse(out, lk_instr))
+            continue;
         if (lk_instr->is_locked && hb_lse_atomics_enabled()) {
             /* ТОЛЬКО continue, без i++: цикл на :13800 сам делает i++. Соседние ветви
              * (emit_cmp_sub_jcc_native, emit_scalar_flags_jcc_pair) пишут i++ потому,

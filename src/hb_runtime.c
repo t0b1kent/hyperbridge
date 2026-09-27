@@ -1484,7 +1484,11 @@ static __thread int t_l1_prev_term = HB_TERM_OTHER;
 static __thread uint64_t t_l1_hit_term[HB_TERM_N], t_l1_miss_term[HB_TERM_N];
 
 static void dispatch_stats_note_terminal(const hb_ir_block_t* block) {
-    int slot = term_slot_of(block);
+    int slot;
+    /* Claude 27.09.2026: разбор завершителя (term_slot_of обходит команды блока) — только под прибором.
+     * Прежде он шёл на КАЖДОМ входе в диспетчер до проверки гейтов: 1,6 % главного потока HK в меню. */
+    if (!l1_term_stats_enabled() && !trace_dispatch_stats_enabled()) return;
+    slot = term_slot_of(block);
     /* Запоминаем вид завершителя ТОЛЬКО что отправленного блока: следующий поиск в кеше
      * порождён именно им, и его попадание/промах приписывается сюда. */
     if (l1_term_stats_enabled()) t_l1_prev_term = slot;
@@ -4000,6 +4004,54 @@ static int runtime_l1_any_term(void) {
 
 static int runtime_callret_enabled(void) {
     return runtime_gate_flag( HB_GATE_HB_CALLRET, 0);
+}
+
+/* Claude 27.09.2026 — РОДНЫЕ БЫСТРЫЕ ПУТИ (см. hb_runtime.h). Перепись меню HK: на главном потоке
+ * 70 % выходов наружу — RtlEnterCriticalSection, RtlLeaveCriticalSection и GetCurrentThreadId; у
+ * рабочего потока — TlsGetValue. Таблица короткая и почти только читается: запись до публикации
+ * счётчика, чтение по acquire. */
+#define HB_NFP_MAX 32u
+static struct { uint64_t addr; hb_native_fastpath_fn fn; void* arg; } g_nfp[HB_NFP_MAX];
+static unsigned g_nfp_n;
+static __thread uint64_t t_nfp_hits;
+
+int hb_runtime_register_native_fastpath(uint64_t addr, hb_native_fastpath_fn fn, void* arg) {
+    unsigned n = __atomic_load_n(&g_nfp_n, __ATOMIC_ACQUIRE), i;
+    if (!addr || !fn) return 0;
+    for (i = 0; i < n; i++) if (g_nfp[i].addr == addr) return 1;
+    if (n >= HB_NFP_MAX) return 0;
+    g_nfp[n].addr = addr;
+    g_nfp[n].fn = fn;
+    g_nfp[n].arg = arg;
+    __atomic_store_n(&g_nfp_n, n + 1u, __ATOMIC_RELEASE);
+    return 1;
+}
+
+uint64_t hb_runtime_native_fastpath_hits(void) { return t_nfp_hits; }
+
+int hb_runtime_native_fastpath_index(uint64_t addr) {
+    unsigned n = __atomic_load_n(&g_nfp_n, __ATOMIC_ACQUIRE), i;
+    for (i = 0; i < n; i++) if (g_nfp[i].addr == addr) return (int)i;
+    return -1;
+}
+
+uint64_t hb_jit_helper_native_fastpath(hb_context_t* ctx, uint64_t idx) {
+    unsigned n = __atomic_load_n(&g_nfp_n, __ATOMIC_ACQUIRE);
+    if (!ctx || idx >= n || !g_nfp[idx].fn(ctx, g_nfp[idx].arg)) return 0;
+    t_nfp_hits++;
+    return 1;
+}
+
+static inline int native_fastpath_try(hb_context_t* ctx) {
+    unsigned n = __atomic_load_n(&g_nfp_n, __ATOMIC_ACQUIRE), i;
+    if (!n) return 0;
+    for (i = 0; i < n; i++)
+        if (g_nfp[i].addr == ctx->pc) {
+            if (!g_nfp[i].fn(ctx, g_nfp[i].arg)) return 0;
+            t_nfp_hits++;
+            return 1;
+        }
+    return 0;
 }
 
 void hb_l1_table_config(void) {
@@ -14303,16 +14355,17 @@ static int disp_census_enabled(void) {
 /* Цели выходов наружу (блока нет): какие адреса зовут чаще всего. Открытая адресация, 1024 слота на
  * поток; не влезшее считается отдельно, чтобы верх списка не выдавал себя за полный. */
 #define DCX_SLOTS 1024u
-static __thread uint64_t t_dcx_pc[DCX_SLOTS], t_dcx_n[DCX_SLOTS];
+static __thread uint64_t t_dcx_pc[DCX_SLOTS], t_dcx_n[DCX_SLOTS], t_dcx_src[DCX_SLOTS];
 static __thread uint64_t t_dcx_overflow;
+static __thread uint64_t t_dcx_last_src;   /* гостевой адрес завершителя блока, вышедшего последним (0 — неизвестен) */
 
 static void disp_census_exit_pc(uint64_t pc) {
     uint32_t h = (uint32_t)((pc * 0x9e3779b97f4a7c15ull) >> 54);
     uint32_t i;
     for (i = 0; i < 16u; i++) {
         uint32_t k = (h + i) & (DCX_SLOTS - 1u);
-        if (t_dcx_pc[k] == pc) { t_dcx_n[k]++; return; }
-        if (!t_dcx_pc[k]) { t_dcx_pc[k] = pc; t_dcx_n[k] = 1; return; }
+        if (t_dcx_pc[k] == pc) { t_dcx_n[k]++; if (!t_dcx_src[k]) t_dcx_src[k] = t_dcx_last_src; return; }
+        if (!t_dcx_pc[k]) { t_dcx_pc[k] = pc; t_dcx_n[k] = 1; t_dcx_src[k] = t_dcx_last_src; return; }
     }
     t_dcx_overflow++;
 }
@@ -14382,17 +14435,23 @@ static void disp_census_exit_top(void) {
     unsigned ns = 0, r, k, j;
     fprintf(stderr, " | exit_top(overflow=%llu):", (unsigned long long)t_dcx_overflow);
     for (r = 0; r < 16u; r++) {
-        uint64_t best = 0, bpc = 0;
+        uint64_t best = 0, bpc = 0, bsrc = 0;
         for (k = 0; k < DCX_SLOTS; k++) {
             int seen = 0;
             if (!t_dcx_pc[k] || t_dcx_n[k] <= best) continue;
             for (j = 0; j < ns; j++) if (shown[j] == t_dcx_pc[k]) { seen = 1; break; }
-            if (!seen) { best = t_dcx_n[k]; bpc = t_dcx_pc[k]; }
+            if (!seen) { best = t_dcx_n[k]; bpc = t_dcx_pc[k]; bsrc = t_dcx_src[k]; }
         }
         if (!bpc) break;
         shown[ns++] = bpc;
         fprintf(stderr, " %#llx[%s]=%llu", (unsigned long long)bpc, census_symbolize(t_dcx_mem, bpc),
                 (unsigned long long)best);
+        if (bsrc) {   /* источник: адрес завершителя и его первые байты (ff 15 / ff 25 — вызов/переход через слот) */
+            uint8_t ib[8] = {0};
+            (void)census_rd(t_dcx_mem, bsrc, ib, sizeof ib);
+            fprintf(stderr, "<-%#llx[%s]{%02x%02x%02x%02x%02x%02x%02x%02x}", (unsigned long long)bsrc,
+                    census_symbolize(t_dcx_mem, bsrc), ib[0], ib[1], ib[2], ib[3], ib[4], ib[5], ib[6], ib[7]);
+        }
     }
 }
 
@@ -14417,7 +14476,7 @@ static void disp_census_print(void) {
     for (t = 0; t < HB_TERM_N; t++)
         if (t_dcs_fill_term[t]) fprintf(stderr, " %s=%llu", hb_term_slot_names[t],
                                         (unsigned long long)t_dcs_fill_term[t]);
-    fprintf(stderr, " | runexit:");
+    fprintf(stderr, " | nfp=%llu | runexit:", (unsigned long long)t_nfp_hits);
     for (t = 0; t < RUNEXIT_N; t++)
         if (t_runexit[t]) fprintf(stderr, " %s=%llu", hb_runexit_names[t], (unsigned long long)t_runexit[t]);
     disp_census_exit_top();
@@ -14440,9 +14499,12 @@ static void disp_census_note(hb_jit_runtime_t* rt, hb_context_t* ctx) {
         l = sl[0] == ctx->pc ? DCL_HIT : (sl[0] ? DCL_CONF : DCL_EMPTY);
     }
     t_dcs[s][t][l]++;
+    t_dcx_last_src = 0;
     if (s == DCS_SLOT) {
         hb_block_cache_entry_t* src = block_cache_find_exit_src(rt->block_cache, ctx->chain_exit_src);
-        t_dcs_slot_term[src ? term_slot_of((const hb_ir_block_t*)src->block) : HB_TERM_OTHER]++;
+        const hb_ir_block_t* sb = src ? (const hb_ir_block_t*)src->block : NULL;
+        t_dcs_slot_term[src ? term_slot_of(sb) : HB_TERM_OTHER]++;
+        if (sb && sb->instr_count) t_dcx_last_src = sb->instrs[sb->instr_count - 1].guest_addr;
     }
     if (t != DCT_NC && l != DCL_HIT) {
         uint32_t w0 = 0;
@@ -14717,6 +14779,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
         if (!block)
             block = find_block(func->cfg, ctx->pc);
         if (!block) {
+            /* родной быстрый путь: обслужен — продолжаем с адреса возврата, не выходя наружу */
+            if (native_fastpath_try(ctx)) continue;
             if (func->truncated) {
                 return set_runtime_fault_result(out, ctx, HB_ERR_TRANSLATION_TRUNCATED,
                                                 steps, blocks_executed,
@@ -15442,6 +15506,7 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             next = find_block(func->cfg, ctx->pc);
         }
         if (!next) {
+            if (native_fastpath_try(ctx)) continue;   /* см. такую же проверку у выхода «блока нет» */
             if (func->truncated) {
                 return set_runtime_fault_result(out, ctx, HB_ERR_TRANSLATION_TRUNCATED,
                                                 steps, blocks_executed,

@@ -249,6 +249,46 @@ int main(void) {
                     }
                 }
     }
+    /* Обмены (Claude 27.09.2026, MACRUNNER_HB_LSE_XCHG): xchg [m],r (87, с LOCK и без — неделим всегда),
+     * lock xadd [m],r (0F C1), lock cmpxchg [m],r (0F B1; половина случаев — память равна аккумулятору),
+     * 32/64 бита, r = rax/rcx/rdx. Сверка rax, rcx, rdx, всех шести флагов и окна памяти. */
+    {
+        const int xsz[] = { 32, 64 };
+        for (int kind = 0; kind < 4; kind++)          /* 0 xchg, 1 lock xchg, 2 lock xadd, 3 lock cmpxchg */
+            for (unsigned si = 0; si < 2; si++)
+                for (int it = 0; it < 400; it++) {
+                    uint8_t code[16], mem[64];
+                    size_t n = 0;
+                    int reg = (int)(rnd() % 3);
+                    if (kind >= 1) code[n++] = 0xf0;
+                    if (xsz[si] == 64) code[n++] = 0x48;
+                    if (kind <= 1) code[n++] = 0x87;
+                    else { code[n++] = 0x0f; code[n++] = kind == 2 ? 0xc1 : 0xb1; }
+                    code[n++] = (uint8_t)(0x40 | (reg << 3) | 7);
+                    code[n++] = 0x08;
+                    uint64_t in[4] = { edge(), edge(), edge(), 0 };
+                    uint64_t val = edge();
+                    for (int k = 0; k < 64; k++) mem[k] = (uint8_t)rnd();
+                    in[3] = (uint64_t)(uintptr_t)(g_data + 64) + 16 - 8;
+                    if (kind == 3 && (rnd() & 1)) val = in[0];          /* совпадение с аккумулятором */
+                    memcpy(mem + 16, &val, xsz[si] / 8);
+                    uint64_t fl = rnd() & 0x8d5;
+                    snap_t a = run(code, n, in, fl, mem, 0);
+                    snap_t b = run(code, n, in, fl, mem, 1);
+                    total++;
+                    if (!a.ok || !b.ok) { nok++; if (nok <= 5) fprintf(stderr, "RUN FAIL xchg kind=%d/%d a=%d b=%d\n", kind, xsz[si], a.ok, b.ok); continue; }
+                    if (a.rax != b.rax || a.rcx != b.rcx || a.rdx != b.rdx || ((a.fl ^ b.fl) & 0x8d5) || memcmp(a.mem, b.mem, 64)) {
+                        bad++;
+                        if (bad <= 12)
+                            fprintf(stderr, "MISMATCH xchg kind=%d/%d reg=%d: rax %llx/%llx rcx %llx/%llx rdx %llx/%llx fl %llx/%llx mem16 %llx/%llx\n",
+                                    kind, xsz[si], reg, (unsigned long long)a.rax, (unsigned long long)b.rax,
+                                    (unsigned long long)a.rcx, (unsigned long long)b.rcx,
+                                    (unsigned long long)a.rdx, (unsigned long long)b.rdx,
+                                    (unsigned long long)a.fl, (unsigned long long)b.fl,
+                                    (unsigned long long)*(uint64_t*)(a.mem + 16), (unsigned long long)*(uint64_t*)(b.mem + 16));
+                    }
+                }
+    }
     /* NOT r / NEG r (F6/F7 /2, /3, mod=11), 8/16/32/64. У NOT флаги не меняются, у NEG — все шесть. */
     {
         const int nsz[] = { 8, 16, 32, 64 };

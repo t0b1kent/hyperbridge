@@ -266,6 +266,258 @@ static BOOL is_ec_code_ptr( ULONG_PTR ptr )
     return (map[page / 64] >> (page & 63)) & 1;
 }
 
+/* Claude 27.09.2026 — РОДНЫЕ БЫСТРЫЕ ПУТИ WINE (гейт MACRUNNER_HB_NATIVE_FASTPATH, умолчание 0).
+ *
+ * Перепись меню HK (выходы диспетчера наружу по цели): главный поток — RtlLeaveCriticalSection
+ * 3,66 млн, RtlEnterCriticalSection 2,91 млн, RtlAllocateHeap 1,78 млн, GetCurrentThreadId 1,23 млн
+ * за прогон; рабочий поток — TlsGetValue 5,3 млн. Каждый такой вызов из x64 в ARM64EC-код Wine — это
+ * выход из JIT, переход unix->PE, упаковка контекста, родной вызов и обратный вход через simulate.
+ * Здесь их короткие пути исполняются прямо в диспетчере (hb_runtime_register_native_fastpath), по
+ * семантике Wine (ntdll/sync.c, kernelbase/thread.c, kernel32/thread.c); всё, что требует ожидания,
+ * пробуждения или выделения памяти, по-прежнему уходит в настоящую функцию.
+ *
+ * Адреса: x64-вид таблицы экспорта в памяти (ARM64X-исправления уже применены загрузчиком) даёт
+ * заглушку FFS «mov rax,rsp; mov [rax+20h],rbx; push rbp; pop rbp; jmp rel32»; её цель — та самая
+ * EC-функция, куда выходит диспетчер. Заглушка другого вида — функция не подключается. */
+static int nfp_gate(void)
+{
+    static int cached = -1;
+    if (cached < 0)
+    {
+        const char *v = getenv( "MACRUNNER_HB_NATIVE_FASTPATH" );
+        cached = (v && v[0] && v[0] != '0') ? 1 : 0;
+        fprintf( stderr, "macrunner-gate: MACRUNNER_HB_NATIVE_FASTPATH=%d\n", cached );
+    }
+    return cached;
+}
+
+/* x64 RET после обслуженного вызова: rax — результат, адрес возврата снят со стека гостя. */
+static inline void nfp_return( hb_context_t *ctx, uint64_t rax )
+{
+    uint64_t rsp = ctx->regs.x64.rsp;
+    uint64_t ret = *(const volatile uint64_t *)(uintptr_t)rsp;
+    ctx->regs.x64.rax = rax;
+    ctx->regs.x64.rsp = rsp + 8;
+    ctx->regs.x64.rip = ret;
+    ctx->pc = ret;
+}
+
+static inline HANDLE nfp_tid_handle( TEB *teb )
+{
+    return ULongToHandle( HandleToULong( teb->ClientId.UniqueThread ) );
+}
+
+static int nfp_get_current_thread_id( hb_context_t *ctx, void *arg )
+{
+    TEB *teb = NtCurrentTeb();
+    (void)arg;
+    if (!teb) return 0;
+    nfp_return( ctx, HandleToULong( teb->ClientId.UniqueThread ) );
+    return 1;
+}
+
+static int nfp_tls_get_value( hb_context_t *ctx, void *arg )
+{
+    TEB *teb = NtCurrentTeb();
+    DWORD index = (DWORD)ctx->regs.x64.rcx;
+    (void)arg;
+    if (!teb || index >= TLS_MINIMUM_AVAILABLE) return 0;   /* слоты расширения — настоящей функцией */
+    teb->LastErrorValue = 0;                                  /* TlsGetValue: SetLastError( ERROR_SUCCESS ) */
+    nfp_return( ctx, (uint64_t)(ULONG_PTR)teb->TlsSlots[index] );
+    return 1;
+}
+
+static int nfp_tls_set_value( hb_context_t *ctx, void *arg )
+{
+    TEB *teb = NtCurrentTeb();
+    DWORD index = (DWORD)ctx->regs.x64.rcx;
+    (void)arg;
+    if (!teb || index >= TLS_MINIMUM_AVAILABLE) return 0;
+    teb->TlsSlots[index] = (void *)(ULONG_PTR)ctx->regs.x64.rdx;
+    nfp_return( ctx, TRUE );
+    return 1;
+}
+
+/* macrunner_try_enter_crit из ntdll/sync.c: захват свободной секции или повтор владельцем. */
+static int nfp_crit_try( RTL_CRITICAL_SECTION *crit, HANDLE tid )
+{
+    LONG expected = -1;
+    if (__atomic_compare_exchange_n( &crit->LockCount, &expected, 0, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST ))
+    {
+        crit->OwningThread = tid;
+        crit->RecursionCount = 1;
+        return 1;
+    }
+    if (crit->OwningThread == tid)
+    {
+        __atomic_add_fetch( &crit->LockCount, 1, __ATOMIC_SEQ_CST );
+        crit->RecursionCount++;
+        return 1;
+    }
+    return 0;
+}
+
+static int nfp_enter_cs( hb_context_t *ctx, void *arg )
+{
+    RTL_CRITICAL_SECTION *crit = (RTL_CRITICAL_SECTION *)(ULONG_PTR)ctx->regs.x64.rcx;
+    TEB *teb = NtCurrentTeb();
+    (void)arg;
+    if (!crit || !teb || ((ULONG_PTR)crit & 7)) return 0;
+    if (!nfp_crit_try( crit, nfp_tid_handle( teb ) )) return 0;   /* занята другим — ждать будет Wine */
+    nfp_return( ctx, STATUS_SUCCESS );
+    return 1;
+}
+
+static int nfp_try_enter_cs( hb_context_t *ctx, void *arg )
+{
+    RTL_CRITICAL_SECTION *crit = (RTL_CRITICAL_SECTION *)(ULONG_PTR)ctx->regs.x64.rcx;
+    TEB *teb = NtCurrentTeb();
+    (void)arg;
+    if (!crit || !teb || ((ULONG_PTR)crit & 7)) return 0;
+    nfp_return( ctx, nfp_crit_try( crit, nfp_tid_handle( teb ) ) );
+    return 1;
+}
+
+static int nfp_leave_cs( hb_context_t *ctx, void *arg )
+{
+    RTL_CRITICAL_SECTION *crit = (RTL_CRITICAL_SECTION *)(ULONG_PTR)ctx->regs.x64.rcx;
+    TEB *teb = NtCurrentTeb();
+    HANDLE tid;
+    LONG rec, expected = 0;
+    (void)arg;
+    if (!crit || !teb || ((ULONG_PTR)crit & 7)) return 0;
+    tid = nfp_tid_handle( teb );
+    rec = crit->RecursionCount;
+    if (rec > 1 && crit->OwningThread == tid)
+    {
+        crit->RecursionCount = rec - 1;
+        __atomic_sub_fetch( &crit->LockCount, 1, __ATOMIC_SEQ_CST );
+    }
+    else if (rec == 1 && crit->OwningThread == tid)
+    {
+        /* Ждущих нет только при LockCount == 0; иначе их будит настоящая функция. */
+        if (__atomic_load_n( &crit->LockCount, __ATOMIC_SEQ_CST ) != 0) return 0;
+        crit->RecursionCount = 0;
+        crit->OwningThread = 0;
+        if (!__atomic_compare_exchange_n( &crit->LockCount, &expected, -1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST ))
+        {
+            /* Ждущий пришёл между проверкой и обменом: вернуть состояние, отпустит Wine. */
+            crit->OwningThread = tid;
+            crit->RecursionCount = 1;
+            return 0;
+        }
+    }
+    else return 0;
+    nfp_return( ctx, STATUS_SUCCESS );
+    return 1;
+}
+
+static void *nfp_export( void *base, const char *name )
+{
+    const IMAGE_DOS_HEADER *dos = base;
+    const IMAGE_NT_HEADERS64 *nt;
+    const IMAGE_DATA_DIRECTORY *dir;
+    const IMAGE_EXPORT_DIRECTORY *exp;
+    const DWORD *names, *funcs;
+    const WORD *ords;
+    DWORD i;
+
+    if (!base || dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    nt = (const IMAGE_NT_HEADERS64 *)((const char *)base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return NULL;
+    dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (!dir->VirtualAddress || !dir->Size) return NULL;
+    exp = (const IMAGE_EXPORT_DIRECTORY *)((const char *)base + dir->VirtualAddress);
+    names = (const DWORD *)((const char *)base + exp->AddressOfNames);
+    ords = (const WORD *)((const char *)base + exp->AddressOfNameOrdinals);
+    funcs = (const DWORD *)((const char *)base + exp->AddressOfFunctions);
+    for (i = 0; i < exp->NumberOfNames; i++)
+    {
+        DWORD rva;
+        if (strcmp( (const char *)base + names[i], name )) continue;
+        if (ords[i] >= exp->NumberOfFunctions) return NULL;
+        rva = funcs[ords[i]];
+        if (rva >= dir->VirtualAddress && rva < dir->VirtualAddress + dir->Size) return NULL;   /* пересылка */
+        return (char *)base + rva;
+    }
+    return NULL;
+}
+
+static uint64_t nfp_ffs_target( const void *ffs )
+{
+    static const unsigned char pattern[10] = { 0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x20, 0x55, 0x5d, 0xe9 };
+    int32_t rel;
+    if (!ffs || memcmp( ffs, pattern, sizeof(pattern) )) return 0;
+    memcpy( &rel, (const unsigned char *)ffs + 10, 4 );
+    return (uint64_t)(uintptr_t)((const unsigned char *)ffs + 14) + (int64_t)rel;
+}
+
+static void *nfp_module( const WCHAR *want )
+{
+    TEB *teb = NtCurrentTeb();
+    PEB_LDR_DATA *ldr;
+    LIST_ENTRY *head, *e;
+    size_t wlen = 0;
+
+    while (want[wlen]) wlen++;
+    if (!teb || !teb->Peb || !(ldr = teb->Peb->LdrData)) return NULL;
+    head = &ldr->InLoadOrderModuleList;
+    for (e = head->Flink; e && e != head; e = e->Flink)
+    {
+        LDR_DATA_TABLE_ENTRY *m = CONTAINING_RECORD( e, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks );
+        size_t i;
+        if (!m->BaseDllName.Buffer || m->BaseDllName.Length != wlen * sizeof(WCHAR)) continue;
+        for (i = 0; i < wlen; i++)
+        {
+            WCHAR a = m->BaseDllName.Buffer[i], b = want[i];
+            if (a >= 'A' && a <= 'Z') a += 32;
+            if (a != b) break;
+        }
+        if (i == wlen) return m->DllBase;
+    }
+    return NULL;
+}
+
+static int nfp_state;   /* 0 — не подключено, 1 — идёт поиск, 2 — готово */
+
+static void nfp_add( void *module, const char *mname, const char *fname, hb_native_fastpath_fn fn )
+{
+    void *ffs = nfp_export( module, fname );
+    uint64_t target = nfp_ffs_target( ffs );
+    int ok = target && is_ec_code_ptr( (ULONG_PTR)target ) &&
+             hb_runtime_register_native_fastpath( target, fn, NULL );
+    fprintf( stderr, "macrunner-hb-nfp: %s!%s заглушка=%p цель=%#llx %s\n", mname, fname, ffs,
+             (unsigned long long)target, ok ? "подключено" : "НЕ подключено" );
+}
+
+static void nfp_discover(void)
+{
+    int expected = 0;
+    void *ntdll, *kernel32, *kernelbase;
+
+    if (!nfp_gate() || __atomic_load_n( &nfp_state, __ATOMIC_ACQUIRE ) == 2) return;
+    if (!__atomic_compare_exchange_n( &nfp_state, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE )) return;
+    /* WCHAR явно: в unix-коде на macOS L"" — это 4-байтный wchar_t, а имена в загрузчике — UTF-16. */
+    static const WCHAR ntdllW[] = {'n','t','d','l','l','.','d','l','l',0};
+    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
+    static const WCHAR kernelbaseW[] = {'k','e','r','n','e','l','b','a','s','e','.','d','l','l',0};
+    ntdll = nfp_module( ntdllW );
+    kernel32 = nfp_module( kernel32W );
+    kernelbase = nfp_module( kernelbaseW );
+    if (!ntdll || !kernel32 || !kernelbase)
+    {
+        __atomic_store_n( &nfp_state, 0, __ATOMIC_RELEASE );   /* ещё не загружены — повторим позже */
+        return;
+    }
+    nfp_add( ntdll, "ntdll", "RtlEnterCriticalSection", nfp_enter_cs );
+    nfp_add( ntdll, "ntdll", "RtlLeaveCriticalSection", nfp_leave_cs );
+    nfp_add( ntdll, "ntdll", "RtlTryEnterCriticalSection", nfp_try_enter_cs );
+    nfp_add( kernel32, "kernel32", "GetCurrentThreadId", nfp_get_current_thread_id );
+    nfp_add( kernelbase, "kernelbase", "TlsGetValue", nfp_tls_get_value );
+    nfp_add( kernelbase, "kernelbase", "TlsSetValue", nfp_tls_set_value );
+    __atomic_store_n( &nfp_state, 2, __ATOMIC_RELEASE );
+}
+
 static unsigned int fast_exec_flags(void);
 
 /* Claude, 25.09.2026 — ПРЯМОЙ ДОСТУП вместо копии через ядро (бит 8 MACRUNNER_HB_FAST_EXEC).
@@ -1592,6 +1844,7 @@ static NTSTATUS unix_simulate_context( struct xtajit64_simulate_params *params,
     memset( &thread_fault, 0, sizeof(thread_fault) );
     if ((status = ensure_thread())) return status;
     reset_precise_fault( thread_ctx );
+    if (__builtin_expect( __atomic_load_n( &nfp_state, __ATOMIC_RELAXED ) != 2, 0 )) nfp_discover();
 
     if (params_v2)
     {
