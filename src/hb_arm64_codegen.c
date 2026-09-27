@@ -3638,8 +3638,19 @@ static int sra_insn_mem_base(uint32_t w) {
         case 0xB9400000u: case 0xB9000000u:   /* LDR/STR  W   */
         case 0x79400000u: case 0x79000000u:   /* LDRH/STRH    */
         case 0x39400000u: case 0x39000000u:   /* LDRB/STRB    */
-        case 0x3D400000u: case 0x3D000000u:   /* LDR/STR  Q   */
+        case 0x3D400000u: case 0x3D000000u:   /* LDR/STR  B (V) — прежде подписаны «Q», это B */
         case 0xFD400000u: case 0xFD000000u:   /* LDR/STR  D   */
+        /* ★ Claude 27.09.2026: настоящие Q (opc 11/10) и S не были в списке, а прямой путь к
+         * памяти гостя их выпускает — emit_sse_fp_src (LDR Q [X21]), emit_native_ymm_load/store
+         * (LDP/STP Q [X21]), семьи SIMD (LDR Q/S/D [X21]). Блок, чей единственный доступ к гостю —
+         * такое чтение, считался НЕ способным отказать, и при MACRUNNER_HB_STATIC_REGS=1 закрепление
+         * разрешалось — отказ бросил бы грязный закреплённый регистр. Проверено ассемблером:
+         * ldr q2,[x21] 3dc002a2; str q2,[x19,#640] 3d80a262; ldr s2,[x21] bd4002a2;
+         * stp q31,q31,[x19,#640] ad147e7f; ldr h1,[x21] 7d4002a1. */
+        case 0x3DC00000u: case 0x3D800000u:   /* LDR/STR  Q   */
+        case 0xBD400000u: case 0xBD000000u:   /* LDR/STR  S   */
+        case 0xAD400000u: case 0xAD000000u:   /* LDP/STP  Q (смещение) */
+        case 0x7D400000u: case 0x7D000000u:   /* LDR/STR  H   */
             return (int)((w >> 5) & 0x1Fu);
         default: break;
     }
