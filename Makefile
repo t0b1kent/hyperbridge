@@ -398,6 +398,17 @@ test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPM
 	! MACRUNNER_HB_TEST_BT_ZF_INVERT=1 ./$(BT_PENDING_NATIVE_TEST_BIN) > /dev/null
 	@echo "Running VEX YMM move parity test (VEX.256 load/store, VEX.128 load upper zeroing)..."
 	./$(VEX_YMM_MOVE_TEST_BIN)
+	@echo "Running native SIMD differential test (XMM moves, SIMD int, SIMD FP vs interpreter; FPCR sync off/on; FLIP control must see every native form)..."
+	$(NATIVE_SIMD_GATES) MACRUNNER_HB_MXCSR_FPCR=0 ./$(SIMD_NATIVE_DIFF_TEST_BIN) 2>/dev/null
+	$(NATIVE_SIMD_GATES) MACRUNNER_HB_MXCSR_FPCR=1 ./$(SIMD_NATIVE_DIFF_TEST_BIN) 2>/dev/null
+	$(NATIVE_SIMD_GATES) MACRUNNER_HB_TEST_SIMD_FLIP=1 HB_SIMD_CASES=60 ./$(SIMD_NATIVE_DIFF_TEST_BIN) 2>/dev/null
+	@echo "Running rounding, host-fenv and upper-state contracts with the native SIMD gates on (FLIP arms must FAIL)..."
+	$(NATIVE_SIMD_GATES) ./$(ROUND_INSTRUCTION_TEST_BIN) 2>/dev/null
+	$(NATIVE_SIMD_GATES) ./$(SSE_INTEGER_ROUNDING_TEST_BIN) 2>/dev/null
+	$(NATIVE_SIMD_GATES) ./$(VEX_UPPER_STATE_TEST_BIN) 2>/dev/null
+	! $(NATIVE_SIMD_GATES) MACRUNNER_HB_TEST_SIMD_FLIP=1 ./$(ROUND_INSTRUCTION_TEST_BIN) > /dev/null 2>&1
+	! $(NATIVE_SIMD_GATES) MACRUNNER_HB_TEST_SIMD_FLIP=1 ./$(SSE_INTEGER_ROUNDING_TEST_BIN) > /dev/null 2>&1
+	! $(NATIVE_SIMD_GATES) MACRUNNER_HB_TEST_SIMD_FLIP=1 ./$(VEX_UPPER_STATE_TEST_BIN) > /dev/null 2>&1
 	@echo "Running native lazy-flag condition test (Jcc/CMOVcc/SETcc; FLIP and gate-off arms must FAIL)..."
 	HB_LAZY_COND_QUICK=1 ./$(LAZY_COND_NATIVE_TEST_BIN) 2>/dev/null
 	! HB_LAZY_COND_QUICK=2 MACRUNNER_HB_TEST_LAZY_COND_FLIP=1 ./$(LAZY_COND_NATIVE_TEST_BIN) > /dev/null 2>&1
@@ -506,6 +517,25 @@ test: $(ALUMEM_DIFF_TEST_BIN) $(LOCK_RACE_TEST_BIN)
 
 $(ALUMEM_DIFF_TEST_BIN): tests/hb_alumem_diff.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+# SIMD без помощника (Claude 27.09.2026): перемещения XMM, целые и FP под тремя гейтами против
+# интерпретатора, 390 форм из системного ассемблера. Прогон дважды — FPCR хозяина по MXCSR гостя
+# выключен и включён. MACRUNNER_HB_TEST_SIMD_FLIP=1 портит выпуск: отрицательный контроль обязан
+# увидеть расхождение на КАЖДОЙ нативной форме (выход 0 в этом режиме значит «увидел везде»).
+SIMD_NATIVE_DIFF_TEST_BIN = tests/hb_simd_native_diff
+NATIVE_SIMD_GATES = MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_NATIVE_XMM_MOVES=1 \
+	MACRUNNER_HB_NATIVE_SIMD_INT=1 MACRUNNER_HB_NATIVE_SIMD_FP=1
+
+test: $(SIMD_NATIVE_DIFF_TEST_BIN)
+
+$(SIMD_NATIVE_DIFF_TEST_BIN): tests/hb_simd_native_diff.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+.PHONY: simd-native-diff-test
+simd-native-diff-test: $(SIMD_NATIVE_DIFF_TEST_BIN)
+	$(NATIVE_SIMD_GATES) MACRUNNER_HB_MXCSR_FPCR=0 ./$(SIMD_NATIVE_DIFF_TEST_BIN) 2>/dev/null
+	$(NATIVE_SIMD_GATES) MACRUNNER_HB_MXCSR_FPCR=1 ./$(SIMD_NATIVE_DIFF_TEST_BIN) 2>/dev/null
+	$(NATIVE_SIMD_GATES) MACRUNNER_HB_TEST_SIMD_FLIP=1 HB_SIMD_CASES=60 ./$(SIMD_NATIVE_DIFF_TEST_BIN) 2>/dev/null
 
 $(LOCK_RACE_TEST_BIN): tests/hb_lock_race.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $< $(STATIC_LIB) -lpthread -o $@

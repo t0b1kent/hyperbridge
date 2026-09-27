@@ -14794,6 +14794,10 @@ static bool emit_native_ymm_store(hb_codegen_buffer_t* buf, const hb_ir_instr_t*
     return true;
 }
 
+/* Claude 27.09.2026: SIMD без помощника — три семьи под гейтами MACRUNNER_HB_NATIVE_XMM_MOVES,
+ * _SIMD_INT, _SIMD_FP (умолчание 0). Разбор — в самом файле. */
+#include "hb_arm64_simd.inc"
+
 /* ═══ Claude 26.09.2026 — УСЛОВИЕ ПЕРЕХОДА ИЗ ОТЛОЖЕННЫХ ФЛАГОВ БЕЗ ВЫЗОВА (уровень 4) ═══
  *
  * Общий путь Jcc звал hb_jit_helper_eval_cond_lazy на КАЖДЫЙ переход, который не слит с
@@ -15680,8 +15684,13 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         case HB_IR_MOV:
             if (emit_native_xmm_mov(buf, instr))
                 return HB_OK;
-            if (operand_is_xmm_or_vecmem(&instr->dst) || operand_is_xmm_or_vecmem(&instr->src1))
+            if (operand_is_xmm_or_vecmem(&instr->dst) || operand_is_xmm_or_vecmem(&instr->src1)) {
+                if (emit_native_simd(buf, instr)) { /* Claude 27.09: movss/movsd рег-рег, VEX.128/256 */
+                    hb_emit_note_native_exit();
+                    return HB_OK;
+                }
                 return emit_interp_ir_helper(buf, instr);
+            }
             if (emit_native_scalar_mov(buf, instr))
                 return HB_OK;
             if (instr->src1.type == HB_OP_MEM) {
@@ -16944,6 +16953,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 hb_emit_note_native_exit();
                 return HB_OK;
             }
+            if (emit_native_simd(buf, instr)) {     /* Claude 27.09: семьи SIMD под своими гейтами */
+                hb_emit_note_native_exit();
+                return HB_OK;
+            }
             perepis_shirin_vzvesti();
             perepis_interp_uchest(buf, instr);
             return emit_interp_ir_helper(buf, instr);
@@ -16954,6 +16967,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         case HB_IR_XORPS: {
             if (emit_native_xmm_logic(buf, instr))
                 return HB_OK;
+            if (emit_native_simd(buf, instr)) {     /* Claude 27.09: VEX, VEX.256, память */
+                hb_emit_note_native_exit();
+                return HB_OK;
+            }
             return emit_interp_ir_helper(buf, instr);
         }
 
@@ -16972,8 +16989,25 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
         case HB_IR_PUNPCK: {
             if (emit_native_punpck_qdq(buf, instr))
                 return HB_OK;
+            if (emit_native_simd(buf, instr)) {     /* Claude 27.09: VEX, VEX.256, память */
+                hb_emit_note_native_exit();
+                return HB_OK;
+            }
             return emit_interp_ir_helper(buf, instr);
         }
+
+        /* Claude 27.09: прежде эти шли в default (всегда помощник). */
+        case HB_IR_VEC_PACKED:
+        case HB_IR_VZEROUPPER:
+        case HB_IR_VZEROALL:
+        case HB_IR_XMM_SCALAR_MOV:
+        case HB_IR_FROUND:
+        case HB_IR_MOVDUP:
+            if (emit_native_simd(buf, instr)) {
+                hb_emit_note_native_exit();
+                return HB_OK;
+            }
+            return emit_interp_ir_helper(buf, instr);
 
         case HB_IR_CWD: {
             if (emit_native_cwd(buf, instr))

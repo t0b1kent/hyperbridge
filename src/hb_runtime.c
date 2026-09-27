@@ -6837,6 +6837,12 @@ static unsigned persistent_cache_version(void) {
         /* Claude 26.09.2026: нативная SSE-арифметика меняет ВЫПУСК (вместо вызова помощника —
          * команды FP и медленный путь по NaN); руки A/B не должны делить записи. */
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_SSE_FP");
+        /* Claude 27.09.2026: три семьи SIMD без помощника меняют ВЫПУСК; FLIP — отрицательный
+         * контроль теста, портит результат выпуска, и его записям в общем кеше не место. */
+        HB_KEY_GATE("MACRUNNER_HB_NATIVE_XMM_MOVES");
+        HB_KEY_GATE("MACRUNNER_HB_NATIVE_SIMD_INT");
+        HB_KEY_GATE("MACRUNNER_HB_NATIVE_SIMD_FP");
+        HB_KEY_GATE("MACRUNNER_HB_TEST_SIMD_FLIP");
         HB_KEY_GATE("MACRUNNER_HB_BT_PENDING_NATIVE");
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_YMM_MOVE");
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_LAZY_COND");
