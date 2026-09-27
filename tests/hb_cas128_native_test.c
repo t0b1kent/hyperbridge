@@ -33,6 +33,16 @@ static hb_result_t provider(void* user, hb_gva_t addr, const uint64_t expected[2
     memcpy(observed, &e, 16);
     return HB_OK;
 }
+/* Wine's adapter installs a pair-RMW access observer (hb_context_set_pair_rmw_access). With it the
+ * JIT used to hand the WHOLE block containing CMPXCHG16B to the interpreter (memory_access_block_modes
+ * mode 2), so the native path never ran in a game. HB_CAS128_TEST_PAIR_ACCESS=1 installs one here:
+ * a native, non-faulting CMPXCHG16B must not consult it; the interpreter consults it once. */
+static hb_result_t pair_observer(void* user, uint64_t guest_pc, hb_gva_t address, size_t size,
+                                 uint32_t access) {
+    (void)guest_pc; (void)address; (void)access;
+    if (size == 16) ++*(unsigned long*)user;
+    return HB_OK;
+}
 static unsigned flags(hb_context_t* c) {
     (void)hb_lazy_flags_materialize_available(c, HB_FLAG_BIT_ALL);
     return c->flags.cf | c->flags.pf << 1 | c->flags.af << 2 |
@@ -96,6 +106,9 @@ int main(void) {
     const char* flip_value = getenv("MACRUNNER_HB_TEST_MEM_NATIVE_FLIP");
     int gate = gate_value && strcmp(gate_value, "0");
     int flip = flip_value && strcmp(flip_value, "0");
+    const char* pair_value = getenv("HB_CAS128_TEST_PAIR_ACCESS");
+    int pair_mode = pair_value && strcmp(pair_value, "0");
+    unsigned long pair_calls[2] = {0, 0};
     unsigned long cases = 0, bad = 0, detected = 0, controls_bad = readonly_probe();
     unsigned long calls[2] = {0, 0};
     hb_context_t* cs[2] = {hb_context_create(HB_ARCH_X64, HB_BACKEND_INTERP), hb_context_create(HB_ARCH_X64, HB_BACKEND_JIT)};
@@ -174,9 +187,12 @@ int main(void) {
             uint64_t a = random64(), b = random64();
             hb_exec_result_t o[2]; hb_result_t r[2], flag_result[2]; unsigned f[2];
             unsigned long before_calls[2] = {calls[0], calls[1]};
+            unsigned long before_pair[2] = {pair_calls[0], pair_calls[1]};
             for (int k = 0; k < 2; ++k) {
                 hb_context_t* c = cs[k];
                 hb_context_reset(c);
+                if (pair_mode && hb_context_set_pair_rmw_access(c, pair_observer, &pair_calls[k], PAGE) != HB_OK)
+                    return 2;
                 memset(&c->regs, 0, sizeof(c->regs));
                 c->regs.x64.rax = expected[0]; c->regs.x64.rdx = expected[1];
                 c->regs.x64.rbx = desired[0]; c->regs.x64.rcx = desired[1];
@@ -203,6 +219,12 @@ int main(void) {
                     o[0].faulted || cs[0]->pc != (uintptr_t)at + n ||
                     ((f[0] >> 3) & 1u) != (outcome == 0) || calls[0] != before_calls[0] + 1 ||
                     calls[1] != before_calls[1] + (gate ? 0 : 1)) ++controls_bad;
+                /* Interpreter consults the observer once; native CASPAL (gate on) never, the old
+                 * whole-block interpreter path (gate off) once. Unaligned: #GP before observation. */
+                if (pair_mode && (pair_calls[0] != before_pair[0] + 1 ||
+                                  pair_calls[1] != before_pair[1] + (gate ? 0 : 1))) ++controls_bad;
+            } else if (pair_mode && (pair_calls[0] != before_pair[0] || pair_calls[1] != before_pair[1])) {
+                ++controls_bad;
             } else if (cs[0]->last_fault_kind != HB_FAULT_KIND_GENERAL_PROTECTION ||
                        cs[0]->pc != (uintptr_t)at + cas_offset ||
                        memcmp(observed[0], initial, sizeof(initial)) ||
@@ -222,8 +244,9 @@ int main(void) {
     }
     uint64_t emitted = hb_codegen_native_cas128_emitted() - emitted_before;
     if (gate ? emitted < FORMS : emitted != 0) ++controls_bad;
-    printf("CAS128_TOTAL gate=%d flip=%d cases=%lu bad=%lu control_bad=%lu flip_detected=%lu emitted=%llu provider_interp=%lu provider_jit=%lu\n",
-           gate, flip, cases, bad, controls_bad, detected, (unsigned long long)emitted, calls[0], calls[1]);
+    printf("CAS128_TOTAL gate=%d flip=%d pair_access=%d cases=%lu bad=%lu control_bad=%lu flip_detected=%lu emitted=%llu provider_interp=%lu provider_jit=%lu pair_interp=%lu pair_jit=%lu\n",
+           gate, flip, pair_mode, cases, bad, controls_bad, detected, (unsigned long long)emitted, calls[0], calls[1],
+           pair_calls[0], pair_calls[1]);
     hb_jit_runtime_destroy(rt);
     for (unsigned i = 0; i < FORMS; ++i) hb_ir_func_destroy(funcs[i]);
     for (unsigned k = 0; k < 2; ++k) { cs[k]->memory = NULL; hb_context_destroy(cs[k]); hb_memory_destroy(ms[k]); }

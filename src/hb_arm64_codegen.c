@@ -22269,13 +22269,28 @@ static inline bool scalar_move_to_interp(const hb_context_t* ctx, const hb_ir_in
     return instr->guest_addr < g_scalar_native_lo || instr->guest_addr >= g_scalar_native_hi;
 }
 
+static bool native_cas128_admit_ctx(const hb_context_t* ctx, const hb_ir_instr_t* instr);
+
+/* ★ Claude 28.09.2026 — CMPXCHG16B С РОДНЫМ ВЫПУСКОМ НЕ УВОДИТ БЛОК В ИНТЕРПРЕТАТОР.
+ *
+ * Адаптер Wine ставит поставщика pair-RMW (hb_context_set_pair_rmw_access), и режим 2 отдавал
+ * интерпретатору ВЕСЬ блок, где встречается CMPXCHG8B/16B, — вместе со всеми его чтениями,
+ * записями и арифметикой. Поэтому MACRUNNER_HB_NATIVE_CAS128 в игре не действовал вовсе:
+ * перепись HK при гейте 1 — 390 845 вызовов помощника на `lock cmpxchg16b [r9+0x40]`, ровно
+ * как при гейте 0 (393 348), а тесты гейта поставщика не ставили.
+ *
+ * Если родной путь команду берёт (native_cas128_admit), блок выпускается обычным образом.
+ * Поставщик при этом не теряется: отказ CASPAL (защита, сторожевая страница, наблюдение
+ * записи) дверь отказов разрешает точным PC -> повтор интерпретатором, а тот вызывает
+ * поставщика (hb_pair_rmw_begin). Невыровненный адрес идёт прежним помощником (#GP). */
 static unsigned memory_access_block_modes(const hb_context_t* ctx, const hb_ir_block_t* block) {
     unsigned modes = 0;
     if (!ctx || !block) return 0;
     if (ctx->exec_access) modes |= 4; /* Includes instructions with zero IR. */
     for (size_t i = 0; i < block->instr_count; i++) {
         if (scalar_move_to_interp(ctx, &block->instrs[i])) modes |= 1;
-        if (ctx->pair_access && hb_ir_pair_rmw(&block->instrs[i])) modes |= 2;
+        if (ctx->pair_access && hb_ir_pair_rmw(&block->instrs[i]) &&
+            !native_cas128_admit_ctx(ctx, &block->instrs[i])) modes |= 2;
     }
     return modes;
 }
@@ -24834,11 +24849,12 @@ uint64_t hb_codegen_native_cas128_emitted(void) {
  * CASPAL also gives the unlocked form atomicity, which is permitted by x86.
  * No provider, page query, flag materializer, or retry loop on the aligned arm.
  */
-static bool emit_native_cas128(hb_codegen_buffer_t* out, const hb_ir_instr_t* instr) {
+/* Допуск родного пути отдельно от выпуска: его же спрашивает memory_access_block_modes, чтобы
+ * блок с такой командой не уходил целиком в интерпретатор (см. там). Из буфера читается
+ * только arch — проверено по всем предикатам ниже. */
+static bool native_cas128_admit(hb_codegen_buffer_t* out, const hb_ir_instr_t* instr) {
     hb_ir_operand_t shape;
-    const uint32_t lz = (uint32_t)offsetof(hb_context_t, lazy_flags);
-    size_t misaligned, equal, no_pending, done;
-    if (!instr || !hb_jit_gate_flag(HB_GATE_HB_NATIVE_CAS128, 0) ||
+    if (!out || !instr || !hb_jit_gate_flag(HB_GATE_HB_NATIVE_CAS128, 0) ||
         out->arch != HB_ARCH_X64 || instr->op != HB_IR_CMPXCHG8B ||
         instr->dst.type != HB_OP_MEM || instr->dst.size != HB_SIZE_128)
         return false;
@@ -24846,8 +24862,22 @@ static bool emit_native_cas128(hb_codegen_buffer_t* out, const hb_ir_instr_t* in
      * emitter to accept 128-bit data. Width/alignment are handled here. */
     shape = instr->dst;
     shape.size = HB_SIZE_64;
-    if (!jit_direct_mem_codegen_enabled(out) || !store_perm_checked_by_host_mmu(out) ||
-        !direct_user_mem_store_raw_allowed(out, &shape)) return false;
+    return jit_direct_mem_codegen_enabled(out) && store_perm_checked_by_host_mmu(out) &&
+           direct_user_mem_store_raw_allowed(out, &shape);
+}
+
+static bool native_cas128_admit_ctx(const hb_context_t* ctx, const hb_ir_instr_t* instr) {
+    hb_codegen_buffer_t tb;
+    if (!ctx) return false;
+    memset(&tb, 0, sizeof(tb));
+    tb.arch = ctx->arch;
+    return native_cas128_admit(&tb, instr);
+}
+
+static bool emit_native_cas128(hb_codegen_buffer_t* out, const hb_ir_instr_t* instr) {
+    const uint32_t lz = (uint32_t)offsetof(hb_context_t, lazy_flags);
+    size_t misaligned, equal, no_pending, done;
+    if (!native_cas128_admit(out, instr)) return false;
 
     emit_direct_mem_addr(out, &instr->dst);
     ea_materialize(out);
