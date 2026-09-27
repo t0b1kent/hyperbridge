@@ -26773,16 +26773,40 @@ TEST(decode_xgetbv_opcode_0f01d0) {
     tests_passed++;
 }
 
+/* Claude 27.09.2026 — ИСПОЛНИТЬ ПРОГРАММУ ЕДИНИЦАМИ, КАК ДИСПЕТЧЕР: подъём из ЖИВОЙ памяти с
+ * ctx->pc до конца окна, прогон, снова подъём — пока pc не дойдёт до конца. Так же ходит стенд
+ * HB_CTRL (hb_ctrl_test.c): x64 — тождественная карта, i386 — окно guest32. Нужно с тех пор, как
+ * CPUID кончает единицу (hb_lift_edinica_serializing): один hb_runtime_run за CPUID не проходит.
+ * Число единиц отдаётся наружу — по нему видно, где лифтер оборвал. */
+static int run_units_from_live_bytes(hb_context_t* ctx, hb_backend_t backend,
+                                     uint64_t base, size_t len, unsigned* units) {
+    unsigned n = 0;
+    while (n < 8 && ctx->pc >= base && ctx->pc < base + len) {
+        size_t rest = (size_t)(base + len - ctx->pc);
+        const uint8_t* live = ctx->arch == HB_ARCH_X86
+            ? (const uint8_t*)hb_memory_host_ptr(ctx->memory, ctx->pc, rest, HB_PERM_READ)
+            : (const uint8_t*)(uintptr_t)ctx->pc;
+        hb_decoder_t* dec = live ? hb_decoder_create(ctx->arch, live, rest, ctx->pc) : NULL;
+        hb_ir_func_t* func = NULL;
+        hb_exec_result_t out;
+        hb_result_t r;
+        if (!dec) break;
+        r = ctx->arch == HB_ARCH_X86 ? hb_lift_func_x86(dec, &func) : hb_lift_func_x64(dec, &func);
+        hb_decoder_destroy(dec);
+        if (r != HB_OK || !func) break;
+        memset(&out, 0, sizeof(out));
+        r = hb_runtime_run(ctx, func, backend, &out);
+        hb_ir_func_destroy(func);
+        n++;
+        if (r != HB_OK || out.result != HB_OK || out.faulted) break;
+    }
+    if (units) *units = n;
+    return ctx->pc == base + len;
+}
+
 TEST(interp_x64_cpuid_vendor_and_leaf1) {
     uint8_t code[] = {0x0f, 0xa2, 0xb8, 0x01, 0x00, 0x00, 0x00, 0x0f, 0xa2};
     uint64_t base = (uint64_t)(uintptr_t)code;
-
-    hb_decoder_t* dec = hb_decoder_create(HB_ARCH_X64, code, sizeof(code), base);
-    hb_ir_func_t* func = NULL;
-    ASSERT(dec != NULL);
-    ASSERT(hb_lift_func_x64(dec, &func) == HB_OK);
-    hb_decoder_destroy(dec);
-    ASSERT(func != NULL);
 
     hb_context_t* ctx = hb_context_create(HB_ARCH_X64, HB_BACKEND_INTERP);
     ASSERT(ctx != NULL);
@@ -26795,9 +26819,9 @@ TEST(interp_x64_cpuid_vendor_and_leaf1) {
     ctx->regs.x64.rcx = 0;
     ctx->regs.x64.rdx = 0;
 
-    hb_exec_result_t out;
-    ASSERT(hb_runtime_run(ctx, func, HB_BACKEND_INTERP, &out) == HB_OK);
-    ASSERT(out.result == HB_OK);
+    /* Claude 27.09.2026: CPUID кончает единицу, поэтому программа идёт двумя единицами
+     * (cpuid | mov eax,1; cpuid) — прежде её проходил один hb_runtime_run. */
+    ASSERT(run_units_from_live_bytes(ctx, HB_BACKEND_INTERP, base, sizeof(code), NULL));
     ASSERT((uint32_t)ctx->regs.x64.rax == 0x000306a9U);
     ASSERT((uint32_t)ctx->regs.x64.rcx & (1u << 12)); /* FMA */
     ASSERT((uint32_t)ctx->regs.x64.rcx & (1u << 27)); /* OSXSAVE */
@@ -26806,7 +26830,6 @@ TEST(interp_x64_cpuid_vendor_and_leaf1) {
     ASSERT((uint32_t)ctx->regs.x64.rdx & (1u << 26)); /* SSE2 */
 
     hb_context_destroy(ctx);
-    hb_ir_func_destroy(func);
     tests_passed++;
 }
 
@@ -26916,13 +26939,6 @@ TEST(jit_x64_cpuid_vendor_and_leaf1) {
     uint8_t code[] = {0x0f, 0xa2, 0xb8, 0x01, 0x00, 0x00, 0x00, 0x0f, 0xa2};
     uint64_t base = (uint64_t)(uintptr_t)code;
 
-    hb_decoder_t* dec = hb_decoder_create(HB_ARCH_X64, code, sizeof(code), base);
-    hb_ir_func_t* func = NULL;
-    ASSERT(dec != NULL);
-    ASSERT(hb_lift_func_x64(dec, &func) == HB_OK);
-    hb_decoder_destroy(dec);
-    ASSERT(func != NULL);
-
     hb_context_t* ctx = hb_context_create(HB_ARCH_X64, HB_BACKEND_JIT);
     ASSERT(ctx != NULL);
     ctx->memory = hb_memory_create(0);
@@ -26934,9 +26950,8 @@ TEST(jit_x64_cpuid_vendor_and_leaf1) {
     ctx->regs.x64.rcx = 0;
     ctx->regs.x64.rdx = 0;
 
-    hb_exec_result_t out;
-    ASSERT(hb_runtime_run(ctx, func, HB_BACKEND_JIT, &out) == HB_OK);
-    ASSERT(out.result == HB_OK);
+    /* Claude 27.09.2026: двумя единицами, см. interp_x64_cpuid_vendor_and_leaf1. */
+    ASSERT(run_units_from_live_bytes(ctx, HB_BACKEND_JIT, base, sizeof(code), NULL));
     ASSERT((uint32_t)ctx->regs.x64.rax == 0x000306a9U);
     /* Итерация 3 (16.08): было «== 0, not advertised yet». Устарело: лист 1 объявляет
      * XSAVE(26), OSXSAVE(27), AVX(28), F16C(29) намеренно (`include/hb_cpuid.h`, итерации 510
@@ -26947,7 +26962,87 @@ TEST(jit_x64_cpuid_vendor_and_leaf1) {
     ASSERT((uint32_t)ctx->regs.x64.rdx & (1u << 26)); /* SSE2 */
 
     hb_context_destroy(ctx);
-    hb_ir_func_destroy(func);
+    tests_passed++;
+}
+
+/* Claude 27.09.2026 — CPUID СЕРИАЛИЗУЕТ: ЗАПИСЬ В СЛЕДУЮЩУЮ ЗА НИМ КОМАНДУ ВИДНА.
+ *
+ * Программа записи next-instruction-cpuid-patch оракула железа HB_CTRL (Астра, три зерна):
+ * гость пишет imm32 команды `mov eax, imm32`, стоящей ПОСЛЕ него в той же единице, исполняет
+ * CPUID (Intel SDM т. 3A §9.1.3, вариант 2) и проваливается в поправленную команду. Железо:
+ * EAX=0x55667788. Пока CPUID единицу не рвал, оба исполнителя давали 0x11223344 — команда за
+ * CPUID была поднята из байтов ДО записи. Единиц обязано быть ровно две: обрыв на CPUID.
+ * Отрицательный контроль — тот же тест против библиотеки acaf063: единица одна, EAX старый. */
+TEST(x64_cpuid_serializes_patched_next_instruction) {
+    static const uint8_t prog[] = {
+        0x48, 0xbb, 0, 0, 0, 0, 0, 0, 0, 0,   /* mov rbx, base+23 — адрес imm32 ниже */
+        0xc7, 0x03, 0x88, 0x77, 0x66, 0x55,   /* mov dword [rbx], 0x55667788 */
+        0x31, 0xc0,                           /* xor eax, eax */
+        0x31, 0xc9,                           /* xor ecx, ecx */
+        0x0f, 0xa2,                           /* cpuid */
+        0xb8, 0x44, 0x33, 0x22, 0x11          /* mov eax, 0x11223344 (imm32 по base+23) */
+    };
+    const size_t page = 16384;
+    for (int arm = 0; arm < 2; arm++) {
+        hb_backend_t backend = arm ? HB_BACKEND_JIT : HB_BACKEND_INTERP;
+        uint8_t* code = mmap(NULL, page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        uint64_t base, imm;
+        unsigned units = 0;
+        ASSERT(code != MAP_FAILED);
+        base = (uint64_t)(uintptr_t)code;
+        imm = base + 23;
+        memcpy(code, prog, sizeof(prog));
+        memcpy(code + 2, &imm, sizeof(imm));
+
+        hb_context_t* ctx = hb_context_create(HB_ARCH_X64, backend);
+        ASSERT(ctx != NULL);
+        ctx->memory = hb_memory_create(0);
+        ASSERT(ctx->memory != NULL);
+        ASSERT(hb_memory_map(ctx->memory, base, page,
+                             HB_PERM_READ | HB_PERM_WRITE | HB_PERM_EXEC) == HB_OK);
+        ctx->pc = base;
+        ctx->regs.x64.rip = base;
+
+        ASSERT(run_units_from_live_bytes(ctx, backend, base, sizeof(prog), &units));
+        ASSERT(units == 2);
+        ASSERT(ctx->regs.x64.rax == 0x55667788ULL);
+
+        hb_context_destroy(ctx);
+        munmap(code, page);
+    }
+    tests_passed++;
+}
+
+/* То же на i386, окно guest32: imm32 команды `mov eax` лежит по 0x00401012. */
+TEST(x86_cpuid_serializes_patched_next_instruction) {
+    const uint32_t base = 0x00401000u;
+    static const uint8_t prog[] = {
+        0xbb, 0x12, 0x10, 0x40, 0x00,         /* mov ebx, 0x00401012 */
+        0xc7, 0x03, 0x88, 0x77, 0x66, 0x55,   /* mov dword [ebx], 0x55667788 */
+        0x31, 0xc0,                           /* xor eax, eax */
+        0x31, 0xc9,                           /* xor ecx, ecx */
+        0x0f, 0xa2,                           /* cpuid */
+        0xb8, 0x44, 0x33, 0x22, 0x11          /* mov eax, 0x11223344 */
+    };
+    for (int arm = 0; arm < 2; arm++) {
+        hb_backend_t backend = arm ? HB_BACKEND_JIT : HB_BACKEND_INTERP;
+        unsigned units = 0;
+        hb_context_t* ctx = hb_context_create(HB_ARCH_X86, backend);
+        ASSERT(ctx != NULL);
+        ctx->memory = hb_memory_create(0);
+        ASSERT(ctx->memory != NULL);
+        ASSERT(hb_memory_guest32_map(ctx->memory, base, 4096,
+                                     HB_PERM_READ | HB_PERM_WRITE | HB_PERM_EXEC) == HB_OK);
+        ASSERT(hb_memory_write(ctx->memory, base, prog, sizeof(prog)) == HB_OK);
+        ctx->pc = base;
+        ctx->regs.x86.eip = base;
+
+        ASSERT(run_units_from_live_bytes(ctx, backend, base, sizeof(prog), &units));
+        ASSERT(units == 2);
+        ASSERT(ctx->regs.x86.eax == 0x55667788u);
+
+        hb_context_destroy(ctx);
+    }
     tests_passed++;
 }
 
@@ -27943,6 +28038,10 @@ int main(int argc, char** argv) {
     test_interp_x64_cpuid_leaf7_hides_unverified_simd_features();
     if (getenv("MACRUNNER_TEST_TRACE")) { fprintf(stderr, "TEST> %s\n", "test_jit_x64_cpuid_vendor_and_leaf1"); fflush(stderr); }
     test_jit_x64_cpuid_vendor_and_leaf1();
+    if (getenv("MACRUNNER_TEST_TRACE")) { fprintf(stderr, "TEST> %s\n", "test_x64_cpuid_serializes_patched_next_instruction"); fflush(stderr); }
+    test_x64_cpuid_serializes_patched_next_instruction();
+    if (getenv("MACRUNNER_TEST_TRACE")) { fprintf(stderr, "TEST> %s\n", "test_x86_cpuid_serializes_patched_next_instruction"); fflush(stderr); }
+    test_x86_cpuid_serializes_patched_next_instruction();
     if (getenv("MACRUNNER_TEST_TRACE")) { fprintf(stderr, "TEST> %s\n", "test_interp_x64_xgetbv_leaf0"); fflush(stderr); }
     test_interp_x64_xgetbv_leaf0();
     if (getenv("MACRUNNER_TEST_TRACE")) { fprintf(stderr, "TEST> %s\n", "test_jit_x64_xgetbv_leaf0"); fflush(stderr); }

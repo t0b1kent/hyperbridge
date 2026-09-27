@@ -2293,6 +2293,33 @@ int hb_lift_edinica_prodlit(const hb_decoder_t* dec, const hb_decoded_t* d, size
     return 1;
 }
 
+/* Claude 27.09.2026 — СЕРИАЛИЗУЮЩАЯ КОМАНДА КОНЧАЕТ ЕДИНИЦУ. Правило одно на обе ветви, как и
+ * продление выше; зовут его оба лифтера сразу после разбора команды.
+ *
+ * Intel SDM т. 3A §9.1.3: самоизменяющийся код обязан увидеть новые байты после ПЕРЕХОДА
+ * (вариант 1) или после СЕРИАЛИЗУЮЩЕЙ команды, например CPUID (вариант 2). Переход единицу и так
+ * обрывает — следующая команда приходит через диспетчер, а там сверка отпечатка SMC или подъём
+ * из живой памяти. CPUID единицу не обрывал: команды за ним поднимались ЗАРАНЕЕ, из байтов, какими
+ * они были до записи гостя, и исполнялись устаревшими — одинаково интерпретатором (он идёт по уже
+ * поднятой функции) и JIT (он выпускает её целиком).
+ *
+ * Замер — оракул железа HB_CTRL, запись next-instruction-cpuid-patch, три зерна, i386 и x64:
+ * гость пишет imm32 команды `mov eax, imm32`, стоящей ПОСЛЕ него в том же блоке, исполняет CPUID
+ * и проваливается в поправленную команду. Железо: EAX=0x55667788; мы — 0x11223344 в обоих
+ * исполнителях. С обрывом — 0x55667788.
+ *
+ * Выход из такой единицы — прямой, без перехода: pc пишет сама единица
+ * (codegen_emit_tail_pc_if_needed), сшивка её не берёт (завершитель не JMP/Jcc/CALL,
+ * block_terminal_is_chainable), значит следующую команду всегда ищет диспетчер со сверкой.
+ *
+ * Остальные сериализующие команды провала за себя не дают (проба разбора и подъёма, обе ветви):
+ * IRET декодер помечает возвратом (i386) или переходом (x64) — единица кончается и так;
+ * привилегированные (MOV CR, LGDT/LIDT/LLDT/LTR, INVLPG, WRMSR, INVD, WBINVD, RSM) и SERIALIZE
+ * (0F 01 E8) поднимаются узлом отказа — привилегии или «не поддержано». */
+int hb_lift_edinica_serializing(const hb_decoded_t* d) {
+    return d && d->opcode == HB_INS_CPUID;
+}
+
 hb_result_t hb_lift_func_x86(hb_decoder_t* dec, hb_ir_func_t** out) {
     if (!dec || !out) return HB_ERR_INVALID_ARG;
 
@@ -2359,6 +2386,9 @@ hb_result_t hb_lift_func_x86(hb_decoder_t* dec, hb_ir_func_t** out) {
             __atomic_add_fetch(&g_mg_hist[merged < 8 ? merged : 8], 1, __ATOMIC_RELAXED);
             break;
         }
+        /* Сериализующая команда (CPUID) — конец единицы, но НЕ усечение: truncated не ставим,
+         * провал за неё штатный выход в диспетчер. Разбор у hb_lift_edinica_serializing. */
+        if (hb_lift_edinica_serializing(&d)) break;
         if (count >= instr_limit) {
             if (dec->pos < dec->code_len) {
                 func->truncated = true;

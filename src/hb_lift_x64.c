@@ -2206,6 +2206,10 @@ hb_result_t hb_lift_func_x64(hb_decoder_t* dec, hb_ir_func_t** out) {
             if (hb_lift_edinica_prodlit(dec, &d, merged)) { merged++; continue; }
             break;
         }
+        /* Сериализующая команда (CPUID) — конец единицы, но НЕ усечение: truncated не ставим,
+         * провал за неё штатный выход в диспетчер. Правило общее с ветвью i386, разбор у
+         * hb_lift_edinica_serializing (hb_lift_x86.c). */
+        if (hb_lift_edinica_serializing(&d)) break;
         if (count >= instr_limit) {
             if (dec->pos < dec->code_len) {
                 func->truncated = true;
