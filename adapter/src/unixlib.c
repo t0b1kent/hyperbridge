@@ -1209,7 +1209,7 @@ static NTSTATUS unix_process_term_impl( void *args )
 static BOOL jit_cache_full_fallback( hb_result_t result, const hb_exec_result_t *exec )
 {
     return result == HB_OK && exec && exec->faulted && exec->fault_reason &&
-           !exec->steps_executed && !exec->blocks_executed &&
+           !hb_exec_result_has_progress( exec ) &&
            !strcmp( exec->fault_reason, "JIT code cache full; interpreter fallback" );
 }
 
@@ -1408,7 +1408,7 @@ static hb_result_t run_translated_block( const hb_ir_func_t *func, hb_exec_resul
         return result;
     }
     if (result == HB_OK && jit_out.result == HB_ERR_STEP_LIMIT &&
-        !jit_out.faulted && jit_out.steps_executed)
+        !jit_out.faulted && hb_exec_result_has_progress( &jit_out ))
     {
         /* The JIT commits architectural state at this resumable slice boundary.
          * Keep the instruction budget; deliver the saved context to the PE
@@ -1446,10 +1446,11 @@ static hb_result_t run_translated_block( const hb_ir_func_t *func, hb_exec_resul
         fflush( stderr );
     }
 
-    if (!snap && (jit_out.steps_executed || jit_out.blocks_executed))
+    if ((!snap || jit_out.counters_are_dispatches) && hb_exec_result_has_progress( &jit_out ))
     {
         /* Без снимка откатывать нечем, а повтор исполненного недопустим — отдаём как есть.
-         * По разбору выше сюда не попадаем; счёт — чтобы это было видно, если попадём. */
+         * Counter-free chains also forbid replay with a register snapshot:
+         * preceding blocks may already have committed guest-memory stores. */
         static uint64_t no_snap_refused;
         uint64_t n = __atomic_add_fetch( &no_snap_refused, 1, __ATOMIC_RELAXED );
         if (n <= 8)
@@ -2029,7 +2030,7 @@ static NTSTATUS unix_simulate_context( struct xtajit64_simulate_params *params,
         reset_precise_fault( thread_ctx );
         r = run_translated_block( func, &block_out, &budget_yield );
         /* Бит 256: пустой запуск по заглушке — ни шага, ни блока — значит нужен полный разбор. */
-        if (func == stub_func && !block_out.steps_executed && !block_out.blocks_executed)
+        if (func == stub_func && !hb_exec_result_has_progress( &block_out ))
         {
             stub_force_lift = TRUE;
             fast_stat_stub_empty++;

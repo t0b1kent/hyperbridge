@@ -22,7 +22,20 @@ typedef struct {
     bool timed_out;
     bool faulted;
     const char* fault_reason;
+    /* Guest execution began: native admission or an interpreter prefix.
+     * State may have changed even when no instruction retired. Never use
+     * zero counters to authorize replay. */
+    bool execution_started;
+    /* CHAIN_NO_COUNTERS reports C dispatches and entry-block IR counts, not
+     * the number of guest blocks/instructions traversed inside native chains. */
+    bool counters_are_dispatches;
 } hb_exec_result_t;
+
+static inline bool hb_exec_result_has_progress(const hb_exec_result_t* result) {
+    return result && (result->execution_started ||
+                      (!result->counters_are_dispatches &&
+                       (result->steps_executed || result->blocks_executed)));
+}
 
 /* Interpreter */
 typedef struct hb_interpreter hb_interpreter_t;
@@ -103,6 +116,10 @@ typedef struct {
     uint64_t slot2_guest_addr;
     uint8_t* slot2_target_code;
     size_t   slot2_patch_offset;
+    /* Exact incoming/outgoing lists for body-to-body branches. Eviction work
+     * is proportional to this block's degree, independent of UNCHAIN_WALK. */
+    struct hb_transit_link* transit_in;
+    struct hb_transit_link* transit_out;
 } hb_block_chain_meta_t;
 
 /* MacRunner (2026-06-17 — FIX#2a, HK rank-7 livelock): the block-cache hash table was

@@ -592,6 +592,47 @@ sra-mem-base-test:
 
 test: cas128-native-test cas128-fault-test sra-mem-base-test
 
+tests/hb_zero_transit_test: tests/hb_zero_transit_test.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+.PHONY: zero-transit-test
+zero-transit-test: tests/hb_zero_transit_test
+	./tests/hb_zero_transit_test --mode off --fallback-progress
+	./tests/hb_zero_transit_test --mode on --fallback-progress
+	./tests/hb_zero_transit_test --mode off
+	./tests/hb_zero_transit_test --mode on
+	./tests/hb_zero_transit_test --mode off --helper-stack --cases 4
+	./tests/hb_zero_transit_test --mode on --helper-stack --cases 4
+	./tests/hb_zero_transit_test --mode pc --cases 8
+	./tests/hb_zero_transit_test --mode counters --cases 8
+	./tests/hb_zero_transit_test --mode counters --one-slot --cases 8
+	./tests/hb_zero_transit_test --mode on --mixed-lean --cases 8
+	./tests/hb_zero_transit_test --mode off --mixed-lean --cases 8
+	./tests/hb_zero_transit_test --mode counters --one-slot --mixed-lean --cases 8
+	MACRUNNER_HB_CALLRET=1 ./tests/hb_zero_transit_test --mode on --cases 8
+	@./tests/hb_zero_transit_test --mode on --cases 2 --negative > /tmp/hb-zero-transit-negative.$$$$.log 2>&1; \
+	status=$$?; if [ $$status -eq 0 ] || ! grep -q ZERO_TRANSIT_DIFF /tmp/hb-zero-transit-negative.$$$$.log; then \
+	cat /tmp/hb-zero-transit-negative.$$$$.log; rm -f /tmp/hb-zero-transit-negative.$$$$.log; exit 1; fi; \
+	rm -f /tmp/hb-zero-transit-negative.$$$$.log; echo 'zero-transit negative control: detected'
+
+test: zero-transit-test
+
+tests/hb_zero_transit_evict_test: tests/hb_zero_transit_evict_test.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+.PHONY: zero-transit-evict-test
+zero-transit-evict-test: tests/hb_zero_transit_evict_test
+	./tests/hb_zero_transit_evict_test
+	./tests/hb_zero_transit_evict_test --lean
+	./tests/hb_zero_transit_evict_test --sra
+	./tests/hb_zero_transit_evict_test --sra-saved
+	./tests/hb_zero_transit_evict_test --remap
+
+test: zero-transit-evict-test
+
+tests/hb_zero_transit_bench: tests/hb_zero_transit_bench.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
 .PHONY: clean-cas128-tests
 clean: clean-cas128-tests
 clean-cas128-tests:

@@ -14,6 +14,7 @@ static inline int runtime_gate_flag(enum hb_gate_id id, int default_value)
 }
 
 #include "hb_runtime.h"
+#include "hb_transit.h"
 #include "hb_pair_rmw.h"
 #include <pthread.h>
 #include <mach/mach_time.h>
@@ -1775,6 +1776,41 @@ static void block_cache_clear_icache(const hb_jit_buffer_t* arena, uint8_t* star
         __builtin___clear_cache((char*)rw, (char*)rw + len);
 }
 
+struct hb_transit_link {
+    hb_block_chain_meta_t *from, *to;
+    struct hb_transit_link *in_next, *in_prev, *out_next, *out_prev;
+    uint8_t* patch;
+};
+
+static void transit_unlink(hb_block_cache_t* cache, struct hb_transit_link* link,
+                            bool restore) {
+    if (restore) {
+        arm64_store_u32(cache->jit_mem, link->patch, HB_TRANSIT_COLD_BRANCH);
+        block_cache_clear_icache(cache->jit_mem, link->patch, 4);
+    }
+    if (link->in_prev) link->in_prev->in_next = link->in_next;
+    else link->to->transit_in = link->in_next;
+    if (link->in_next) link->in_next->in_prev = link->in_prev;
+    if (link->out_prev) link->out_prev->out_next = link->out_next;
+    else link->from->transit_out = link->out_next;
+    if (link->out_next) link->out_next->out_prev = link->out_prev;
+    free(link);
+}
+
+static void transit_forget(hb_block_cache_t* cache, hb_block_chain_meta_t* meta,
+                            bool restore) {
+    if (!meta) return;
+    while (meta->transit_in) transit_unlink(cache, meta->transit_in, restore);
+    while (meta->transit_out) transit_unlink(cache, meta->transit_out, restore);
+}
+
+static bool block_cache_has_transit(const hb_block_cache_t* cache,
+                                   const hb_block_cache_entry_t* entry) {
+    /* Runtime switches control new edges; old links remain owned until revoked. */
+    const hb_block_chain_meta_t* meta = block_cache_chain_meta_const(cache, entry);
+    return meta && (meta->transit_in || meta->transit_out);
+}
+
 static void block_cache_unchain_entry(hb_block_cache_t* cache,
                                       hb_block_cache_entry_t* entry) {
     static const uint32_t arm64_nop = 0xd503201fu;
@@ -1784,6 +1820,7 @@ static void block_cache_unchain_entry(hb_block_cache_t* cache,
     meta = block_cache_chain_meta(cache, entry, false);
     if (!entry || !entry->native_code || !meta)
         return;
+    transit_forget(cache, meta, true);
     if (!meta->target_code && !meta->slot2_target_code)
         return;
     /* ОБЕ щели. Оставить вторую заплату на месте значило бы оставить переход в код
@@ -1791,7 +1828,8 @@ static void block_cache_unchain_entry(hb_block_cache_t* cache,
     if (meta->target_code &&
         meta->patch_offset + sizeof(uint32_t) <= entry->native_size) {
         patch = entry->native_code + meta->patch_offset;
-        arm64_store_u32(cache->jit_mem, patch, arm64_nop);
+        arm64_store_u32(cache->jit_mem, patch,
+            runtime_gate_flag(HB_GATE_HB_CHAIN_SKIP_NOP, 0) ? 0x14000002u : arm64_nop);
         if (meta->patch_offset + 2 * sizeof(uint32_t) <= entry->native_size)
             arm64_store_u32(cache->jit_mem, patch + sizeof(uint32_t), arm64_nop);
         block_cache_clear_icache(cache->jit_mem, patch, 2 * sizeof(uint32_t));
@@ -1799,10 +1837,14 @@ static void block_cache_unchain_entry(hb_block_cache_t* cache,
     if (meta->slot2_target_code &&
         meta->slot2_patch_offset + sizeof(uint32_t) <= entry->native_size) {
         patch = entry->native_code + meta->slot2_patch_offset;
-        arm64_store_u32(cache->jit_mem, patch, arm64_nop);
-        if (meta->slot2_patch_offset + 2 * sizeof(uint32_t) <= entry->native_size)
-            arm64_store_u32(cache->jit_mem, patch + sizeof(uint32_t), arm64_nop);
-        block_cache_clear_icache(cache->jit_mem, patch, 2 * sizeof(uint32_t));
+        /* Revoke the entire seven-word second slot, not just its MOVZ/MOVK:
+         * leaving CMP/B.NE/MOV/BL behind would still execute the old edge. */
+        arm64_store_u32(cache->jit_mem, patch, 0x14000007u);
+        for (size_t i = 1; i < 7 && meta->slot2_patch_offset + (i + 1) * 4 <= entry->native_size; i++)
+            arm64_store_u32(cache->jit_mem, patch + i * 4, arm64_nop);
+        if (!runtime_gate_flag(HB_GATE_HB_CHAIN_SKIP_NOP, 0))
+            arm64_store_u32(cache->jit_mem, patch, arm64_nop);
+        block_cache_clear_icache(cache->jit_mem, patch, 7 * sizeof(uint32_t));
     }
     memset(meta, 0, sizeof(*meta));
 }
@@ -2008,6 +2050,15 @@ static void block_cache_prepare_replace_entry(hb_jit_runtime_t* rt, hb_block_cac
 
     if (!entry || !entry->valid) return;
     l1_forget(rt, entry->guest_addr);
+    /* Direct edges are admitted only on arenas whose write permission toggle
+     * cannot fail (MAP_JIT's void per-thread toggle, or a permanent RW alias).
+     * Revoke before even the legacy forced-WPROT-failure path can erase meta. */
+    hb_block_chain_meta_t* transit_meta = block_cache_chain_meta(cache, entry, false);
+    if (transit_meta && (transit_meta->transit_in || transit_meta->transit_out)) {
+        (void)hb_jit_buffer_make_writable(rt->jit_mem);
+        transit_forget(cache, transit_meta, true);
+        (void)hb_jit_buffer_make_executable(rt->jit_mem);
+    }
     /* MacRunner 2026-07-30 — the eviction literal store USED TO HAPPEN OUTSIDE THE WRITABLE BRACKET, and
      * that is the same defect class already fixed in chain_trampoline_for: a plain store into the JIT arena
      * while it is mapped read+execute.
@@ -2030,7 +2081,9 @@ static void block_cache_prepare_replace_entry(hb_jit_runtime_t* rt, hb_block_cac
      * счётчиков даже не успевала напечататься. Принуждение обязано быть УЖЕ, чем прибор,
      * который оно испытывает: здесь оно назначает отказ ТОЛЬКО этой скобке — ровно той,
      * чью молчащую ветвь и надо заставить сработать. */
-    if (runtime_block_chain_enabled() && rt && rt->jit_mem && cache &&
+    /* A caller may be cleaning installed edges after both chaining switches
+     * were disabled. Retirement still requires the full writable bracket. */
+    if (rt && rt->jit_mem && cache &&
         !hb_gate_on( HB_GATE_HB_TEST_FORCE_WPROT_FAIL ) &&
         hb_jit_buffer_make_writable(rt->jit_mem) == HB_OK) {
         hb_block_chain_meta_t* self = block_cache_chain_meta(cache, entry, false);
@@ -2110,6 +2163,13 @@ static bool l1_report_hold_fenv(fenv_t* saved) {
 
 static void block_cache_destroy(hb_block_cache_t* cache) {
     if (!cache) return;
+    if (cache->chain_meta) {
+        size_t count = cache->used_overflow ? cache->size : cache->used_count;
+        for (size_t i = 0; i < count; i++) {
+            size_t slot = cache->used_overflow ? i : cache->used_slots[i];
+            transit_forget(cache, &cache->chain_meta[slot], false);
+        }
+    }
     for (size_t i = 0; i < cache->size; i++) {
         block_cache_release_owned_block(&cache->entries[i], NULL);
         ripmap_release(&cache->entries[i]);   /* иначе карта уезжает вместе с кешем в утечку */
@@ -2501,6 +2561,7 @@ static void block_cache_reset(hb_block_cache_t* cache) {
     unchain = runtime_block_chain_enabled();
     if (cache->used_overflow) {
         for (size_t i = 0; i < cache->size; i++) {
+            if (cache->chain_meta) transit_forget(cache, &cache->chain_meta[i], false);
             if (unchain) block_cache_unchain_entry(cache, &cache->entries[i]);
             block_cache_release_owned_block(&cache->entries[i], NULL);
             ripmap_release(&cache->entries[i]);
@@ -2514,6 +2575,7 @@ static void block_cache_reset(hb_block_cache_t* cache) {
         for (size_t i = 0; i < cache->used_count; i++) {
             size_t slot = cache->used_slots[i];
             hb_block_cache_entry_t* e = &cache->entries[slot];
+            if (cache->chain_meta) transit_forget(cache, &cache->chain_meta[slot], false);
             if (unchain) block_cache_unchain_entry(cache, e);
             block_cache_release_owned_block(e, NULL);
             /* ★ 04.09.2026 — СБРОС ТЕЧЁТ КАРТАМИ. Сброс зовётся раз на вложенный кадр run_x64
@@ -2751,18 +2813,34 @@ static void nend_note(hb_block_cache_t* cache, size_t idx) {
     cache->nend_map[nend_hash((uint64_t)(uintptr_t)(e->native_code + e->native_size))] = (uint32_t)idx + 1u;
 }
 static hb_block_cache_entry_t* block_cache_find_exit_src(hb_block_cache_t* cache, uint64_t witness) {
-    static const uint32_t delta[2] = { 24u, 32u };
+    /* Canonical, second-slot BL, frameless and saved-SRA cold returns. */
+    static const uint32_t delta[] = { 24u, 32u, 12u, 28u, 36u, 40u };
     unsigned k;
     if (!cache || !cache->nend_map || !witness) return NULL;
-    for (k = 0; k < 2; k++) {
+    for (k = 0; k < sizeof(delta) / sizeof(delta[0]); k++) {
         const uint64_t end = witness + delta[k];
         const uint32_t v = cache->nend_map[nend_hash(end)];
         hb_block_cache_entry_t* e;
         if (!v || (size_t)(v - 1u) >= cache->size) continue;
         e = &cache->entries[v - 1u];
         if (e->valid && e->native_code && e->native_size &&
+            (uint64_t)(uintptr_t)e->native_code <= witness && witness < end &&
             (uint64_t)(uintptr_t)(e->native_code + e->native_size) == end)
             return e;
+    }
+    /* nend_map is a direct-mapped accelerator. Its collisions may cost a
+     * lookup, never the exact last-block identity required without counters. */
+    if (runtime_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0)) {
+        size_t count = cache->used_overflow ? cache->size : cache->used_count;
+        for (size_t i = 0; i < count; i++) {
+            size_t slot = cache->used_overflow ? i : cache->used_slots[i];
+            hb_block_cache_entry_t* e = &cache->entries[slot];
+            if (!e->valid || !e->native_code) continue;
+            uint64_t end = (uint64_t)(uintptr_t)(e->native_code + e->native_size);
+            if (witness < (uint64_t)(uintptr_t)e->native_code || witness >= end) continue;
+            for (k = 0; k < sizeof(delta) / sizeof(delta[0]); k++)
+                if (witness + delta[k] == end) return e;
+        }
     }
     return NULL;
 }
@@ -3094,7 +3172,8 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
                          (const void*)cache->entries[probe].native_code, (const void*)code);
             if (unchain_stats_enabled())
                 __atomic_add_fetch(&g_evict_reason[EVICT_RETRANSLATE], 1, __ATOMIC_RELAXED);
-            if (runtime_block_chain_enabled())
+            if (runtime_block_chain_enabled() ||
+                block_cache_has_transit(cache, &cache->entries[probe]))
                 block_cache_prepare_replace_entry(rt, cache, &cache->entries[probe]);
             block_cache_release_owned_block(&cache->entries[probe], block);
             /* ★★★ КАРТА ОТНОСИТСЯ К ПРЕЖНЕМУ КОДУ И ПРЕЖНЕМУ БЛОКУ. Ниже заменяются и
@@ -6127,7 +6206,7 @@ static void block_cache_evict_entry(hb_jit_runtime_t* rt, hb_block_cache_t* cach
      * перевода того же адреса выше. */
     if (unchain_stats_enabled())
         __atomic_add_fetch(&g_evict_reason[EVICT_RANGE], 1, __ATOMIC_RELAXED);
-    if (runtime_block_chain_enabled())
+    if (runtime_block_chain_enabled() || block_cache_has_transit(cache, entry))
         block_cache_prepare_replace_entry(rt, cache, entry);
     block_cache_release_owned_block(entry, NULL);
     ripmap_release(entry);
@@ -6916,6 +6995,11 @@ static unsigned persistent_cache_version(void) {
         HB_KEY_GATE("MACRUNNER_HB_TRUE_LDAR_ALIGNED");
         HB_KEY_GATE("MACRUNNER_HB_LDAPR_RCPC");
         HB_KEY_GATE("MACRUNNER_HB_NO_DEADLINE_CHECKS");
+        HB_KEY_GATE("MACRUNNER_HB_CHAIN_BODY_ENTRY");
+        HB_KEY_GATE("MACRUNNER_HB_CHAIN_NO_COUNTERS");
+        HB_KEY_GATE("MACRUNNER_HB_CHAIN_LAZY_PC");
+        HB_KEY_GATE("MACRUNNER_HB_CHAIN_SKIP_NOP");
+        HB_KEY_GATE("MACRUNNER_HB_TEST_TRANSIT_FLIP");
         HB_KEY_GATE("MACRUNNER_HB_STACK_STLR_GUARD");
         HB_KEY_GATE("MACRUNNER_HB_XMM_STORE_STLR");
         HB_KEY_GATE("MACRUNNER_HB_NATIVE_FASTPATH_INLINE");
@@ -8952,7 +9036,8 @@ static size_t entry_second_slot_offset(const hb_block_cache_entry_t* entry) {
      * слову (`movz x21`), и тогда занимать нечего: цель уже прописана. */
     for (i = 0; i < HB_CHAIN_SLOT2_WORDS; i++) {
         memcpy(&w, entry->native_code + off + i * 4u, sizeof(w));
-        if (w != arm64_nop) return 0;
+        if (w != arm64_nop && !(i == 0 && w == 0x14000007u &&
+            runtime_gate_flag(HB_GATE_HB_CHAIN_SKIP_NOP, 0))) return 0;
     }
     return off;
 }
@@ -8992,7 +9077,9 @@ static bool entry_chain_slot_at(const hb_block_cache_entry_t* entry, size_t pos)
     {   /* хвост: два NOP либо свидетель выхода (ADR+STR), см. chain_exit_src */
         const bool tail = (w[2] == arm64_nop && w[3] == arm64_nop) ||
                           (w[2] == 0x10000010u && w[3] == chain_exit_src_str_word());
-        pristine = (w[0] == arm64_nop && w[1] == arm64_nop && tail);
+        pristine = ((w[0] == arm64_nop ||
+                    (runtime_gate_flag(HB_GATE_HB_CHAIN_SKIP_NOP, 0) && w[0] == 0x14000002u)) &&
+                    w[1] == arm64_nop && tail);
         /* B (000101) или BL (100101) — BL при свидетеле, чтобы страж трамплина знал источник. */
         patched = (w[0] == arm64_mov_x0_x19 && ((w[1] & 0xfc000000u) == 0x14000000u ||
                                               (w[1] & 0xfc000000u) == 0x94000000u) && tail);
@@ -9025,10 +9112,13 @@ static uint32_t arm64_bl_to(const uint8_t* from, const uint8_t* to) {
     return arm64_b_to(from, to) | 0x80000000u;
 }
 static int chain_src_link_enabled(void) {
+    /* Patched slots are admitted only with the canonical 48-byte frame.
+     * A global LEAN preference does not make those particular slots frameless. */
+    if (runtime_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0)) return 1;
     const char* lean = hb_gate( HB_GATE_HB_LEAN_FRAME );
     const char* remap = hb_gate( HB_GATE_HB_LEAN_REMAP_ONLY );
     if ((lean && *lean && *lean != '0') || (remap && *remap && *remap != '0')) return 0;
-    return runtime_chain_two_slots_enabled();
+    return runtime_chain_two_slots_enabled() || runtime_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0);
 }
 
 static uint32_t arm64_mov_reg_u32(int rd, int rn) {
@@ -9394,7 +9484,7 @@ static long chain_entry_offset(const hb_block_cache_entry_t* entry) {
                             "(жёсткая константа промахнулась бы в середину кода)\n",
                             (unsigned long long)entry->guest_addr, i * 4);
             }
-            return (long)(i * 4);
+            return (long)(i * 4 + (runtime_gate_flag(HB_GATE_HB_CHAIN_BODY_ENTRY, 0) ? 4 : 0));
         }
     }
     g_chain_entry_not_found++;
@@ -9524,7 +9614,6 @@ static bool chain_patch_slot2(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
     /* ПОРЯДОК ВАЖЕН: сначала пишем всё, кроме перехода, и только последним словом —
      * сам переход. До этого момента щель для другого потока остаётся набором NOP плюс
      * безобидная арифметика: прыгнуть в полузаполненную щель невозможно. */
-    arm64_store_u32(rt->jit_mem, p + 0,  arm64_movz_x(21, (uint16_t)(ga & 0xffffu), 0));
     arm64_store_u32(rt->jit_mem, p + 4,  arm64_movk_x(21, (uint16_t)((ga >> 16) & 0xffffu), 1));
     arm64_store_u32(rt->jit_mem, p + 8,  arm64_movk_x(21, (uint16_t)((ga >> 32) & 0xffffu), 2));
     arm64_store_u32(rt->jit_mem, p + 12, arm64_cmp_x(20, 21));
@@ -9534,7 +9623,8 @@ static bool chain_patch_slot2(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
     block_cache_clear_icache(rt->jit_mem, p + 20, 2 * sizeof(uint32_t));
     /* Пока развилка — NOP, поток проваливается в MOV+B и уходит в трамплин второй цели БЕЗ
      * сравнения; страж трамплина это ловит и возвращает в диспетчер (промах, не порча). */
-    arm64_store_u32(rt->jit_mem, p + 16, arm64_bne_skip_two());       /* последней — сама развилка */
+    arm64_store_u32(rt->jit_mem, p + 16, arm64_bne_skip_two());
+    arm64_store_u32(rt->jit_mem, p + 0, arm64_movz_x(21, (uint16_t)(ga & 0xffffu), 0));
     block_cache_clear_icache(rt->jit_mem, p, HB_CHAIN_SLOT2_BYTES);
     if (hb_jit_buffer_make_executable(rt->jit_mem) != HB_OK) return false;
 
@@ -9543,6 +9633,75 @@ static bool chain_patch_slot2(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
     meta->slot2_patch_offset = off;
     t_chain_decline[CHAIN_DECL_PATCHED2]++;
     return true;
+}
+
+static bool transit_patch_edge(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
+                                hb_block_cache_entry_t* next) {
+    if (!runtime_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0) || !rt->ctx ||
+        rt->ctx->arch != HB_ARCH_X64 ||
+        !(rt->jit_mem->splitwx || rt->jit_mem->thread_jit_write_protect) ||
+        !entry_has_chain_slot(cur, NULL) || !entry_has_chain_slot(next, NULL) ||
+        !block_terminal_is_chainable(cur->block) || chain_target_refused_smc(next) ||
+        (runtime_chain_forward_only_enabled() && next->guest_addr <= cur->guest_addr)) return false;
+    int thunk = chain_target_thunk_kind(rt, next->guest_addr);
+    if (thunk == HB_THUNK_ARENA || (thunk == HB_THUNK_PE_FF25 &&
+        !runtime_gate_flag(HB_GATE_HB_CHAIN_IMPORT_GUARD, 0))) return false;
+    /* Validate all four prologue words: both ends share exactly one canonical
+     * frame and x19. Scratch SRA fills follow byte 16 and must still run. */
+    static const uint32_t prologue[4] = {
+        0xa9bd53f3u, 0xa9015bf5u, 0xa9027bf7u, 0xaa0003f3u
+    };
+    if (cur->native_size < 16 || next->native_size < 16 ||
+        memcmp(cur->native_code, prologue, 16) || memcmp(next->native_code, prologue, 16)) return false;
+    hb_block_chain_meta_t* from = block_cache_chain_meta(rt->block_cache, cur, true);
+    hb_block_chain_meta_t* to = block_cache_chain_meta(rt->block_cache, next, true);
+    if (!from || !to) return false;
+    for (size_t off = 16; off + HB_TRANSIT_SLOT_BYTES <= cur->native_size; off += 4) {
+        uint32_t w[5];
+        uint64_t guest;
+        memcpy(w, cur->native_code + off, sizeof(w));
+        if (!hb_transit_decode(w, &guest) || guest != next->guest_addr) continue;
+        uint8_t* patch = cur->native_code + off;
+        for (struct hb_transit_link* l = from->transit_out; l; l = l->out_next)
+            if (l->patch == patch) return l->to == to;
+        if (w[0] != HB_TRANSIT_COLD_BRANCH) continue;
+        uint8_t* target = next->native_code + 16;
+        if (!arm64_branch_reaches(patch, target)) return false;
+        uint64_t cap = runtime_chain_max_patches();
+        if (cap && __atomic_load_n(&g_chain_patches_installed, __ATOMIC_RELAXED) >= cap) return false;
+        struct hb_transit_link* link = calloc(1, sizeof(*link));
+        if (!link) return false;
+        if (runtime_gate_flag(HB_GATE_HB_TEST_TRANSIT_FLIP, 0)) {
+            /* Only a TAKEN stitched edge executes this poison. It cannot fault
+             * or hang: overwrite a guest register, then enter the right body. */
+            uint8_t poison[12];
+            const uint8_t* at = hb_jit_rw_to_rx(rt->jit_mem, rt->jit_mem->writable + rt->jit_mem->used);
+            if (!arm64_branch_reaches(at + 8, target) || !arm64_branch_reaches(patch, at)) {
+                free(link); return false;
+            }
+            arm64_store_u32(NULL, poison, arm64_movz_x(16, 0xdead, 0));
+            arm64_store_u32(NULL, poison + 4, arm64_str_x_off(16, 19,
+                (uint32_t)offsetof(hb_context_t, regs.x64.rax)));
+            arm64_store_u32(NULL, poison + 8, arm64_b_to(at + 8, target));
+            if (jit_commit_blob_ex(rt, poison, sizeof(poison), &target, false) != HB_OK || target != at) {
+                free(link); return false;
+            }
+        }
+        if (hb_jit_buffer_make_writable(rt->jit_mem) != HB_OK) { free(link); return false; }
+        link->from = from; link->to = to; link->patch = patch;
+        link->out_next = from->transit_out;
+        if (link->out_next) link->out_next->out_prev = link;
+        from->transit_out = link;
+        link->in_next = to->transit_in;
+        if (link->in_next) link->in_next->in_prev = link;
+        to->transit_in = link;
+        arm64_store_u32(rt->jit_mem, patch, arm64_b_to(patch, target));
+        block_cache_clear_icache(rt->jit_mem, patch, 4);
+        (void)hb_jit_buffer_make_executable(rt->jit_mem);
+        __atomic_add_fetch(&g_chain_patches_installed, 1, __ATOMIC_RELAXED);
+        return true;
+    }
+    return false;
 }
 
 static bool patch_block_tail(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
@@ -9737,6 +9896,7 @@ static bool patch_block_tail(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
     }
     meta = block_cache_chain_meta(rt->block_cache, cur, true);
     if (!meta) { t_chain_decline[CHAIN_DECL_NOMETA]++; return false; }
+    if (transit_patch_edge(rt, cur, next)) return true;
     /* ★ Claude 27.09.2026 — МЁРТВЫЙ ТРАМПЛИН ПОСЛЕ ВЫСЕЛЕНИЯ ЦЕЛИ.
      * Щель сшита по ГОСТЕВОМУ адресу цели, а ведёт в трамплин конкретной ЗАПИСИ. Выселение (SMC, сброс
      * диапазона, повторный перевод) переводит трамплин старой записи на выход в диспетчер, а новый перевод
@@ -10020,16 +10180,15 @@ static bool patch_block_tail(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
 /* Claude 27.09.2026 — заполнение таблицы переходов потока при входе диспетчера в блок. Условия пригодности
  * цели — те же, что у слота места (update_indirect_ic): вход +16 после стандартного кадра, сшиваемый
  * завершитель, щель сцепления, не код под отказом SMC. Совпадающую запись не переписываем. */
+static bool ic_target_frame48(const hb_block_cache_entry_t* e);
 static void l1_fill(hb_jit_runtime_t* rt, hb_block_cache_entry_t* e) {
     uint64_t* s;
     uint64_t native;
-    uint32_t w0 = 0;
     if (!rt || !rt->l1_table || !e || !e->valid || !e->native_code || e->native_size <= 16) return;
     s = rt->l1_table + 2u * hb_l1_index(e->guest_addr);
     native = (uint64_t)(uintptr_t)(e->native_code + 16);
     if (s[0] == e->guest_addr && s[1] == native) return;
-    memcpy(&w0, e->native_code, sizeof w0);
-    if (w0 != HB_CHAIN_FRAME48_PUSH) return;
+    if (!ic_target_frame48(e)) return;
     if (chain_target_refused_smc(e)) return;
     if (!runtime_l1_any_term() &&
         (!block_terminal_is_chainable(e->block) || !entry_has_chain_slot(e, NULL))) return;
@@ -10038,12 +10197,14 @@ static void l1_fill(hb_jit_runtime_t* rt, hb_block_cache_entry_t* e) {
     s[0] = e->guest_addr;
 }
 
-/* Вход +16 допустим только в блок со стандартным кадром 48 (первое слово — STP X19,X20,[SP,#-48]!). */
+/* Byte 16 requires both the canonical frame and the x19 context bank. Merely
+ * checking the first STP also admits LEAN_REMAP_ONLY's different bank. */
 static bool ic_target_frame48(const hb_block_cache_entry_t* e) {
-    uint32_t w0 = 0;
+    static const uint32_t prologue[4] = {
+        0xa9bd53f3u, 0xa9015bf5u, 0xa9027bf7u, 0xaa0003f3u
+    };
     if (!e || !e->native_code || e->native_size <= 16) return false;
-    memcpy(&w0, e->native_code, sizeof w0);
-    return w0 == HB_CHAIN_FRAME48_PUSH;
+    return memcmp(e->native_code, prologue, sizeof(prologue)) == 0;
 }
 
 static void update_indirect_ic(hb_context_t* ctx, hb_block_cache_entry_t* target,
@@ -10414,7 +10575,7 @@ static hb_result_t set_jit_interp_fallback_result(hb_exec_result_t* out,
  * вход — безопасная точка арены); шагов не было — честный фаллбэк, исполнять нечего. */
 static hb_result_t set_jit_cache_full_result(hb_exec_result_t* out, uint64_t steps,
                                              uint64_t blocks_executed) {
-    if (steps) {
+    if (steps || out->execution_started) {
         out->result = HB_ERR_STEP_LIMIT;
         out->steps_executed = steps;
         out->blocks_executed = blocks_executed;
@@ -10532,7 +10693,15 @@ static hb_result_t hb_codegen_fail_to_interp(hb_context_t* ctx, const hb_ir_func
         fflush(stderr);
     }
 
+    bool started_before_fallback = out->execution_started;
+    bool dispatch_units_before_fallback = out->counters_are_dispatches;
+    /* Read interpreter progress while its counters still denote guest work.
+     * Restoring dispatch units first would hide a committed interpreter prefix
+     * when code generation failed before the first native admission. */
+    bool interpreter_progress = hb_exec_result_has_progress(&sub);
     *out = sub;
+    out->execution_started |= started_before_fallback || interpreter_progress;
+    out->counters_are_dispatches |= dispatch_units_before_fallback;
     out->steps_executed += steps;
     out->blocks_executed += blocks_executed;
     return r;
@@ -10697,6 +10866,7 @@ static bool jit_aa_force_mono_simd_copy_interp(hb_jit_runtime_t* rt,
                 bytes[12], bytes[13], bytes[14], bytes[15]);
         fflush(stderr);
     }
+    out->execution_started = true;
     hb_jit_helper_exec_ir_block(ctx, cached->block);
     if (ctx->last_result != HB_OK) {
         out->result = ctx->last_result;
@@ -11749,6 +11919,7 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
                 lean_dispatch_report("ход");
         }
         if (trace_null_pc_enabled_rt()) hb_trace_current_block_addr = cached->guest_addr;
+        out->execution_started = true;
         if (ctx->exec_access)
             ((void (*)(hb_context_t*, hb_exec_result_t*))(void*)cached->native_code)(ctx, out);
         else
@@ -12249,6 +12420,7 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
     if (fault_guest_exact && faulted && faulted->block &&
         fault_instr_index < faulted->block->instr_count) {
         hb_result_t rr;
+        const bool dispatch_counters = out->counters_are_dispatches;
         static unsigned resume_n;
         if (++resume_n <= 8) {
             fprintf(stderr, "macrunner-hb-resume-interp: n=%u guest=%#llx instr=%zu/%zu fault=%#llx sig=%d\n",
@@ -12257,6 +12429,10 @@ static hb_result_t run_jit_block_with_signal_guard(hb_jit_runtime_t* rt,
             fflush(stderr);
         }
         rr = hb_interpreter_resume_block(ctx, faulted->block, fault_instr_index, out);
+        /* Resume initializes its result. Native predecessors already ran;
+         * retain that fact even when the faulting instruction retires zero. */
+        out->execution_started = true;
+        out->counters_are_dispatches |= dispatch_counters;
         out->steps_executed += frame.steps;
         out->blocks_executed += frame.blocks_executed;
         /* Договор: после отказа `ctx->last_result` несёт причину (проба
@@ -14622,6 +14798,22 @@ static void disp_census_note(hb_jit_runtime_t* rt, hb_context_t* ctx) {
 static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_func_t* func,
                                            hb_exec_result_t* out);
 
+/* With CHAIN_NO_COUNTERS, accounting is deliberately in C dispatch units.
+ * There is no claim that this recovers the dynamic length of a native chain. */
+static void account_counter_free_dispatch(hb_context_t* ctx,
+                                         const hb_block_cache_entry_t* entry,
+                                         hb_exec_result_t* out,
+                                         uint64_t* steps, uint64_t* blocks) {
+    if (!out->execution_started) return;
+    uint64_t entry_steps = entry->steps ? entry->steps : jit_block_step_count(entry->block);
+    (*blocks)++;
+    *steps += entry_steps;
+    ctx->block_count++;
+    ctx->step_count += entry_steps;
+    out->blocks_executed = *blocks;
+    out->steps_executed = *steps;
+}
+
 /* Opus 26.09.2026 — ВНЕШНИЙ ВХОД В ДИСПЕТЧЕР = БЕЗОПАСНАЯ ТОЧКА АРЕНЫ.
  * Здесь кадров выпущенного кода на стеке этого потока нет (вложенный вход — не внешний), и
  * мёртвое место можно отдать, а при безвыходном переполнении — сбросить арену целиком.
@@ -14710,6 +14902,17 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
     /* По архитектуре ГОСТЯ — см. runtime_block_chain_enabled_for. */
     int block_chain = runtime_block_chain_enabled_for(rt && rt->ctx ? rt->ctx->arch
                                                                   : HB_ARCH_X64);
+    const bool no_chain_counters = block_chain && rt && rt->ctx &&
+        rt->ctx->arch == HB_ARCH_X64 && !rt->ctx->exec_access &&
+        runtime_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0);
+    /* Counter-free native cycles have no budget poll. Reject finite runs
+     * before any native entry; gate-off retains the exact existing limits. */
+    if (no_chain_counters && (rt->ctx->step_limit || rt->ctx->block_limit)) {
+        if (!out) return HB_ERR_INVALID_ARG;
+        memset(out, 0, sizeof(*out));
+        return set_runtime_fault_result(out, rt->ctx, HB_ERR_INVALID_ARG, 0, 0,
+                                       "CHAIN_NO_COUNTERS requires unlimited step/block budgets");
+    }
     int single_lookup_gate = runtime_single_lookup_enabled();
     int indirect_ic_gate = runtime_indirect_ic_enabled();
     const int disp_census_on = disp_census_enabled();
@@ -14746,6 +14949,7 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
     uint64_t steps = 0;
     uint64_t blocks_executed = 0;
     bool chain_accounting = block_chain != 0;
+    out->counters_are_dispatches = no_chain_counters;
     /* ★★★★★ MacRunner 2026-08-25 — СЦЕПЛЕНИЕ ПРИ НЕНУЛЕВОМ ПРЕДЕЛЕ ШАГОВ.
      *
      * Прежнее условие требовало `step_limit == 0`, и это выключало сцепление ВСЕГДА: предел
@@ -14821,12 +15025,14 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
          * Пересчёт каждый круг, а не однократно перед циклом: это дешевле, чем
          * доказывать, что местный счётчик и счётчик контекста нигде не
          * расходятся (интерпретаторный путь ведёт их по-разному). */
+        if (!no_chain_counters) {
         ctx->step_deadline = (ctx->step_limit > steps)
                              ? ctx->step_count + (ctx->step_limit - steps)
                              : UINT64_MAX;
         ctx->block_deadline = (ctx->block_limit > blocks_executed)
-                              ? ctx->block_count + (ctx->block_limit - blocks_executed)
-                              : UINT64_MAX;
+                               ? ctx->block_count + (ctx->block_limit - blocks_executed)
+                               : UINT64_MAX;
+        }
         /* ★ 04.09.2026 — ПРИБОР ГОСТЕВЫХ СЛОВ. Вершина цикла — ЕДИНСТВЕННОЕ узкое
          * место, через которое проходит КАЖДЫЙ переход гостя: и вход в блок, и
          * возврат из сцепленной цепочки. Выключенный прибор стоит одного сравнения. */
@@ -14876,7 +15082,10 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             block = find_block(func->cfg, ctx->pc);
         if (!block) {
             /* родной быстрый путь: обслужен — продолжаем с адреса возврата, не выходя наружу */
-            if (native_fastpath_try(ctx)) continue;
+            if (native_fastpath_try(ctx)) {
+                if (no_chain_counters) out->execution_started = true;
+                continue;
+            }
             if (func->truncated) {
                 return set_runtime_fault_result(out, ctx, HB_ERR_TRANSLATION_TRUNCATED,
                                                 steps, blocks_executed,
@@ -14955,8 +15164,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             if (cached->block)
                 block = (hb_ir_block_t*)cached->block;
             trace_jit_cached_watch_block_once(rt, cached);
-        bool native_accounting = ctx->scalar_access || ctx->pair_access ||
-                                     (chain_accounting && entry_has_chain_slot(cached, NULL));
+        bool native_accounting = !no_chain_counters && (ctx->scalar_access || ctx->pair_access ||
+                                     (chain_accounting && entry_has_chain_slot(cached, NULL)));
             uint64_t before_steps = native_accounting ? ctx->step_count : 0;
             uint64_t before_blocks = native_accounting ? ctx->block_count : 0;
             uint64_t before_rcx = ctx->regs.x64.rcx;
@@ -15027,6 +15236,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             hb_result_t run_result = run_jit_block_with_signal_guard(rt, func, cached, guard_stable, out,
                                                                       steps, blocks_executed);
             mr_dc_after(mr_dc_t0);
+            if (no_chain_counters)
+                account_counter_free_dispatch(ctx, cached, out, &steps, &blocks_executed);
             if (run_result != HB_OK || out->faulted) return run_result;
             trace_jit_hot_block_tick(rt, cached);
             if (disp_census_on) disp_census_note(rt, ctx);
@@ -15094,7 +15305,7 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                     if (dispatch_stats_enabled_run) dispatch_stats_add(1, 1, cached->steps);
                     native_accounting = false;
                 }
-            } else {
+            } else if (!no_chain_counters) {
                 steps += cached->steps;
                 if (chain_accounting) blocks_executed++;
                 if (dispatch_stats_enabled_run) dispatch_stats_add(1, 1, cached->steps);
@@ -15325,8 +15536,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             trace_jit_cached_watch_block_once(rt, cached);
 
             /* Execute */
-        bool native_accounting = ctx->scalar_access || ctx->pair_access ||
-                                     (chain_accounting && entry_has_chain_slot(cached, NULL));
+        bool native_accounting = !no_chain_counters && (ctx->scalar_access || ctx->pair_access ||
+                                     (chain_accounting && entry_has_chain_slot(cached, NULL)));
             uint64_t before_steps = native_accounting ? ctx->step_count : 0;
             uint64_t before_blocks = native_accounting ? ctx->block_count : 0;
             uint64_t before_rcx = ctx->regs.x64.rcx;
@@ -15385,6 +15596,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             hb_result_t run_result = run_jit_block_with_signal_guard(rt, func, cached, guard_stable, out,
                                                                       steps, blocks_executed);
             mr_dc_after(mr_dc_t0);
+            if (no_chain_counters)
+                account_counter_free_dispatch(ctx, cached, out, &steps, &blocks_executed);
             if (run_result != HB_OK || out->faulted) return run_result;
             trace_jit_hot_block_tick(rt, cached);
             if (disp_census_on) disp_census_note(rt, ctx);
@@ -15411,7 +15624,7 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                     if (dispatch_stats_enabled_run)
                         dispatch_stats_add(1, 1, cached->steps ? cached->steps : jit_block_step_count(block));
                 }
-            } else {
+            } else if (!no_chain_counters) {
                 steps += cached->steps ? cached->steps : jit_block_step_count(block);
                 if (chain_accounting) blocks_executed++;
                 if (dispatch_stats_enabled_run)
@@ -15499,7 +15712,23 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             set_helper_fault_result(out, ctx, steps, blocks_executed);
             return HB_OK;
         }
-        if (chain_accounting && run_block_delta > 1) {
+        if (no_chain_counters) {
+            /* The exit witness names the last block even when the chain
+             * returned to its entry address. Counter deltas cannot tell us
+             * either the terminal instruction or the source edge here. */
+            hb_block_cache_entry_t* exit_entry = ctx->chain_exit_src
+                ? block_cache_find_exit_src(rt->block_cache, ctx->chain_exit_src) : NULL;
+            if (exit_entry && exit_entry->block) {
+                cached = exit_entry;
+                block = (hb_ir_block_t*)exit_entry->block;
+            } else if (cached && entry_has_chain_slot(cached, NULL)) {
+                return set_runtime_fault_result(out, ctx, HB_ERR_UNSUPPORTED_FEATURE,
+                    steps, blocks_executed, "counter-free chain exited without an exact source witness");
+            }
+            (*tls_last_run_entry) = cached ? cached->guest_addr : ctx->pc;
+            (*tls_last_run_delta) = 0; /* Unknown native length, never invent a value. */
+        }
+        if (chain_accounting && !no_chain_counters && run_block_delta > 1) {
             /* Claude 27.09.2026 — СШИВКА ПОСЛЕ ЦЕПОЧКИ (гейт MACRUNNER_HB_CHAIN_AFTER_RUN, умолчание 0).
              *
              * Заход, исполнивший больше одного блока, уходил отсюда на следующий оборот, минуя место
@@ -15602,7 +15831,10 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             next = find_block(func->cfg, ctx->pc);
         }
         if (!next) {
-            if (native_fastpath_try(ctx)) continue;   /* см. такую же проверку у выхода «блока нет» */
+            if (native_fastpath_try(ctx)) {
+                if (no_chain_counters) out->execution_started = true;
+                continue;
+            }
             if (func->truncated) {
                 return set_runtime_fault_result(out, ctx, HB_ERR_TRANSLATION_TRUNCATED,
                                                 steps, blocks_executed,

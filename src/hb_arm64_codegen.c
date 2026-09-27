@@ -15,6 +15,7 @@ static inline int hb_jit_gate_flag(enum hb_gate_id id, int default_value)
 }
 
 #include "hb_codegen.h"
+#include "hb_transit.h"
 #include <mach/mach_time.h>
 #include "hb_regalloc.h"
 #include "hb_contract_telemetry.h"
@@ -4044,7 +4045,8 @@ static void emit_prologue(hb_codegen_buffer_t* buf) {
      * выпущенное слово и при выключенном гейте — а «выключенный гейт не делает ничего»
      * это правило лейна, а не пожелание. С невзведённым признаком крюк вырождается в одну
      * проверку байта, и разбор не вызывается вовсе. */
-    buf->x0_holds_ctx = ctx_arg_reuse_enabled() ? 1 : 0;
+    buf->x0_holds_ctx = ctx_arg_reuse_enabled() &&
+        !hb_jit_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0) ? 1 : 0;
     /* ★ Закрепить базу окна гостя в X28 на весь блок: одна загрузка вместо загрузки
      * на КАЖДЫЙ доступ (разбор выше у pin_guest32_base_enabled). Только i386 — у x64
      * guest32_base ноль и перевод вырождается в тождество. */
@@ -4119,6 +4121,7 @@ static int no_deadline_checks_enabled(void) {
 
 static void emit_block_counter_accounting(hb_codegen_buffer_t* buf, uint32_t steps) {
     if (!jit_block_chain_enabled_for(buf)) return;
+    if (buf->arch == HB_ARCH_X64 && hb_jit_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0)) return;
 
     emit_ldr_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, block_count));
     if (!no_deadline_checks_enabled())
@@ -4165,21 +4168,30 @@ unsigned long long g_cg_emit_bytes, g_cg_emit_sum = 14695981039346656037ull, g_c
 static void emit_block_chain_slot2(hb_codegen_buffer_t* buf) {
     unsigned i;
     if (!jit_block_chain_enabled_for(buf) || !jit_chain_two_slots_enabled()) return;
-    for (i = 0; i < HB_CHAIN_SLOT2_WORDS; i++) emit_nop(buf);
+    /* One cold B replaces seven executed NOPs. Patching opens this first word
+     * only after writing the remainder, so a partially installed slot is cold. */
+    if (hb_jit_gate_flag(HB_GATE_HB_CHAIN_SKIP_NOP, 0)) {
+        emit_b(buf, HB_CHAIN_SLOT2_WORDS * 4);
+        for (i = 1; i < HB_CHAIN_SLOT2_WORDS; i++) emit_nop(buf);
+    } else {
+        for (i = 0; i < HB_CHAIN_SLOT2_WORDS; i++) emit_nop(buf);
+    }
 }
 
 static int lean_frame_enabled(void);
 static void emit_block_chain_slot(hb_codegen_buffer_t* buf) {
     if (!jit_block_chain_enabled_for(buf)) return;
+    if (hb_jit_gate_flag(HB_GATE_HB_CHAIN_SKIP_NOP, 0)) emit_b(buf, 8);
+    else emit_nop(buf);
     emit_nop(buf);
-    emit_nop(buf);
-    if (jit_chain_two_slots_enabled() && !lean_frame_enabled()) {
+    if ((jit_chain_two_slots_enabled() && !lean_frame_enabled()) ||
+        hb_jit_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0)) {
         /* Claude 26.09 — СВИДЕТЕЛЬ ВЫХОДА. Пока щель не сшита, два последних слова кладут адрес
          * своего блока в ctx->chain_exit_src: диспетчер сшивает ИМЕННО его, а не блок, с которого
          * начался заход. Сшитая щель уходит BL-ом раньше, эти слова не исполняются. */
         const uint32_t off = (uint32_t)offsetof(hb_context_t, chain_exit_src);
         emit_u32(buf, 0x10000010u);                                               /* ADR X16, #0 */
-        emit_u32(buf, 0xf9000000u | ((off / 8u) << 10) | (19u << 5) | 16u);       /* STR X16, [X19, #src] */
+        emit_str_x(buf, 16, 19, off);
     } else {
         emit_nop(buf);
         emit_nop(buf);
@@ -4246,6 +4258,12 @@ static void emit_srok_vyhod(hb_codegen_buffer_t* buf, int schetchik,
 
     emit_mov_imm_compact(buf, 21, (uint64_t)(unsigned)rezultat);
     emit_str_w(buf, 21, 19, (uint32_t)offsetof(hb_context_t, last_result));
+    if (buf->arch == HB_ARCH_X64 && hb_jit_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0)) {
+        /* A direct incoming edge never published this block's address. */
+        emit_mov_imm_compact(buf, 20, g_cg_note_guest);
+        emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
+        emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, regs.x64.rip));
+    }
     /* ЭПИЛОГ ТОЛЬКО НА МЕСТЕ, общий брать НЕЛЬЗЯ.
      *
      * emit_shared_or_inline_epilogue(buf, false) тела не выпускает: он ставит
@@ -8461,6 +8479,10 @@ static void emit_store_zero_to_gpr_sized(hb_codegen_buffer_t* buf, const hb_ir_o
 
 static bool operand_is_xmm_or_vecmem(const hb_ir_operand_t* op);
 static void emit_set_pc_imm64(hb_codegen_buffer_t* buf, uint64_t pc);
+static int transit_edges_enabled(hb_codegen_buffer_t* buf);
+static void emit_transit_edge(hb_codegen_buffer_t* buf, uint64_t pc);
+static bool emit_transit_armcond(hb_codegen_buffer_t* buf, int cond,
+                                  uint64_t target, uint64_t fallthrough);
 
 static bool emit_native_scalar_mov(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
     if (!instr || instr->op != HB_IR_MOV) return false;
@@ -9100,9 +9122,14 @@ static bool emit_native_ret(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr
     emit_add_imm(buf, 21, 21, 8);
     if (adjust) emit_add_imm(buf, 21, 21, (uint32_t)adjust);
     emit_str_x(buf, 21, 19, (uint32_t)reg_off(buf, HB_REG_RSP));
-    emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
+    const bool lazy_pc = buf->arch == HB_ARCH_X64 &&
+                         hb_jit_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0);
+    if (!lazy_pc) emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
     if (!emit_callret_ret(buf, jit_indirect_ic_ret_enabled()) && jit_indirect_ic_ret_enabled())
         emit_indirect_ic_probe(buf, 20);
+    /* Every shadow-stack/IC/L1 miss preserves x20. Successful probes have
+     * already entered the next body and never publish this intermediate PC. */
+    if (lazy_pc) emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
     return true;
 }
 
@@ -9317,10 +9344,19 @@ static int jit_l1_table_enabled(void) {
     return hb_jit_gate_flag( HB_GATE_HB_L1_TABLE, 0);
 }
 
+/* IC/L1/CALLRET entries all enter canonical bodies at +16. A frameless or
+ * remapped caller cannot lend them that frame/context bank; a saved-SRA frame
+ * cannot be popped as 48 bytes either. This is an ABI invariant, not a gate. */
+static bool chain_body_source_compatible(const hb_codegen_buffer_t* buf) {
+    return buf && !buf->rmap_active &&
+           !(buf->sra_armed == HB_SRA_ARMED && buf->sra_bank != HB_SRA_BANK_SCRATCH);
+}
+
 static void emit_l1_table_probe(hb_codegen_buffer_t* buf, int target_reg) {
     size_t no_table, guest_miss, code_zero;
     int rd, rn;
     if (!jit_l1_table_enabled()) return;
+    if (!chain_body_source_compatible(buf)) return;
     if (target_reg == 21 || target_reg == 22) return;
     ea_materialize(buf);   /* флаг отложенного адреса i386 гасим ДО порчи X21 */
     emit_ldr_x(buf, 22, 19, (uint32_t)offsetof(hb_context_t, l1_table));
@@ -9418,10 +9454,12 @@ static void emit_callret_push(hb_codegen_buffer_t* buf, uint64_t ret_guest) {
     (void)patch_cbz_x(buf, skip, 21, buf->size);
 }
 
-/* Цель RET уже в x20 и в ctx->pc. true — выпущено вместе с прежними зондами (вызывающий их не зовёт). */
+/* Цель RET в x20; при CHAIN_LAZY_PC вызывающий публикует pc только после промаха.
+ * Все пути промаха сохраняют x20. true — выпущено вместе с прежними зондами. */
 static bool emit_callret_ret(hb_codegen_buffer_t* buf, bool ic_ret) {
     size_t nocr1, nocr2, nocr3, fill1, fill2, to_exit;
     if (!jit_callret_enabled()) return false;
+    if (!chain_body_source_compatible(buf)) return false;
     ea_materialize(buf);
     emit_ldr_x(buf, 21, 19, (uint32_t)offsetof(hb_context_t, callret_sp));
     nocr1 = emit_cbz_x_deferred(buf, 21);
@@ -9464,8 +9502,18 @@ static void emit_indirect_ic_probe(hb_codegen_buffer_t* buf, int target_reg) {
     size_t guest_miss;
     size_t code_zero_miss;
     hb_ic_slot_t* slot = NULL;
+    if (!chain_body_source_compatible(buf)) return;
+    const bool lazy_pc = buf->arch == HB_ARCH_X64 &&
+                         hb_jit_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0);
 
-    if (!jit_indirect_ic_enabled()) { emit_l1_table_probe(buf, target_reg); return; }
+    if (!jit_indirect_ic_enabled()) {
+        emit_l1_table_probe(buf, target_reg);
+        if (lazy_pc) {
+            emit_mov_imm_compact(buf, 22, 0);
+            emit_str_x(buf, 22, 19, (uint32_t)offsetof(hb_context_t, indirect_ic_slot));
+        }
+        return;
+    }
 
     /* x21 и x22 — банк временных, сохраняемый прологом; оба вызывающих места держат
      * цель в x20 либо x23. Совпадение цели с временным было бы порчей, поэтому
@@ -9475,8 +9523,10 @@ static void emit_indirect_ic_probe(hb_codegen_buffer_t* buf, int target_reg) {
 
     if (slot) {
         emit_mov_imm64_compact(buf, 22, (uint64_t)(uintptr_t)slot);
-        /* Кому писать при промахе. Путь промаха в hb_runtime.c читает это поле. */
-        emit_str_x(buf, 22, 19, (uint32_t)offsetof(hb_context_t, indirect_ic_slot));
+        /* The legacy path publishes before probing. The lazy path publishes
+         * only after both caches miss, so a hit cannot identify this site as
+         * the source of another block's later miss. */
+        if (!lazy_pc) emit_str_x(buf, 22, 19, (uint32_t)offsetof(hb_context_t, indirect_ic_slot));
 
         emit_ldr_x(buf, 21, 22, (uint32_t)offsetof(hb_ic_slot_t, guest));
         ea_materialize(buf);  /* X21 идёт как ЗНАЧЕНИЕ — база обязана быть прибавлена */
@@ -9497,6 +9547,11 @@ static void emit_indirect_ic_probe(hb_codegen_buffer_t* buf, int target_reg) {
         patch_bcond(buf, guest_miss, 1, buf->size);
         patch_bcond(buf, code_zero_miss, 0, buf->size);
         emit_l1_table_probe(buf, target_reg);   /* промах слота места — таблица потока */
+        if (lazy_pc) {
+            /* L1 uses x22 as scratch; reconstruct the cold miss's site. */
+            emit_mov_imm64_compact(buf, 22, (uint64_t)(uintptr_t)slot);
+            emit_str_x(buf, 22, 19, (uint32_t)offsetof(hb_context_t, indirect_ic_slot));
+        }
         return;
     }
 
@@ -9515,14 +9570,23 @@ static void emit_indirect_ic_probe(hb_codegen_buffer_t* buf, int target_reg) {
     patch_bcond(buf, guest_miss, 1, buf->size);
     patch_bcond(buf, code_zero_miss, 0, buf->size);
     emit_l1_table_probe(buf, target_reg);
+    if (lazy_pc) {
+        /* Allocation exhaustion uses the shared IC fields, never an older
+         * site's slot retained by a previous dispatcher invocation. */
+        emit_mov_imm_compact(buf, 22, 0);
+        emit_str_x(buf, 22, 19, (uint32_t)offsetof(hb_context_t, indirect_ic_slot));
+    }
 }
 
 static bool emit_native_indirect_jmp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
     if (!instr || instr->op != HB_IR_JMP || instr->src1.type == HB_OP_NONE) return false;
     if (!emit_native_branch_target_to_x20(buf, &instr->src1)) return false;
     size_t done_branch = emit_zero_target_fault_skip_to_done(buf, 20);
-    emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
+    const bool lazy_pc = buf->arch == HB_ARCH_X64 &&
+                         hb_jit_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0);
+    if (!lazy_pc) emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
     emit_indirect_ic_probe(buf, 20);
+    if (lazy_pc) emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
     patch_b(buf, done_branch, buf->size);
     return true;
 }
@@ -9542,8 +9606,11 @@ static bool emit_native_indirect_call(hb_codegen_buffer_t* buf, const hb_ir_inst
     else
         emit_native_stack_push_x20(buf);
     emit_callret_push(buf, instr->guest_addr + instr->guest_len);
-    emit_str_x(buf, 23, 19, (uint32_t)offsetof(hb_context_t, pc));
+    const bool lazy_pc = buf->arch == HB_ARCH_X64 &&
+                         hb_jit_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0);
+    if (!lazy_pc) emit_str_x(buf, 23, 19, (uint32_t)offsetof(hb_context_t, pc));
     emit_indirect_ic_probe(buf, 23);
+    if (lazy_pc) emit_str_x(buf, 23, 19, (uint32_t)offsetof(hb_context_t, pc));
     patch_b(buf, done_branch, buf->size);
     return true;
 }
@@ -10089,6 +10156,7 @@ static bool emit_flags_set_pc(hb_codegen_buffer_t* buf, hb_cc_t cc,
                               uint64_t target, uint64_t fallthrough) {
     int64_t delta = (int64_t)target - (int64_t)fallthrough;
     if (cc != HB_CC_E && cc != HB_CC_NE) return false;
+    if (emit_transit_armcond(buf, arm64_cond(cc), target, fallthrough)) return true;
     /* ★ ОБЩИЙ ХВОСТ ПОСЛЕ ПРЕДИКАТА (лейн ФЛАГИ-2): цель внутри слитой единицы -> одна
      * команда перехода вместо записи pc и возврата в диспетчер. NZCV здесь уже выставлены
      * вызывающим, поэтому форма — B.cond по родному условию. */
@@ -10184,6 +10252,17 @@ static bool emit_reg_zero_set_pc_cbz(hb_codegen_buffer_t* buf, int reg, hb_cc_t 
                                      uint64_t target, uint64_t fallthrough) {
     int64_t delta = (int64_t)target - (int64_t)fallthrough;
     if (cbz_branch_invert_test()) cc = (cc == HB_CC_E) ? HB_CC_NE : HB_CC_E;
+    if (transit_edges_enabled(buf)) {
+        size_t taken = (cc == HB_CC_E) ? emit_cbz_x_deferred(buf, reg)
+                                       : emit_cbnz_x_deferred(buf, reg);
+        emit_set_pc_imm64(buf, fallthrough);
+        size_t done = emit_b_deferred(buf);
+        if (cc == HB_CC_E) patch_cbz_x(buf, taken, reg, buf->size);
+        else patch_cbnz_x(buf, taken, reg, buf->size);
+        emit_set_pc_imm64(buf, target);
+        patch_b(buf, done, buf->size);
+        return true;
+    }
     if (delta >= -4095 && delta <= 4095) {
         emit_mov_imm_compact(buf, 21, fallthrough);
         /* Обойти поправку, когда условие ЛОЖНО — ровно то, что делал `arm64_cond(cc) ^ 1`:
@@ -10274,6 +10353,15 @@ static bool emit_reg_sign_set_pc(hb_codegen_buffer_t* buf, int reg, hb_size_t si
     bit = bits - 1;
     nz_taken = (cc == HB_CC_S) ? 1 : 0;       /* JS берётся при УСТАНОВЛЕННОМ бите */
     if (tbz_branch_invert_test()) nz_taken = !nz_taken;
+    if (transit_edges_enabled(buf)) {
+        size_t taken = emit_tbznz_x_deferred(buf, nz_taken, reg, bit);
+        emit_set_pc_imm64(buf, fallthrough);
+        size_t done = emit_b_deferred(buf);
+        (void)patch_tbznz_x(buf, taken, nz_taken, reg, bit, buf->size);
+        emit_set_pc_imm64(buf, target);
+        patch_b(buf, done, buf->size);
+        return true;
+    }
     delta = (int64_t)target - (int64_t)fallthrough;
 
     if (delta >= -4095 && delta <= 4095) {
@@ -10354,9 +10442,40 @@ static int jit_chain_direct_enabled(void) {
     return hb_jit_gate_flag( HB_GATE_HB_CHAIN_DIRECT, 0);
 }
 
+/* Armed only for a terminal instruction (or its final fused pair). Never put
+ * an edge at helper-boundary PC publication or in an idiom's internal state. */
+static _Thread_local int g_transit_edges_allowed;
+static int transit_edges_enabled(hb_codegen_buffer_t* buf) {
+    return g_transit_edges_allowed && buf && buf->arch == HB_ARCH_X64 &&
+           !buf->rmap_active && jit_block_chain_enabled_for(buf) &&
+           !(buf->sra_armed == HB_SRA_ARMED && buf->sra_bank != HB_SRA_BANK_SCRATCH) &&
+           hb_jit_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0);
+}
+
+static void emit_transit_edge(hb_codegen_buffer_t* buf, uint64_t pc) {
+    if (!transit_edges_enabled(buf)) return;
+    /* The next body reloads its own SRA bindings. Commit the predecessor first. */
+    sra_emit_spill_dirty(buf);
+    emit_u32(buf, HB_TRANSIT_COLD_BRANCH);
+    for (unsigned i = 0; i < 4; i++) emit_u32(buf, hb_transit_word(pc, i));
+}
+
 static void emit_set_pc_imm64(hb_codegen_buffer_t* buf, uint64_t pc) {
+    emit_transit_edge(buf, pc);
     emit_mov_imm_compact(buf, 21, pc);
     emit_str_x(buf, 21, 19, (uint32_t)offsetof(hb_context_t, pc));
+}
+
+static bool emit_transit_armcond(hb_codegen_buffer_t* buf, int cond,
+                                  uint64_t target, uint64_t fallthrough) {
+    if (!transit_edges_enabled(buf)) return false;
+    size_t taken = emit_bcond_deferred(buf, cond);
+    emit_set_pc_imm64(buf, fallthrough);
+    size_t done = emit_b_deferred(buf);
+    patch_bcond(buf, taken, cond, buf->size);
+    emit_set_pc_imm64(buf, target);
+    patch_b(buf, done, buf->size);
+    return true;
 }
 
 /* ★★★ ЧАСТНЫЙ ДОЛГ, ЗАКРЫТЫЙ 07.09.2026 (лейн ФЛАГИ-2, по указанию внешнего разбора).
@@ -11217,8 +11336,7 @@ static bool cc_fusable_after_test_and(const hb_ir_instr_t* op, hb_cc_t cc) {
 /* Записать pc БЕЗ ПРОВЕРКИ — когда исход условия известен на этапе выпуска.
  * Это и есть уровень 4 для условия: проверки в выпущенном коде не остаётся вовсе. */
 static void emit_set_pc_const(hb_codegen_buffer_t* buf, uint64_t pc) {
-    emit_mov_imm_compact(buf, 21, pc);
-    emit_str_x(buf, 21, 19, (uint32_t)offsetof(hb_context_t, pc));
+    emit_set_pc_imm64(buf, pc);
 }
 
 static bool emit_flags_set_pc_armcond(hb_codegen_buffer_t* buf, int ac,
@@ -11235,6 +11353,7 @@ static bool emit_flags_set_pc_any_cond(hb_codegen_buffer_t* buf, hb_cc_t cc,
  * `arm64_cond` там дал бы неверную ветвь у беззнакового семейства. */
 static bool emit_flags_set_pc_armcond(hb_codegen_buffer_t* buf, int ac,
                                       uint64_t target, uint64_t fallthrough) {
+    if (emit_transit_armcond(buf, ac, target, fallthrough)) return true;
     int64_t delta = (int64_t)target - (int64_t)fallthrough;
     /* ★ Общий хвост: внутреннее ребро одной командой, см. cg_edge_vnutr_armcond. */
     if (cg_edge_ok(target, fallthrough)) {
@@ -13446,6 +13565,32 @@ static void emit_helper_target(hb_codegen_buffer_t* buf, void* fn) {
     emit_mov_imm64_kind(buf, HB_HOST_CALL_TARGET, (uint64_t)fn, HB_RELOC_KIND_HELPER);
 }
 
+/* A direct chain may leave both published PCs behind. Materialize the current
+ * instruction at the C boundary, using the call-target scratch before it gets
+ * its helper address. MOV/LDR/STR preserve NZCV, x0_holds_ctx and all arguments.
+ * The raw PC store deliberately bypasses emit_str_x's direct-edge hook: a
+ * helper checkpoint is not a control transfer and must never be stitched.
+ * STR encoding checked with clang's AArch64 assembler (str x23,[x19,#544]). */
+static void emit_helper_boundary_pc(hb_codegen_buffer_t* buf, void* fn) {
+    _Static_assert(offsetof(hb_context_t, pc) < 32768 &&
+                   offsetof(hb_context_t, pc) % 8 == 0,
+                   "helper PC checkpoint requires a scaled STR immediate");
+    if (!buf || buf->arch != HB_ARCH_X64 ||
+        !hb_jit_gate_flag(HB_GATE_HB_CHAIN_LAZY_PC, 0)) return;
+    if (fn == (void*)hb_jit_helper_adjust_stack) {
+        /* RET imm has already committed its popped return address. */
+        emit_ldr_x(buf, HB_HOST_CALL_TARGET, 19, (uint32_t)offsetof(hb_context_t, pc));
+    } else {
+        const uint32_t off = (uint32_t)offsetof(hb_context_t, pc);
+        emit_mov_imm_compact(buf, HB_HOST_CALL_TARGET, g_cg_note_guest);
+        emit_u32(buf, 0xf9000000u | ((off / 8u) << 10) |
+                      ((uint32_t)hb_rm(buf, 19) << 5) |
+                      (uint32_t)hb_rm(buf, HB_HOST_CALL_TARGET));
+    }
+    emit_str_x(buf, HB_HOST_CALL_TARGET, 19,
+               (uint32_t)offsetof(hb_context_t, regs.x64.rip));
+}
+
 
 static void emit_call_helper_wmask(hb_codegen_buffer_t* buf, void* fn, uint32_t wmask) {
     /* Итерация 368: любая отправка в помощник помечает ТЕКУЩУЮ операцию как ненативную. */
@@ -13462,6 +13607,7 @@ static void emit_call_helper_wmask(hb_codegen_buffer_t* buf, void* fn, uint32_t 
          * показывал «грубый путь: 256 из 412» — то есть прибор сообщал о поломке разметки,
          * которой не было. Четвёртый случай в этом лейне, когда врёт не код, а измеряющий его
          * прибор; поэтому исправляется здесь, а не в счётчике. */
+        emit_helper_boundary_pc(buf, fn);
         emit_helper_target(buf, fn);
         emit_blr(buf, HB_HOST_CALL_TARGET);
         return;
@@ -13481,6 +13627,7 @@ static void emit_call_helper_wmask(hb_codegen_buffer_t* buf, void* fn, uint32_t 
             for (b = 0; b < 16; b++) if (by_mask & (1u << b)) sra_count(SRA_C_RELOAD_SKIPPED_MASK);
         }
         sra_emit_spill_masked(buf, sp);
+        emit_helper_boundary_pc(buf, fn);
         emit_helper_target(buf, fn);
         emit_blr(buf, HB_HOST_CALL_TARGET);
         if (buf->sra_armed == HB_SRA_ARMED) buf->sra_call_index++;
@@ -16914,6 +17061,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
              * всегда четыре слова, и короткая укладка это нарушила (см. соседние места). */
             {
                 size_t br_taken = emit_bcond_deferred(buf, 1);
+                emit_transit_edge(buf, instr->guest_addr + instr->guest_len);
                 emit_mov_imm64(buf, 21, instr->guest_addr + instr->guest_len);
                 emit_str_x(buf, 21, 19, (uint32_t)offsetof(hb_context_t, pc));
                 {   /* ПРЯМОЕ РЕБРО ОБЕИМ ВЕТВЯМ. Обычный `Jcc` пишет `pc` НАПРЯМУЮ, минуя
@@ -16923,6 +17071,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                      * регистра. Сплавы покрыты отдельно, в самой emit_set_pc_imm64. */
                     size_t br_done = emit_b_deferred(buf);
                     patch_bcond(buf, br_taken, 1, buf->size);
+                    emit_transit_edge(buf, instr->target);
                     emit_mov_imm64(buf, 20, instr->target);
                     emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
                     patch_b(buf, br_done, buf->size);
@@ -24969,6 +25118,8 @@ hb_result_t hb_arm64_codegen_instr(hb_arm64_codegen_t* cg, const hb_ir_instr_t* 
     bool lk_serialize;
     hb_result_t r;
     if (!instr || !out) return HB_ERR_INVALID_ARG;
+    g_cg_note_guest = instr->guest_addr;
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     if (cg && cg->ctx && scalar_move_to_interp(cg->ctx, instr))
         return emit_interp_ir_helper(out, instr);
@@ -25041,6 +25192,8 @@ hb_result_t hb_arm64_codegen_copy_scan_counted_loop(hb_arm64_codegen_t* cg,
                                                     const hb_ir_block_t* guard,
                                                     hb_codegen_buffer_t* out) {
     if (!body || !guard || !out) return HB_ERR_INVALID_ARG;
+    g_cg_note_guest = body->guest_addr;
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     emit_prologue(out);
     if (emit_copy_scan_counted_loop_block(out, body, guard)) sp_uchest(SP_COPY, 0);
@@ -25055,6 +25208,8 @@ hb_result_t hb_arm64_codegen_bounded_scan_loop(hb_arm64_codegen_t* cg,
                                                const hb_ir_block_t* body,
                                                hb_codegen_buffer_t* out) {
     if (!guard || !body || !out) return HB_ERR_INVALID_ARG;
+    g_cg_note_guest = guard->guest_addr;
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     emit_prologue(out);
     if (emit_bounded_scan_loop_block(out, guard, body)) sp_uchest(SP_BOUNDED, 0);
@@ -25069,6 +25224,8 @@ hb_result_t hb_arm64_codegen_two_block_loop_helper(hb_arm64_codegen_t* cg,
                                                    const hb_ir_block_t* second,
                                                    hb_codegen_buffer_t* out) {
     if (!first || !second || !out) return HB_ERR_INVALID_ARG;
+    g_cg_note_guest = first->guest_addr;
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     emit_prologue(out);
     if (!emit_two_block_loop_helper(out, first, second))
@@ -25084,6 +25241,8 @@ hb_result_t hb_arm64_codegen_four_block_loop_helper(hb_arm64_codegen_t* cg,
                                                     const hb_ir_block_t* fourth,
                                                     hb_codegen_buffer_t* out) {
     if (!first || !second || !third || !out) return HB_ERR_INVALID_ARG;
+    g_cg_note_guest = first->guest_addr;
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     emit_prologue(out);
     if (!emit_four_block_loop_helper(out, first, second, third, fourth))
@@ -25098,6 +25257,8 @@ hb_result_t hb_arm64_codegen_i32_less_tiebreaker_helper(hb_arm64_codegen_t* cg,
                                                         const hb_ir_block_t* less,
                                                         hb_codegen_buffer_t* out) {
     if (!entry || !equal || !out) return HB_ERR_INVALID_ARG;
+    g_cg_note_guest = entry->guest_addr;
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     emit_prologue(out);
     if (!emit_i32_less_tiebreaker_helper(out, entry, equal, less))
@@ -25110,6 +25271,8 @@ hb_result_t hb_arm64_codegen_unity_sort_inner_loop_helper(hb_arm64_codegen_t* cg
                                                           const hb_ir_block_t* sort,
                                                           hb_codegen_buffer_t* out) {
     if (!sort || !out) return HB_ERR_INVALID_ARG;
+    g_cg_note_guest = sort->guest_addr;
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     emit_prologue(out);
     if (!emit_unity_sort_inner_loop_helper(out, sort))
@@ -25277,6 +25440,7 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_noclose(hb_arm64_codegen_t* c
 
 hb_result_t hb_arm64_codegen_block_with_cfg(hb_arm64_codegen_t* cg, const hb_ir_block_t* block,
                                             const hb_ir_cfg_t* cfg, hb_codegen_buffer_t* out) {
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx && cg->ctx->exec_access) {
         /* The private EXEC entry takes out* in X1. Do not run ordinary
          * lean/remap/SRA/dead-lazy preparation or a second emission pass: a
@@ -25291,6 +25455,7 @@ hb_result_t hb_arm64_codegen_block_with_cfg(hb_arm64_codegen_t* cg, const hb_ir_
         out->emitted_call = 0;
         hb_result_t r = hb_arm64_codegen_block_with_cfg_inner(cg, block, cfg, out);
         epi_close_pending(out);
+        g_transit_edges_allowed = 0;
         return r;
     }
     size_t reloc0 = out ? out->reloc_count : 0;
@@ -25342,6 +25507,7 @@ hb_result_t hb_arm64_codegen_block_with_cfg(hb_arm64_codegen_t* cg, const hb_ir_
     }
     epi_close_pending(out);
     if (r == HB_OK) g_cg_emit_instrs += (unsigned long long)g_cg_last_instrs;
+    g_transit_edges_allowed = 0;
     return r;
 }
 
@@ -25680,6 +25846,8 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
     bool mid_block_transfer;
 
     if (!block || !out) return HB_ERR_INVALID_ARG;
+    g_cg_note_guest = block->guest_addr;
+    g_transit_edges_allowed = 0;
     if (cg && cg->ctx) out->arch = cg->ctx->arch;
     if (cg && cg->ctx && cg->ctx->exec_access && !hb_ir_is_exec_unit(block))
         return HB_ERR_INVALID_ARG;
@@ -25811,6 +25979,8 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
         }
         if (g_cg_merge_block == block && i < CG_MERGE_MAX_INSTR && g_cg_note_join[i]) g_cg_note_cur.valid = 0;
         g_cg_note_guest = block->instrs[i].guest_addr;
+        g_transit_edges_allowed = i + 1 == instr_limit ||
+            (i + 2 == instr_limit && block->instrs[i + 1].op == HB_IR_Jcc);
         if (g_cg_merge_block == block && out && i < CG_MERGE_MAX_INSTR)
             g_cg_merge_off[i] = out->size;
         /* Решение о живости флагов принимается ЗДЕСЬ: тут известны блок и номер команды,
