@@ -6297,7 +6297,11 @@ static bool flags_instr_may_fail(const hb_ir_instr_t* in) {
 
 static bool flags_analysis_barrier(const hb_ir_instr_t* in) {
     if (!in) return true;
-    if (flags_instr_may_fail(in)) return true;   /* отказ бросит блок ДО затирания */
+    /* Claude 28.09.2026 — MACRUNNER_HB_FLAG_LIVENESS_IMPRECISE (умолчание 0): обращение к памяти НЕ барьер.
+     * Цена названа выше: при отказе этой команды обработчик исключения гостя увидит EFLAGS от более раннего
+     * производителя. Так делают FEX и Box64; Rosetta — нет. Только для замера. */
+    if (flags_instr_may_fail(in) && !hb_jit_gate_flag(HB_GATE_HB_FLAG_LIVENESS_IMPRECISE, 0))
+        return true;                             /* отказ бросит блок ДО затирания */
     if (codegen_is_control_transfer_op(in->op)) return true;
     /* ★ СДВИГИ И ВРАЩЕНИЯ — БАРЬЕР (итерация 134). У них флаги ЧАСТИЧНЫЕ: `ROL`/`ROR` пишут
      * CF и OF, а SF/ZF/PF ОСТАВЛЯЮТ; `SHL`/`SHR`/`SAR` добавляют OF только при счётчике 1.
@@ -7112,6 +7116,17 @@ static bool lazy_note_dead_for_fused_pair(const hb_ir_block_t* block, size_t idx
 /* Решение принимается в цикле эмиссии, где известен блок и номер команды; эмиттеры
  * лежат слишком глубоко, чтобы передавать это аргументом через все двенадцать точек. */
 static _Thread_local int g_lazy_flags_skip;
+/* ★ Claude 28.09.2026 — ЗАМЕТКА СЛЕДУЮЩЕЙ КОМАНДЫ, решённая ОТДЕЛЬНО (MACRUNNER_HB_FLAG_LIVENESS_OWN).
+ * Живость решала снятие заметки команды i только вместе с живостью следующего производителя: сращивающий
+ * эмиттер `emit_arith_rmw_dead_flags_test_jcc` (i, i+1, i+2) пишет заметку TEST (i+1) под тем же
+ * g_lazy_flags_skip, и снятие заметки i без этого условия сняло бы и её. Цена условия — ноль снятий в
+ * самой частой форме `add; cmp; jl`: заметка CMP перед переходом жива всегда (прибор hb-flag-liveness-снято
+ * looked=2 hits=0). С гейтом заметка i решается по своей живости, а эмиттер со «второй» заметкой берёт
+ * решение для i+1 отсюда. */
+static _Thread_local int g_lazy_next_note_dead;
+static int flag_liveness_own_enabled(void) {
+    return hb_jit_gate_flag(HB_GATE_HB_FLAG_LIVENESS_OWN, 0);
+}
 /* ★ ЗАМЕТКИ, СНЯТЫЕ ПО ФАКТИЧЕСКИ ВЫБРАННОЙ ФОРМЕ — а не по числу `hits` анализа.
  * Формы: 0 общая (пара x20/x21/x22), 1 CMP из x23/x22/x21, 2 CMP-с-нулём из x20.
  * `hits` анализа считается ДО выбора эмиттера и ДО отката; переносить его на выпуск нельзя
@@ -13164,6 +13179,15 @@ static bool emit_arith_rmw_dead_flags_test_jcc(hb_codegen_buffer_t* buf, const h
     if (!jcc || jcc->op != HB_IR_Jcc || (jcc->cc != HB_CC_E && jcc->cc != HB_CC_NE))
         return false;
     if (!emit_direct_arith_rmw_impl(buf, rmw, false)) return false;
+    if (flag_liveness_own_enabled()) {
+        /* Заметка TEST (команда i+1) — по ЕЁ живости, не по живости RMW (см. g_lazy_next_note_dead). */
+        int saved = g_lazy_flags_skip;
+        bool ok;
+        g_lazy_flags_skip = g_lazy_next_note_dead;
+        ok = emit_test_same_reg_jcc_pair(buf, test, jcc);
+        g_lazy_flags_skip = saved;
+        return ok;
+    }
     return emit_test_same_reg_jcc_pair(buf, test, jcc);
 }
 
@@ -25795,6 +25819,7 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
          * две команды в одну форму и выпустила бы запись флагов за ВТОРУЮ из них. */
         g_emit_ir++;
         g_lazy_flags_skip = 0;
+        g_lazy_next_note_dead = 0;
         /* Решение для СРАЩЁННОЙ пары считается здесь и здесь же обнуляется: у эмиттеров
          * нет ни блока, ни номера команды, а действовать оно обязано ровно один шаг. */
         g_lazy_pair_dead = 0;
@@ -25884,9 +25909,14 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
         if (flag_liveness_enabled() && flags_written_mask(&block->instrs[i])) {
             HB_PROBE_LOOKED(&pr_flagliv_snyato);
             g_flagliv_seen++;
-            if (lazy_flags_dead_at_lim(block, i, instr_limit) &&
-                (i + 1 >= instr_limit || !flags_written_mask(&block->instrs[i + 1]) ||
-                 lazy_flags_dead_at_lim(block, i + 1, instr_limit))) {
+            const bool next_prod = i + 1 < instr_limit && flags_written_mask(&block->instrs[i + 1]);
+            g_lazy_next_note_dead = next_prod && lazy_flags_dead_at_lim(block, i + 1, instr_limit);
+            /* ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ (MACRUNNER_HB_TEST_LIVENESS_FLIP, только для тестов): снять и ЖИВУЮ заметку
+             * производителя, за которым сразу идёт Jcc, — сличение обязано покраснеть на флагах блока. */
+            const bool test_flip = hb_jit_gate_flag(HB_GATE_HB_TEST_LIVENESS_FLIP, 0) &&
+                                   i + 1 < instr_limit && block->instrs[i + 1].op == HB_IR_Jcc;
+            if (test_flip || (lazy_flags_dead_at_lim(block, i, instr_limit) &&
+                (!next_prod || g_lazy_next_note_dead || flag_liveness_own_enabled()))) {
                 g_lazy_flags_skip = 1;
                 g_flagliv_skipped++;
                 HB_PROBE_HIT(&pr_flagliv_snyato);

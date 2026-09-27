@@ -2921,14 +2921,29 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
     {
         static int карта_гейт = -1;
         static FILE* карта;
+        static FILE* карта_байты;   /* Claude 28.09: =2 — ещё и байты выпуска, для разбора отсчётов sample */
+        static FILE* карта_гостя;   /* =3 — ещё и байты ГОСТЯ блока: корпус настоящих горячих блоков */
         if (карта_гейт < 0) {
             const char* v = hb_gate( HB_GATE_HB_JIT_MAP );
             карта_гейт = (v && *v && *v != '0') ? 1 : 0;
             if (карта_гейт) {
-                char путь[256];
-                snprintf(путь, sizeof(путь), "/tmp/hbjit_%d.map", (int)getpid());
+                char путь[512];
+                /* Claude 28.09: прогон идёт в песочнице, писать можно только в свой TMPDIR — /tmp даёт открыт=0. */
+                const char* каталог = getenv("TMPDIR");
+                if (!каталог || !*каталог) каталог = "/tmp";
+                snprintf(путь, sizeof(путь), "%s/hbjit_%d.map", каталог, (int)getpid());
                 карта = fopen(путь, "w");
                 fprintf(stderr, "macrunner-hb-jit-map: файл=%s открыт=%d\n", путь, карта ? 1 : 0);
+                if (v[0] == '2' || v[0] == '3') {
+                    snprintf(путь, sizeof(путь), "%s/hbjit_%d.bin", каталог, (int)getpid());
+                    карта_байты = fopen(путь, "wb");
+                    fprintf(stderr, "macrunner-hb-jit-map: байты=%s открыт=%d\n", путь, карта_байты ? 1 : 0);
+                }
+                if (v[0] == '3') {
+                    snprintf(путь, sizeof(путь), "%s/hbjit_%d.gbin", каталог, (int)getpid());
+                    карта_гостя = fopen(путь, "wb");
+                    fprintf(stderr, "macrunner-hb-jit-map: гость=%s открыт=%d\n", путь, карта_гостя ? 1 : 0);
+                }
                 fflush(stderr);
             }
         }
@@ -2937,6 +2952,41 @@ static hb_block_cache_entry_t* block_cache_put(hb_jit_runtime_t* rt, hb_block_ca
                     (unsigned long long)(uintptr_t)code,
                     (unsigned long long)((uintptr_t)code + size),
                     (unsigned long long)addr);
+            if (карта_байты && size < (1u << 20)) {
+                /* Запись: u64 начало, u32 размер, u64 гостевой адрес, затем байты кода. */
+                uint64_t нач = (uint64_t)(uintptr_t)code, гость = (uint64_t)addr;
+                uint32_t разм = (uint32_t)size;
+                /* Потоки компилируют параллельно: запись целиком под замком файла, иначе заголовок
+                 * одного блока перемешивается с байтами другого (первый прогон: разобрано 50 тыс. из ~460 тыс.). */
+                flockfile(карта_байты);
+                fwrite(&нач, 8, 1, карта_байты);
+                fwrite(&разм, 4, 1, карта_байты);
+                fwrite(&гость, 8, 1, карта_байты);
+                fwrite(code, 1, size, карта_байты);
+                fflush(карта_байты);   /* прогон снимают SIGKILL — буфер stdio иначе теряется */
+                funlockfile(карта_байты);
+            }
+            if (карта_гостя && block && block->instr_count && rt && rt->ctx && rt->ctx->memory) {
+                /* Запись: u64 гостевой адрес, u32 длина, байты гостя (не больше 4 КБ). */
+                uint64_t lo = UINT64_MAX, hi = 0;
+                uint8_t гбуф[4096];
+                for (size_t k = 0; k < block->instr_count; k++) {
+                    uint64_t a0 = block->instrs[k].guest_addr, a1 = a0 + block->instrs[k].guest_len;
+                    if (a0 < lo) lo = a0;
+                    if (a1 > hi) hi = a1;
+                }
+                if (hi > lo && hi - lo <= sizeof(гбуф) &&
+                    hb_memory_read_nofault(rt->ctx->memory, lo, гбуф, (size_t)(hi - lo)) == HB_OK) {
+                    uint32_t глен = (uint32_t)(hi - lo);
+                    flockfile(карта_гостя);
+                    fwrite(&lo, 8, 1, карта_гостя);
+                    fwrite(&глен, 4, 1, карта_гостя);
+                    fwrite(гбуф, 1, глен, карта_гостя);
+                    fflush(карта_гостя);
+                    funlockfile(карта_гостя);
+                }
+            }
+            if (карта_байты) fflush(карта);
         }
     }
     size_t first_tomb = SIZE_MAX;
@@ -6980,6 +7030,9 @@ static unsigned persistent_cache_version(void) {
          * ГРАНИЦА СПИСКА: гейт, меняющий выпуск только на коде, которого в обоих корпусах нет,
          * перебор не найдёт. Список закрыт по этим корпусам, а не вообще. */
         HB_KEY_GATE("MACRUNNER_HB_FLAG_LIVENESS");
+        HB_KEY_GATE("MACRUNNER_HB_FLAG_LIVENESS_OWN");
+        HB_KEY_GATE("MACRUNNER_HB_TEST_LIVENESS_FLIP");
+        HB_KEY_GATE("MACRUNNER_HB_FLAG_LIVENESS_IMPRECISE");
         HB_KEY_GATE("MACRUNNER_HB_LEAN_FRAME");
         HB_KEY_GATE("MACRUNNER_HB_LEAN_REMAP_ONLY");
         HB_KEY_GATE("MACRUNNER_HB_JIT_HELPER_STORE_FENCE");

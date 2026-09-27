@@ -1,0 +1,855 @@
+# Корпус лейна РЕГИСТРЫ — случаи под закреплённые RAX/RCX/RDX/RSP.
+# ПОРОЖДЁН tools/regalloc/породить-корпус.py — руками не править, править порождатель.
+# Формат: <зерно> <байты> <ожидаемое-число-команд>
+# Строка '# asm:' показывает, ЧТО реально закодировано (обратный разбор ассемблера).
+
+# ═══ ★ маска записей помощника: закреплённый ЖИВ через вызов, который его НЕ ПИШЕТ ═══
+# asm: addq %rcx, %rax ; movq %rdx, (%rbx) ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c84889134801c84801c8 4
+0xdeadbeef 4801c84889134801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c84889134801c84801c8 4
+0x7fffffffffffffff 4801c84889134801c84801c8 4
+# asm: addq %rcx, %rax ; movl %edx, (%rbx) ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c889134801c84801c8 4
+0xdeadbeef 4801c889134801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c889134801c84801c8 4
+0x7fffffffffffffff 4801c889134801c84801c8 4
+# asm: addq %rcx, %rax ; movb %dl, (%rbx) ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c888134801c84801c8 4
+0xdeadbeef 4801c888134801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c888134801c84801c8 4
+0x7fffffffffffffff 4801c888134801c84801c8 4
+# asm: addq %rcx, %rax ; testq %rdx, (%rbx) ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c84885134801c84801c8 4
+0xdeadbeef 4801c84885134801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c84885134801c84801c8 4
+0x7fffffffffffffff 4801c84885134801c84801c8 4
+# asm: addq %rcx, %rax ; cmpq %rdx, (%rbx) ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c84839134801c84801c8 4
+0xdeadbeef 4801c84839134801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c84839134801c84801c8 4
+0x7fffffffffffffff 4801c84839134801c84801c8 4
+# asm: addq %rcx, %rax ; movq (%rbx), %rdx ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c8488b134801c84801c8 4
+0xdeadbeef 4801c8488b134801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c8488b134801c84801c8 4
+0x7fffffffffffffff 4801c8488b134801c84801c8 4
+# asm: addq %rcx, %rax ; movq (%rbx), %rax ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c8488b034801c84801c8 4
+0xdeadbeef 4801c8488b034801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c8488b034801c84801c8 4
+0x7fffffffffffffff 4801c8488b034801c84801c8 4
+# asm: addq %rcx, %rax ; movzbq (%rbx), %rdx ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c8480fb6134801c84801c8 4
+0xdeadbeef 4801c8480fb6134801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c8480fb6134801c84801c8 4
+0x7fffffffffffffff 4801c8480fb6134801c84801c8 4
+# asm: addq %rcx, %rax ; movslq (%rbx), %rdx ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c84863134801c84801c8 4
+0xdeadbeef 4801c84863134801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c84863134801c84801c8 4
+0x7fffffffffffffff 4801c84863134801c84801c8 4
+# asm: movq %rsp, %rax ; movq %rdx, (%rbx) ; addq $0x8, %rsp ; movq %rsp, %rcx ; addq %rax, %rcx
+0x1 4889e04889134883c4084889e14801c1 5
+0xdeadbeef 4889e04889134883c4084889e14801c1 5
+0x5a5a5a5a5a5a5a5a 4889e04889134883c4084889e14801c1 5
+0x7fffffffffffffff 4889e04889134883c4084889e14801c1 5
+# asm: addq %rcx, %rax ; movq %rdx, (%rbx) ; addq %rcx, %rax ; movq %rdx, (%rbx) ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c84889134801c84889134801c84801c8 6
+0xdeadbeef 4801c84889134801c84889134801c84801c8 6
+0x5a5a5a5a5a5a5a5a 4801c84889134801c84889134801c84801c8 6
+0x7fffffffffffffff 4801c84889134801c84889134801c84801c8 6
+# asm: addq %rcx, %rax ; movq (%rbx), %rcx ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c8488b0b4801c84801c8 4
+0xdeadbeef 4801c8488b0b4801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c8488b0b4801c84801c8 4
+0x7fffffffffffffff 4801c8488b0b4801c84801c8 4
+# asm: addq %rcx, %rax ; movq (%rbx), %rsp ; addq %rcx, %rax ; addq %rcx, %rax
+0x1 4801c8488b234801c84801c8 4
+0xdeadbeef 4801c8488b234801c84801c8 4
+0x5a5a5a5a5a5a5a5a 4801c8488b234801c84801c8 4
+0x7fffffffffffffff 4801c8488b234801c84801c8 4
+# asm: movq $0x7, %rax ; addq %rcx, %rax ; movq %rdx, (%rbx) ; addq %rax, %rcx ; addq %rax, %rcx
+0x1 48c7c0070000004801c84889134801c14801c1 5
+0xdeadbeef 48c7c0070000004801c84889134801c14801c1 5
+0x5a5a5a5a5a5a5a5a 48c7c0070000004801c84889134801c14801c1 5
+0x7fffffffffffffff 48c7c0070000004801c84889134801c14801c1 5
+
+# ═══ подрегистры RAX — чтение и запись вперемешку ═══
+# asm: movb $0x7f, %al
+0x1 b07f 1
+0xdeadbeef b07f 1
+0x5a5a5a5a5a5a5a5a b07f 1
+0x7fffffffffffffff b07f 1
+# asm: movb $0x7f, %al ; movb $0x7f, %al ; movb $0x7f, %al ; movb $0x7f, %al ; movb $0x7f, %al ; movb $0x7f, %al ; movb $0x7f, %al ; movb $0x7f, %al ; movb $0x7f, %al ; movb $0x7f, %al...
+0x1 b07fb07fb07fb07fb07fb07fb07fb07fb07fb07fb07fb07f 12
+0xdeadbeef b07fb07fb07fb07fb07fb07fb07fb07fb07fb07fb07fb07f 12
+0x5a5a5a5a5a5a5a5a b07fb07fb07fb07fb07fb07fb07fb07fb07fb07fb07fb07f 12
+0x7fffffffffffffff b07fb07fb07fb07fb07fb07fb07fb07fb07fb07fb07fb07f 12
+# asm: movb $0x7f, %ah
+0x1 b47f 1
+0xdeadbeef b47f 1
+0x5a5a5a5a5a5a5a5a b47f 1
+0x7fffffffffffffff b47f 1
+# asm: movb $0x7f, %ah ; movb $0x7f, %ah ; movb $0x7f, %ah ; movb $0x7f, %ah ; movb $0x7f, %ah ; movb $0x7f, %ah ; movb $0x7f, %ah ; movb $0x7f, %ah ; movb $0x7f, %ah ; movb $0x7f, %ah...
+0x1 b47fb47fb47fb47fb47fb47fb47fb47fb47fb47fb47fb47f 12
+0xdeadbeef b47fb47fb47fb47fb47fb47fb47fb47fb47fb47fb47fb47f 12
+0x5a5a5a5a5a5a5a5a b47fb47fb47fb47fb47fb47fb47fb47fb47fb47fb47fb47f 12
+0x7fffffffffffffff b47fb47fb47fb47fb47fb47fb47fb47fb47fb47fb47fb47f 12
+# asm: movw $0x1234, %ax            ## imm = 0x1234
+0x1 66b83412 1
+0xdeadbeef 66b83412 1
+0x5a5a5a5a5a5a5a5a 66b83412 1
+0x7fffffffffffffff 66b83412 1
+# asm: movl $0x12345678, %eax       ## imm = 0x12345678
+0x1 b878563412 1
+0xdeadbeef b878563412 1
+0x5a5a5a5a5a5a5a5a b878563412 1
+0x7fffffffffffffff b878563412 1
+# asm: movabsq $0x123456789, %rax      ## imm = 0x123456789
+0x1 48b88967452301000000 1
+0xdeadbeef 48b88967452301000000 1
+0x5a5a5a5a5a5a5a5a 48b88967452301000000 1
+0x7fffffffffffffff 48b88967452301000000 1
+# asm: addb %ah, %al
+0x1 00e0 1
+0xdeadbeef 00e0 1
+0x5a5a5a5a5a5a5a5a 00e0 1
+0x7fffffffffffffff 00e0 1
+# asm: addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; addb %ah, %al ; a...
+0x1 00e000e000e000e000e000e000e000e000e000e000e000e0 12
+0xdeadbeef 00e000e000e000e000e000e000e000e000e000e000e000e0 12
+0x5a5a5a5a5a5a5a5a 00e000e000e000e000e000e000e000e000e000e000e000e0 12
+0x7fffffffffffffff 00e000e000e000e000e000e000e000e000e000e000e000e0 12
+# asm: addb %al, %ah
+0x1 00c4 1
+0xdeadbeef 00c4 1
+0x5a5a5a5a5a5a5a5a 00c4 1
+0x7fffffffffffffff 00c4 1
+# asm: addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; addb %al, %ah ; a...
+0x1 00c400c400c400c400c400c400c400c400c400c400c400c4 12
+0xdeadbeef 00c400c400c400c400c400c400c400c400c400c400c400c4 12
+0x5a5a5a5a5a5a5a5a 00c400c400c400c400c400c400c400c400c400c400c400c4 12
+0x7fffffffffffffff 00c400c400c400c400c400c400c400c400c400c400c400c4 12
+# asm: movb %ah, %al
+0x1 88e0 1
+0xdeadbeef 88e0 1
+0x5a5a5a5a5a5a5a5a 88e0 1
+0x7fffffffffffffff 88e0 1
+# asm: movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; movb %ah, %al ; m...
+0x1 88e088e088e088e088e088e088e088e088e088e088e088e0 12
+0xdeadbeef 88e088e088e088e088e088e088e088e088e088e088e088e0 12
+0x5a5a5a5a5a5a5a5a 88e088e088e088e088e088e088e088e088e088e088e088e0 12
+0x7fffffffffffffff 88e088e088e088e088e088e088e088e088e088e088e088e0 12
+# asm: movb %al, %ah
+0x1 88c4 1
+0xdeadbeef 88c4 1
+0x5a5a5a5a5a5a5a5a 88c4 1
+0x7fffffffffffffff 88c4 1
+# asm: movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; movb %al, %ah ; m...
+0x1 88c488c488c488c488c488c488c488c488c488c488c488c4 12
+0xdeadbeef 88c488c488c488c488c488c488c488c488c488c488c488c4 12
+0x5a5a5a5a5a5a5a5a 88c488c488c488c488c488c488c488c488c488c488c488c4 12
+0x7fffffffffffffff 88c488c488c488c488c488c488c488c488c488c488c488c4 12
+# asm: xchgb %al, %ah
+0x1 86e0 1
+0xdeadbeef 86e0 1
+0x5a5a5a5a5a5a5a5a 86e0 1
+0x7fffffffffffffff 86e0 1
+# asm: xchgb %al, %ah ; xchgb %al, %ah ; xchgb %al, %ah ; xchgb %al, %ah ; xchgb %al, %ah ; xchgb %al, %ah ; xchgb %al, %ah ; xchgb %al, %ah ; xchgb %al, %ah ; xchgb %al, %ah ; xchgb %...
+0x1 86e086e086e086e086e086e086e086e086e086e086e086e0 12
+0xdeadbeef 86e086e086e086e086e086e086e086e086e086e086e086e0 12
+0x5a5a5a5a5a5a5a5a 86e086e086e086e086e086e086e086e086e086e086e086e0 12
+0x7fffffffffffffff 86e086e086e086e086e086e086e086e086e086e086e086e0 12
+# asm: incb %ah
+0x1 fec4 1
+0xdeadbeef fec4 1
+0x5a5a5a5a5a5a5a5a fec4 1
+0x7fffffffffffffff fec4 1
+# asm: incb %ah ; incb %ah ; incb %ah ; incb %ah ; incb %ah ; incb %ah ; incb %ah ; incb %ah ; incb %ah ; incb %ah ; incb %ah ; incb %ah
+0x1 fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4 12
+0xdeadbeef fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4 12
+0x5a5a5a5a5a5a5a5a fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4 12
+0x7fffffffffffffff fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4fec4 12
+# asm: notb %ah
+0x1 f6d4 1
+0xdeadbeef f6d4 1
+0x5a5a5a5a5a5a5a5a f6d4 1
+0x7fffffffffffffff f6d4 1
+# asm: notb %ah ; notb %ah ; notb %ah ; notb %ah ; notb %ah ; notb %ah ; notb %ah ; notb %ah ; notb %ah ; notb %ah ; notb %ah ; notb %ah
+0x1 f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4 12
+0xdeadbeef f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4 12
+0x5a5a5a5a5a5a5a5a f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4 12
+0x7fffffffffffffff f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4f6d4 12
+# asm: negb %al
+0x1 f6d8 1
+0xdeadbeef f6d8 1
+0x5a5a5a5a5a5a5a5a f6d8 1
+0x7fffffffffffffff f6d8 1
+# asm: negb %al ; negb %al ; negb %al ; negb %al ; negb %al ; negb %al ; negb %al ; negb %al ; negb %al ; negb %al ; negb %al ; negb %al
+0x1 f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8 12
+0xdeadbeef f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8 12
+0x5a5a5a5a5a5a5a5a f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8 12
+0x7fffffffffffffff f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8f6d8 12
+# asm: movzbq %al, %rax
+0x1 480fb6c0 1
+0xdeadbeef 480fb6c0 1
+0x5a5a5a5a5a5a5a5a 480fb6c0 1
+0x7fffffffffffffff 480fb6c0 1
+# asm: movzwq %ax, %rax
+0x1 480fb7c0 1
+0xdeadbeef 480fb7c0 1
+0x5a5a5a5a5a5a5a5a 480fb7c0 1
+0x7fffffffffffffff 480fb7c0 1
+# asm: movslq %eax, %rax
+0x1 4863c0 1
+0xdeadbeef 4863c0 1
+0x5a5a5a5a5a5a5a5a 4863c0 1
+0x7fffffffffffffff 4863c0 1
+
+# ═══ верх EAX обнуляется — последовательностью, а не одной командой ═══
+# asm: movq $-0x1, %rax ; movl $0x1, %eax
+0x1 48c7c0ffffffffb801000000 2
+0xdeadbeef 48c7c0ffffffffb801000000 2
+0x5a5a5a5a5a5a5a5a 48c7c0ffffffffb801000000 2
+0x7fffffffffffffff 48c7c0ffffffffb801000000 2
+# asm: movq $-0x1, %rax ; addl $0x1, %eax
+0x1 48c7c0ffffffff83c001 2
+0xdeadbeef 48c7c0ffffffff83c001 2
+0x5a5a5a5a5a5a5a5a 48c7c0ffffffff83c001 2
+0x7fffffffffffffff 48c7c0ffffffff83c001 2
+# asm: movq $-0x1, %rax ; xorl %eax, %eax
+0x1 48c7c0ffffffff31c0 2
+0xdeadbeef 48c7c0ffffffff31c0 2
+0x5a5a5a5a5a5a5a5a 48c7c0ffffffff31c0 2
+0x7fffffffffffffff 48c7c0ffffffff31c0 2
+# asm: movq $-0x1, %rcx ; movl $0x1, %ecx
+0x1 48c7c1ffffffffb901000000 2
+0xdeadbeef 48c7c1ffffffffb901000000 2
+0x5a5a5a5a5a5a5a5a 48c7c1ffffffffb901000000 2
+0x7fffffffffffffff 48c7c1ffffffffb901000000 2
+# asm: movq $-0x1, %rdx ; incl %edx
+0x1 48c7c2ffffffffffc2 2
+0xdeadbeef 48c7c2ffffffffffc2 2
+0x5a5a5a5a5a5a5a5a 48c7c2ffffffffffc2 2
+0x7fffffffffffffff 48c7c2ffffffffffc2 2
+
+# ═══ запись в закреплённый видна следующей команде того же блока ═══
+# asm: movabsq $0x1122334455667788, %rax ## imm = 0x1122334455667788 ; addq %rax, %rcx
+0x1 48b888776655443322114801c1 2
+0xdeadbeef 48b888776655443322114801c1 2
+0x5a5a5a5a5a5a5a5a 48b888776655443322114801c1 2
+0x7fffffffffffffff 48b888776655443322114801c1 2
+# asm: movq $0x5, %rcx ; addq %rcx, %rax ; addq %rcx, %rdx
+0x1 48c7c1050000004801c84801ca 3
+0xdeadbeef 48c7c1050000004801c84801ca 3
+0x5a5a5a5a5a5a5a5a 48c7c1050000004801c84801ca 3
+0x7fffffffffffffff 48c7c1050000004801c84801ca 3
+# asm: addq %rcx, %rax ; addq %rax, %rdx ; addq %rdx, %rcx
+0x1 4801c84801c24801d1 3
+0xdeadbeef 4801c84801c24801d1 3
+0x5a5a5a5a5a5a5a5a 4801c84801c24801d1 3
+0x7fffffffffffffff 4801c84801c24801d1 3
+# asm: movb $0x11, %ah ; movb $0x22, %al ; addq %rax, %rcx
+0x1 b411b0224801c1 3
+0xdeadbeef b411b0224801c1 3
+0x5a5a5a5a5a5a5a5a b411b0224801c1 3
+0x7fffffffffffffff b411b0224801c1 3
+# asm: xorq %rax, %rax ; incq %rax ; addq %rax, %rax
+0x1 4831c048ffc04801c0 3
+0xdeadbeef 4831c048ffc04801c0 3
+0x5a5a5a5a5a5a5a5a 4831c048ffc04801c0 3
+0x7fffffffffffffff 4831c048ffc04801c0 3
+# asm: movq %rsp, %rax ; addq $0x8, %rax ; subq %rax, %rcx
+0x1 4889e04883c0084829c1 3
+0xdeadbeef 4889e04883c0084829c1 3
+0x5a5a5a5a5a5a5a5a 4889e04883c0084829c1 3
+0x7fffffffffffffff 4889e04883c0084829c1 3
+
+# ═══ RCX как счётчик сдвига (CL) — закреплён и читается неявно ═══
+# asm: shlq %cl, %rax
+0x1 48d3e0 1
+0xdeadbeef 48d3e0 1
+0x5a5a5a5a5a5a5a5a 48d3e0 1
+0x7fffffffffffffff 48d3e0 1
+# asm: shrq %cl, %rdx
+0x1 48d3ea 1
+0xdeadbeef 48d3ea 1
+0x5a5a5a5a5a5a5a5a 48d3ea 1
+0x7fffffffffffffff 48d3ea 1
+# asm: sarl %cl, %eax
+0x1 d3f8 1
+0xdeadbeef d3f8 1
+0x5a5a5a5a5a5a5a5a d3f8 1
+0x7fffffffffffffff d3f8 1
+# asm: sarl %cl, %eax ; sarl %cl, %eax ; sarl %cl, %eax ; sarl %cl, %eax ; sarl %cl, %eax ; sarl %cl, %eax ; sarl %cl, %eax ; sarl %cl, %eax ; sarl %cl, %eax ; sarl %cl, %eax ; sarl %c...
+0x1 d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8 12
+0xdeadbeef d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8 12
+0x5a5a5a5a5a5a5a5a d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8 12
+0x7fffffffffffffff d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8d3f8 12
+# asm: rolq %cl, %rax
+0x1 48d3c0 1
+0xdeadbeef 48d3c0 1
+0x5a5a5a5a5a5a5a5a 48d3c0 1
+0x7fffffffffffffff 48d3c0 1
+# asm: shldq %cl, %rdx, %rax
+0x1 480fa5d0 1
+0xdeadbeef 480fa5d0 1
+0x5a5a5a5a5a5a5a5a 480fa5d0 1
+0x7fffffffffffffff 480fa5d0 1
+# asm: movb $0x3, %cl ; shlq %cl, %rax
+0x1 b10348d3e0 2
+0xdeadbeef b10348d3e0 2
+0x5a5a5a5a5a5a5a5a b10348d3e0 2
+0x7fffffffffffffff b10348d3e0 2
+# asm: movb $0x41, %cl ; shlq %cl, %rax
+0x1 b14148d3e0 2
+0xdeadbeef b14148d3e0 2
+0x5a5a5a5a5a5a5a5a b14148d3e0 2
+0x7fffffffffffffff b14148d3e0 2
+
+# ═══ неявная пара RAX:RDX — умножение и деление ═══
+# asm: mulq %rcx
+0x1 48f7e1 1
+0xdeadbeef 48f7e1 1
+0x5a5a5a5a5a5a5a5a 48f7e1 1
+0x7fffffffffffffff 48f7e1 1
+# asm: imulq %rcx
+0x1 48f7e9 1
+0xdeadbeef 48f7e9 1
+0x5a5a5a5a5a5a5a5a 48f7e9 1
+0x7fffffffffffffff 48f7e9 1
+# asm: mull %ecx
+0x1 f7e1 1
+0xdeadbeef f7e1 1
+0x5a5a5a5a5a5a5a5a f7e1 1
+0x7fffffffffffffff f7e1 1
+# asm: mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx ; mull %ecx
+0x1 f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1 12
+0xdeadbeef f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1 12
+0x5a5a5a5a5a5a5a5a f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1 12
+0x7fffffffffffffff f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1f7e1 12
+# asm: cqto
+0x1 4899 1
+0xdeadbeef 4899 1
+0x5a5a5a5a5a5a5a5a 4899 1
+0x7fffffffffffffff 4899 1
+# asm: cqto ; cqto ; cqto ; cqto ; cqto ; cqto ; cqto ; cqto ; cqto ; cqto ; cqto ; cqto
+0x1 489948994899489948994899489948994899489948994899 12
+0xdeadbeef 489948994899489948994899489948994899489948994899 12
+0x5a5a5a5a5a5a5a5a 489948994899489948994899489948994899489948994899 12
+0x7fffffffffffffff 489948994899489948994899489948994899489948994899 12
+# asm: cltd
+0x1 99 1
+0xdeadbeef 99 1
+0x5a5a5a5a5a5a5a5a 99 1
+0x7fffffffffffffff 99 1
+# asm: cltd ; cltd ; cltd ; cltd ; cltd ; cltd ; cltd ; cltd ; cltd ; cltd ; cltd ; cltd
+0x1 999999999999999999999999 12
+0xdeadbeef 999999999999999999999999 12
+0x5a5a5a5a5a5a5a5a 999999999999999999999999 12
+0x7fffffffffffffff 999999999999999999999999 12
+# asm: cwtl
+0x1 98 1
+0xdeadbeef 98 1
+0x5a5a5a5a5a5a5a5a 98 1
+0x7fffffffffffffff 98 1
+# asm: cwtl ; cwtl ; cwtl ; cwtl ; cwtl ; cwtl ; cwtl ; cwtl ; cwtl ; cwtl ; cwtl ; cwtl
+0x1 989898989898989898989898 12
+0xdeadbeef 989898989898989898989898 12
+0x5a5a5a5a5a5a5a5a 989898989898989898989898 12
+0x7fffffffffffffff 989898989898989898989898 12
+# asm: cbtw
+0x1 6698 1
+0xdeadbeef 6698 1
+0x5a5a5a5a5a5a5a5a 6698 1
+0x7fffffffffffffff 6698 1
+# asm: cbtw ; cbtw ; cbtw ; cbtw ; cbtw ; cbtw ; cbtw ; cbtw ; cbtw ; cbtw ; cbtw ; cbtw
+0x1 669866986698669866986698669866986698669866986698 12
+0xdeadbeef 669866986698669866986698669866986698669866986698 12
+0x5a5a5a5a5a5a5a5a 669866986698669866986698669866986698669866986698 12
+0x7fffffffffffffff 669866986698669866986698669866986698669866986698 12
+# asm: movq $0x64, %rax ; xorq %rdx, %rdx ; movq $0x7, %rcx ; divq %rcx
+0x1 48c7c0640000004831d248c7c10700000048f7f1 4
+0xdeadbeef 48c7c0640000004831d248c7c10700000048f7f1 4
+0x5a5a5a5a5a5a5a5a 48c7c0640000004831d248c7c10700000048f7f1 4
+0x7fffffffffffffff 48c7c0640000004831d248c7c10700000048f7f1 4
+# asm: movl $0x64, %eax ; xorl %edx, %edx ; movl $0x7, %ecx ; divl %ecx
+0x1 b86400000031d2b907000000f7f1 4
+0xdeadbeef b86400000031d2b907000000f7f1 4
+0x5a5a5a5a5a5a5a5a b86400000031d2b907000000f7f1 4
+0x7fffffffffffffff b86400000031d2b907000000f7f1 4
+# asm: imulq %rcx, %rax
+0x1 480fafc1 1
+0xdeadbeef 480fafc1 1
+0x5a5a5a5a5a5a5a5a 480fafc1 1
+0x7fffffffffffffff 480fafc1 1
+# asm: imulq $0x7, %rcx, %rax
+0x1 486bc107 1
+0xdeadbeef 486bc107 1
+0x5a5a5a5a5a5a5a5a 486bc107 1
+0x7fffffffffffffff 486bc107 1
+
+# ═══ RSP — закреплён и участвует в адресе ═══
+# asm: pushq %rax
+0x1 50 1
+0xdeadbeef 50 1
+0x5a5a5a5a5a5a5a5a 50 1
+0x7fffffffffffffff 50 1
+# asm: pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; pushq %rax
+0x1 505050505050505050505050 12
+0xdeadbeef 505050505050505050505050 12
+0x5a5a5a5a5a5a5a5a 505050505050505050505050 12
+0x7fffffffffffffff 505050505050505050505050 12
+# asm: popq %rax
+0x1 58 1
+0xdeadbeef 58 1
+0x5a5a5a5a5a5a5a5a 58 1
+0x7fffffffffffffff 58 1
+# asm: popq %rax ; popq %rax ; popq %rax ; popq %rax ; popq %rax ; popq %rax ; popq %rax ; popq %rax ; popq %rax ; popq %rax ; popq %rax ; popq %rax
+0x1 585858585858585858585858 12
+0xdeadbeef 585858585858585858585858 12
+0x5a5a5a5a5a5a5a5a 585858585858585858585858 12
+0x7fffffffffffffff 585858585858585858585858 12
+# asm: pushq %rcx ; popq %rdx
+0x1 515a 2
+0xdeadbeef 515a 2
+0x5a5a5a5a5a5a5a5a 515a 2
+0x7fffffffffffffff 515a 2
+# asm: pushq %rcx ; popq %rdx ; pushq %rcx ; popq %rdx ; pushq %rcx ; popq %rdx ; pushq %rcx ; popq %rdx ; pushq %rcx ; popq %rdx ; pushq %rcx ; popq %rdx ; pushq %rcx ; popq %rdx ; pu...
+0x1 515a515a515a515a515a515a515a515a515a515a515a515a 24
+0xdeadbeef 515a515a515a515a515a515a515a515a515a515a515a515a 24
+0x5a5a5a5a5a5a5a5a 515a515a515a515a515a515a515a515a515a515a515a515a 24
+0x7fffffffffffffff 515a515a515a515a515a515a515a515a515a515a515a515a 24
+# asm: pushq %rax ; pushq %rcx ; popq %rax ; popq %rcx
+0x1 50515859 4
+0xdeadbeef 50515859 4
+0x5a5a5a5a5a5a5a5a 50515859 4
+0x7fffffffffffffff 50515859 4
+# asm: pushq %rax ; pushq %rcx ; popq %rax ; popq %rcx ; pushq %rax ; pushq %rcx ; popq %rax ; popq %rcx ; pushq %rax ; pushq %rcx ; popq %rax ; popq %rcx ; pushq %rax ; pushq %rcx ; p...
+0x1 5051585950515859505158595051585950515859505158595051585950515859 32
+0xdeadbeef 5051585950515859505158595051585950515859505158595051585950515859 32
+0x5a5a5a5a5a5a5a5a 5051585950515859505158595051585950515859505158595051585950515859 32
+0x7fffffffffffffff 5051585950515859505158595051585950515859505158595051585950515859 32
+# asm: movq (%rsp), %rax
+0x1 488b0424 1
+0xdeadbeef 488b0424 1
+0x5a5a5a5a5a5a5a5a 488b0424 1
+0x7fffffffffffffff 488b0424 1
+# asm: movq 0x8(%rsp), %rcx
+0x1 488b4c2408 1
+0xdeadbeef 488b4c2408 1
+0x5a5a5a5a5a5a5a5a 488b4c2408 1
+0x7fffffffffffffff 488b4c2408 1
+# asm: movq %rax, -0x8(%rsp)
+0x1 48894424f8 1
+0xdeadbeef 48894424f8 1
+0x5a5a5a5a5a5a5a5a 48894424f8 1
+0x7fffffffffffffff 48894424f8 1
+# asm: leaq 0x10(%rsp), %rax
+0x1 488d442410 1
+0xdeadbeef 488d442410 1
+0x5a5a5a5a5a5a5a5a 488d442410 1
+0x7fffffffffffffff 488d442410 1
+# asm: addq $0x10, %rsp
+0x1 4883c410 1
+0xdeadbeef 4883c410 1
+0x5a5a5a5a5a5a5a5a 4883c410 1
+0x7fffffffffffffff 4883c410 1
+# asm: subq $0x20, %rsp ; movq %rax, (%rsp) ; addq $0x20, %rsp
+0x1 4883ec20488904244883c420 3
+0xdeadbeef 4883ec20488904244883c420 3
+0x5a5a5a5a5a5a5a5a 4883ec20488904244883c420 3
+0x7fffffffffffffff 4883ec20488904244883c420 3
+# asm: movq %rsp, %rax ; movq %rax, %rsp
+0x1 4889e04889c4 2
+0xdeadbeef 4889e04889c4 2
+0x5a5a5a5a5a5a5a5a 4889e04889c4 2
+0x7fffffffffffffff 4889e04889c4 2
+# asm: xchgq %rsp, %rax
+0x1 4894 1
+0xdeadbeef 4894 1
+0x5a5a5a5a5a5a5a5a 4894 1
+0x7fffffffffffffff 4894 1
+# asm: xchgq %rsp, %rax ; xchgq %rsp, %rax ; xchgq %rsp, %rax ; xchgq %rsp, %rax ; xchgq %rsp, %rax ; xchgq %rsp, %rax ; xchgq %rsp, %rax ; xchgq %rsp, %rax ; xchgq %rsp, %rax ; xchgq ...
+0x1 489448944894489448944894489448944894489448944894 12
+0xdeadbeef 489448944894489448944894489448944894489448944894 12
+0x5a5a5a5a5a5a5a5a 489448944894489448944894489448944894489448944894 12
+0x7fffffffffffffff 489448944894489448944894489448944894489448944894 12
+
+# ═══ ★ ГОРЯЧИЙ RSP — иначе САМЫЙ НАГРУЖЕННЫЙ регистр не закрепляется ни разу ═══
+# asm: pushq %rax ; pushq %rcx ; pushq %rdx ; popq %rdx ; popq %rcx ; popq %rax
+0x1 5051525a5958 6
+0xdeadbeef 5051525a5958 6
+0x5a5a5a5a5a5a5a5a 5051525a5958 6
+0x7fffffffffffffff 5051525a5958 6
+# asm: pushq %rax ; pushq %rcx ; pushq %rdx ; popq %rdx ; popq %rcx ; popq %rax ; pushq %rax ; pushq %rcx ; pushq %rdx ; popq %rdx ; popq %rcx ; popq %rax ; pushq %rax ; pushq %rcx ; p...
+0x1 5051525a59585051525a59585051525a59585051525a59585051525a5958 30
+0xdeadbeef 5051525a59585051525a59585051525a59585051525a59585051525a5958 30
+0x5a5a5a5a5a5a5a5a 5051525a59585051525a59585051525a59585051525a59585051525a5958 30
+0x7fffffffffffffff 5051525a59585051525a59585051525a59585051525a59585051525a5958 30
+# asm: pushq %rax ; pushq %rax ; pushq %rax ; popq %rax ; popq %rax ; popq %rax
+0x1 505050585858 6
+0xdeadbeef 505050585858 6
+0x5a5a5a5a5a5a5a5a 505050585858 6
+0x7fffffffffffffff 505050585858 6
+# asm: pushq %rax ; pushq %rax ; pushq %rax ; popq %rax ; popq %rax ; popq %rax ; pushq %rax ; pushq %rax ; pushq %rax ; popq %rax ; popq %rax ; popq %rax ; pushq %rax ; pushq %rax ; p...
+0x1 505050585858505050585858505050585858505050585858505050585858 30
+0xdeadbeef 505050585858505050585858505050585858505050585858505050585858 30
+0x5a5a5a5a5a5a5a5a 505050585858505050585858505050585858505050585858505050585858 30
+0x7fffffffffffffff 505050585858505050585858505050585858505050585858505050585858 30
+# asm: movq (%rsp), %rax ; movq 0x8(%rsp), %rcx ; movq 0x10(%rsp), %rdx ; movq %rax, 0x18(%rsp)
+0x1 488b0424488b4c2408488b5424104889442418 4
+0xdeadbeef 488b0424488b4c2408488b5424104889442418 4
+0x5a5a5a5a5a5a5a5a 488b0424488b4c2408488b5424104889442418 4
+0x7fffffffffffffff 488b0424488b4c2408488b5424104889442418 4
+# asm: subq $0x20, %rsp ; movq %rax, (%rsp) ; movq %rcx, 0x8(%rsp) ; movq (%rsp), %rdx ; addq $0x20, %rsp
+0x1 4883ec204889042448894c2408488b14244883c420 5
+0xdeadbeef 4883ec204889042448894c2408488b14244883c420 5
+0x5a5a5a5a5a5a5a5a 4883ec204889042448894c2408488b14244883c420 5
+0x7fffffffffffffff 4883ec204889042448894c2408488b14244883c420 5
+# asm: leaq 0x8(%rsp), %rax ; leaq 0x10(%rsp), %rcx ; leaq 0x18(%rsp), %rdx ; movq %rax, (%rsp)
+0x1 488d442408488d4c2410488d54241848890424 4
+0xdeadbeef 488d442408488d4c2410488d54241848890424 4
+0x5a5a5a5a5a5a5a5a 488d442408488d4c2410488d54241848890424 4
+0x7fffffffffffffff 488d442408488d4c2410488d54241848890424 4
+# asm: pushq %rax ; movq (%rsp), %rcx ; addq $0x8, %rsp ; pushq %rcx ; popq %rdx ; pushq %rdx
+0x1 50488b0c244883c408515a52 6
+0xdeadbeef 50488b0c244883c408515a52 6
+0x5a5a5a5a5a5a5a5a 50488b0c244883c408515a52 6
+0x7fffffffffffffff 50488b0c244883c408515a52 6
+# asm: addq $0x8, %rsp ; addq $0x8, %rsp ; addq $0x8, %rsp ; subq $0x18, %rsp ; movq (%rsp), %rax
+0x1 4883c4084883c4084883c4084883ec18488b0424 5
+0xdeadbeef 4883c4084883c4084883c4084883ec18488b0424 5
+0x5a5a5a5a5a5a5a5a 4883c4084883c4084883c4084883ec18488b0424 5
+0x7fffffffffffffff 4883c4084883c4084883c4084883ec18488b0424 5
+
+# ═══ закреплённые в адресах — база, индекс, масштаб ═══
+# asm: movq (%rax), %rcx
+0x1 488b08 1
+0xdeadbeef 488b08 1
+0x5a5a5a5a5a5a5a5a 488b08 1
+0x7fffffffffffffff 488b08 1
+# asm: movq (%rcx), %rax
+0x1 488b01 1
+0xdeadbeef 488b01 1
+0x5a5a5a5a5a5a5a5a 488b01 1
+0x7fffffffffffffff 488b01 1
+# asm: movq (%rax,%rcx,8), %rdx
+0x1 488b14c8 1
+0xdeadbeef 488b14c8 1
+0x5a5a5a5a5a5a5a5a 488b14c8 1
+0x7fffffffffffffff 488b14c8 1
+# asm: movq (%rdx,%rax,4), %rcx
+0x1 488b0c82 1
+0xdeadbeef 488b0c82 1
+0x5a5a5a5a5a5a5a5a 488b0c82 1
+0x7fffffffffffffff 488b0c82 1
+# asm: leaq (%rax,%rcx,2), %rdx
+0x1 488d1448 1
+0xdeadbeef 488d1448 1
+0x5a5a5a5a5a5a5a5a 488d1448 1
+0x7fffffffffffffff 488d1448 1
+# asm: leaq 0x4(%rax,%rdx,8), %rcx
+0x1 488d4cd004 1
+0xdeadbeef 488d4cd004 1
+0x5a5a5a5a5a5a5a5a 488d4cd004 1
+0x7fffffffffffffff 488d4cd004 1
+# asm: movl (%rax,%rcx), %edx
+0x1 8b1408 1
+0xdeadbeef 8b1408 1
+0x5a5a5a5a5a5a5a5a 8b1408 1
+0x7fffffffffffffff 8b1408 1
+# asm: movb (%rax), %ah
+0x1 8a20 1
+0xdeadbeef 8a20 1
+0x5a5a5a5a5a5a5a5a 8a20 1
+0x7fffffffffffffff 8a20 1
+# asm: movb (%rax), %ah ; movb (%rax), %ah ; movb (%rax), %ah ; movb (%rax), %ah ; movb (%rax), %ah ; movb (%rax), %ah ; movb (%rax), %ah ; movb (%rax), %ah ; movb (%rax), %ah ; movb (...
+0x1 8a208a208a208a208a208a208a208a208a208a208a208a20 12
+0xdeadbeef 8a208a208a208a208a208a208a208a208a208a208a208a20 12
+0x5a5a5a5a5a5a5a5a 8a208a208a208a208a208a208a208a208a208a208a208a20 12
+0x7fffffffffffffff 8a208a208a208a208a208a208a208a208a208a208a208a20 12
+# asm: movq %rax, (%rcx)
+0x1 488901 1
+0xdeadbeef 488901 1
+0x5a5a5a5a5a5a5a5a 488901 1
+0x7fffffffffffffff 488901 1
+# asm: movq %rcx, (%rax,%rdx,8)
+0x1 48890cd0 1
+0xdeadbeef 48890cd0 1
+0x5a5a5a5a5a5a5a5a 48890cd0 1
+0x7fffffffffffffff 48890cd0 1
+
+# ═══ закреплённый вперемешку с незакреплённым ═══
+# asm: addq %rbx, %rax
+0x1 4801d8 1
+0xdeadbeef 4801d8 1
+0x5a5a5a5a5a5a5a5a 4801d8 1
+0x7fffffffffffffff 4801d8 1
+# asm: addq %rax, %rbx
+0x1 4801c3 1
+0xdeadbeef 4801c3 1
+0x5a5a5a5a5a5a5a5a 4801c3 1
+0x7fffffffffffffff 4801c3 1
+# asm: addq %rsi, %rcx
+0x1 4801f1 1
+0xdeadbeef 4801f1 1
+0x5a5a5a5a5a5a5a5a 4801f1 1
+0x7fffffffffffffff 4801f1 1
+# asm: addq %rdi, %rdx
+0x1 4801fa 1
+0xdeadbeef 4801fa 1
+0x5a5a5a5a5a5a5a5a 4801fa 1
+0x7fffffffffffffff 4801fa 1
+# asm: movq %rbp, %rax
+0x1 4889e8 1
+0xdeadbeef 4889e8 1
+0x5a5a5a5a5a5a5a5a 4889e8 1
+0x7fffffffffffffff 4889e8 1
+# asm: movq %rax, %rbp
+0x1 4889c5 1
+0xdeadbeef 4889c5 1
+0x5a5a5a5a5a5a5a5a 4889c5 1
+0x7fffffffffffffff 4889c5 1
+# asm: xchgq %rbx, %rax
+0x1 4893 1
+0xdeadbeef 4893 1
+0x5a5a5a5a5a5a5a5a 4893 1
+0x7fffffffffffffff 4893 1
+# asm: xchgq %rbx, %rax ; xchgq %rbx, %rax ; xchgq %rbx, %rax ; xchgq %rbx, %rax ; xchgq %rbx, %rax ; xchgq %rbx, %rax ; xchgq %rbx, %rax ; xchgq %rbx, %rax ; xchgq %rbx, %rax ; xchgq ...
+0x1 489348934893489348934893489348934893489348934893 12
+0xdeadbeef 489348934893489348934893489348934893489348934893 12
+0x5a5a5a5a5a5a5a5a 489348934893489348934893489348934893489348934893 12
+0x7fffffffffffffff 489348934893489348934893489348934893489348934893 12
+# asm: addq %r8, %rax
+0x1 4c01c0 1
+0xdeadbeef 4c01c0 1
+0x5a5a5a5a5a5a5a5a 4c01c0 1
+0x7fffffffffffffff 4c01c0 1
+# asm: addq %rax, %r15
+0x1 4901c7 1
+0xdeadbeef 4901c7 1
+0x5a5a5a5a5a5a5a5a 4901c7 1
+0x7fffffffffffffff 4901c7 1
+# asm: movq %r12, %rsp
+0x1 4c89e4 1
+0xdeadbeef 4c89e4 1
+0x5a5a5a5a5a5a5a5a 4c89e4 1
+0x7fffffffffffffff 4c89e4 1
+
+# ═══ сравнения и флаги на закреплённых ═══
+# asm: cmpq %rcx, %rax
+0x1 4839c8 1
+0xdeadbeef 4839c8 1
+0x5a5a5a5a5a5a5a5a 4839c8 1
+0x7fffffffffffffff 4839c8 1
+# asm: testq %rax, %rax
+0x1 4885c0 1
+0xdeadbeef 4885c0 1
+0x5a5a5a5a5a5a5a5a 4885c0 1
+0x7fffffffffffffff 4885c0 1
+# asm: cmpb %ah, %al
+0x1 38e0 1
+0xdeadbeef 38e0 1
+0x5a5a5a5a5a5a5a5a 38e0 1
+0x7fffffffffffffff 38e0 1
+# asm: cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; cmpb %ah, %al ; c...
+0x1 38e038e038e038e038e038e038e038e038e038e038e038e0 12
+0xdeadbeef 38e038e038e038e038e038e038e038e038e038e038e038e0 12
+0x5a5a5a5a5a5a5a5a 38e038e038e038e038e038e038e038e038e038e038e038e0 12
+0x7fffffffffffffff 38e038e038e038e038e038e038e038e038e038e038e038e0 12
+# asm: cmpl %ecx, %eax
+0x1 39c8 1
+0xdeadbeef 39c8 1
+0x5a5a5a5a5a5a5a5a 39c8 1
+0x7fffffffffffffff 39c8 1
+# asm: cmpl %ecx, %eax ; cmpl %ecx, %eax ; cmpl %ecx, %eax ; cmpl %ecx, %eax ; cmpl %ecx, %eax ; cmpl %ecx, %eax ; cmpl %ecx, %eax ; cmpl %ecx, %eax ; cmpl %ecx, %eax ; cmpl %ecx, %eax...
+0x1 39c839c839c839c839c839c839c839c839c839c839c839c8 12
+0xdeadbeef 39c839c839c839c839c839c839c839c839c839c839c839c8 12
+0x5a5a5a5a5a5a5a5a 39c839c839c839c839c839c839c839c839c839c839c839c8 12
+0x7fffffffffffffff 39c839c839c839c839c839c839c839c839c839c839c839c8 12
+# asm: addq %rcx, %rax ; cmpq %rdx, %rax
+0x1 4801c84839d0 2
+0xdeadbeef 4801c84839d0 2
+0x5a5a5a5a5a5a5a5a 4801c84839d0 2
+0x7fffffffffffffff 4801c84839d0 2
+# asm: subq %rcx, %rax ; sete %al
+0x1 4829c80f94c0 2
+0xdeadbeef 4829c80f94c0 2
+0x5a5a5a5a5a5a5a5a 4829c80f94c0 2
+0x7fffffffffffffff 4829c80f94c0 2
+# asm: cmpq %rcx, %rax ; cmovaq %rdx, %rax
+0x1 4839c8480f47c2 2
+0xdeadbeef 4839c8480f47c2 2
+0x5a5a5a5a5a5a5a5a 4839c8480f47c2 2
+0x7fffffffffffffff 4839c8480f47c2 2
+
+# ═══ атомарные и обменные — читают и пишут закреплённый ═══
+# asm: xchgq %rcx, %rax
+0x1 4891 1
+0xdeadbeef 4891 1
+0x5a5a5a5a5a5a5a5a 4891 1
+0x7fffffffffffffff 4891 1
+# asm: xchgq %rcx, %rax ; xchgq %rcx, %rax ; xchgq %rcx, %rax ; xchgq %rcx, %rax ; xchgq %rcx, %rax ; xchgq %rcx, %rax ; xchgq %rcx, %rax ; xchgq %rcx, %rax ; xchgq %rcx, %rax ; xchgq ...
+0x1 489148914891489148914891489148914891489148914891 12
+0xdeadbeef 489148914891489148914891489148914891489148914891 12
+0x5a5a5a5a5a5a5a5a 489148914891489148914891489148914891489148914891 12
+0x7fffffffffffffff 489148914891489148914891489148914891489148914891 12
+# asm: xchgl %ecx, %eax
+0x1 91 1
+0xdeadbeef 91 1
+0x5a5a5a5a5a5a5a5a 91 1
+0x7fffffffffffffff 91 1
+# asm: xchgl %ecx, %eax ; xchgl %ecx, %eax ; xchgl %ecx, %eax ; xchgl %ecx, %eax ; xchgl %ecx, %eax ; xchgl %ecx, %eax ; xchgl %ecx, %eax ; xchgl %ecx, %eax ; xchgl %ecx, %eax ; xchgl ...
+0x1 919191919191919191919191 12
+0xdeadbeef 919191919191919191919191 12
+0x5a5a5a5a5a5a5a5a 919191919191919191919191 12
+0x7fffffffffffffff 919191919191919191919191 12
+# asm: lock xaddq %rcx, (%rdx)
+0x1 f0480fc10a 1
+0xdeadbeef f0480fc10a 1
+0x5a5a5a5a5a5a5a5a f0480fc10a 1
+0x7fffffffffffffff f0480fc10a 1
+# asm: lock cmpxchgq %rcx, (%rdx)
+0x1 f0480fb10a 1
+0xdeadbeef f0480fb10a 1
+0x5a5a5a5a5a5a5a5a f0480fb10a 1
+0x7fffffffffffffff f0480fb10a 1
+# asm: lock addq %rcx, (%rax)
+0x1 f0480108 1
+0xdeadbeef f0480108 1
+0x5a5a5a5a5a5a5a5a f0480108 1
+0x7fffffffffffffff f0480108 1
+# asm: cmpxchgq %rcx, (%rdx)
+0x1 480fb10a 1
+0xdeadbeef 480fb10a 1
+0x5a5a5a5a5a5a5a5a 480fb10a 1
+0x7fffffffffffffff 480fb10a 1
+
+# ═══ ★ ГОРЯЧИЙ закреплённый ВОКРУГ вызова помощника — связность выгрузки и перечитывания ═══
+# asm: addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; movq (%rcx), %rdx ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax
+0x1 4801c04801c04801c04801c04801c04801c0488b114801c04801c04801c0 10
+0xdeadbeef 4801c04801c04801c04801c04801c04801c0488b114801c04801c04801c0 10
+0x5a5a5a5a5a5a5a5a 4801c04801c04801c04801c04801c04801c0488b114801c04801c04801c0 10
+0x7fffffffffffffff 4801c04801c04801c04801c04801c04801c0488b114801c04801c04801c0 10
+# asm: addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; movq (%rcx), %rdx ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax
+0x1 4801c04801c04801c04801c0488b114801c04801c04801c04801c0 9
+0xdeadbeef 4801c04801c04801c04801c0488b114801c04801c04801c04801c0 9
+0x5a5a5a5a5a5a5a5a 4801c04801c04801c04801c0488b114801c04801c04801c04801c0 9
+0x7fffffffffffffff 4801c04801c04801c04801c0488b114801c04801c04801c04801c0 9
+# asm: addq %rcx, %rcx ; addq %rcx, %rcx ; addq %rcx, %rcx ; addq %rcx, %rcx ; movq (%rax), %rdx ; addq %rcx, %rcx ; addq %rcx, %rcx ; addq %rcx, %rcx ; addq %rcx, %rcx
+0x1 4801c94801c94801c94801c9488b104801c94801c94801c94801c9 9
+0xdeadbeef 4801c94801c94801c94801c9488b104801c94801c94801c94801c9 9
+0x5a5a5a5a5a5a5a5a 4801c94801c94801c94801c9488b104801c94801c94801c94801c9 9
+0x7fffffffffffffff 4801c94801c94801c94801c9488b104801c94801c94801c94801c9 9
+# asm: movb $0x1, %ah ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; movq (%rcx), %rdx ; movb %ah, %al ; addq %rax, %rax ; addq %rax, %rax
+0x1 b4014801c04801c04801c0488b1188e04801c04801c0 8
+0xdeadbeef b4014801c04801c04801c0488b1188e04801c04801c0 8
+0x5a5a5a5a5a5a5a5a b4014801c04801c04801c0488b1188e04801c04801c0 8
+0x7fffffffffffffff b4014801c04801c04801c0488b1188e04801c04801c0 8
+# asm: addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; movq %rax, (%rcx) ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax
+0x1 4801c04801c04801c04889014801c04801c04801c0 7
+0xdeadbeef 4801c04801c04801c04889014801c04801c04801c0 7
+0x5a5a5a5a5a5a5a5a 4801c04801c04801c04889014801c04801c04801c0 7
+0x7fffffffffffffff 4801c04801c04801c04889014801c04801c04801c0 7
+# asm: addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; movq (%rcx), %rdx ; addq %rbx, %rbx ; addq %rbx, %rbx ; addq %rbx, %rbx
+0x1 4801c04801c04801c04801c04801c0488b114801db4801db4801db 9
+0xdeadbeef 4801c04801c04801c04801c04801c0488b114801db4801db4801db 9
+0x5a5a5a5a5a5a5a5a 4801c04801c04801c04801c04801c0488b114801db4801db4801db 9
+0x7fffffffffffffff 4801c04801c04801c04801c04801c0488b114801db4801db4801db 9
+# asm: addq %rcx, %rcx ; addq %rcx, %rcx ; addq %rcx, %rcx ; addq %rcx, %rcx ; addq %rcx, %rcx ; movq (%rax), %rdx ; addq %rsi, %rsi ; addq %rsi, %rsi
+0x1 4801c94801c94801c94801c94801c9488b104801f64801f6 8
+0xdeadbeef 4801c94801c94801c94801c94801c9488b104801f64801f6 8
+0x5a5a5a5a5a5a5a5a 4801c94801c94801c94801c94801c9488b104801f64801f6 8
+0x7fffffffffffffff 4801c94801c94801c94801c94801c9488b104801f64801f6 8
+# asm: addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; movq (%rcx), %rdx ; movq (%rcx), %rsi ; addq %rbx, %rbx ; addq %rbx, %rbx
+0x1 4801c04801c04801c04801c0488b11488b314801db4801db 8
+0xdeadbeef 4801c04801c04801c04801c0488b11488b314801db4801db 8
+0x5a5a5a5a5a5a5a5a 4801c04801c04801c04801c0488b11488b314801db4801db 8
+0x7fffffffffffffff 4801c04801c04801c04801c0488b11488b314801db4801db 8
+
+# ═══ ★ ПОДРЕГИСТРЫ НА ГОРЯЧЕМ закреплённом — иначе формы перехвата AL/AX не задеваются ═══
+# asm: addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addb %al, %al ; addb %al, %al ; addq %rax, %rax
+0x1 4801c04801c04801c000c000c04801c0 6
+0xdeadbeef 4801c04801c04801c000c000c04801c0 6
+0x5a5a5a5a5a5a5a5a 4801c04801c04801c000c000c04801c0 6
+0x7fffffffffffffff 4801c04801c04801c000c000c04801c0 6
+# asm: addq %rax, %rax ; addq %rax, %rax ; addq %rax, %rax ; addw %ax, %ax ; addw %ax, %ax ; addq %rax, %rax
+0x1 4801c04801c04801c06601c06601c04801c0 6
+0xdeadbeef 4801c04801c04801c06601c06601c04801c0 6
+0x5a5a5a5a5a5a5a5a 4801c04801c04801c06601c06601c04801c0 6
+0x7fffffffffffffff 4801c04801c04801c06601c06601c04801c0 6
+# asm: addq %rax, %rax ; addq %rax, %rax ; movb %al, %bl ; movb %bl, %al ; addq %rax, %rax ; addq %rax, %rax
+0x1 4801c04801c088c388d84801c04801c0 6
+0xdeadbeef 4801c04801c088c388d84801c04801c0 6
+0x5a5a5a5a5a5a5a5a 4801c04801c088c388d84801c04801c0 6
+0x7fffffffffffffff 4801c04801c088c388d84801c04801c0 6
+# asm: addq %rax, %rax ; addq %rax, %rax ; movw %ax, %bx ; movw %bx, %ax ; addq %rax, %rax ; addq %rax, %rax
+0x1 4801c04801c06689c36689d84801c04801c0 6
+0xdeadbeef 4801c04801c06689c36689d84801c04801c0 6
+0x5a5a5a5a5a5a5a5a 4801c04801c06689c36689d84801c04801c0 6
+0x7fffffffffffffff 4801c04801c06689c36689d84801c04801c0 6
+# asm: addq %rcx, %rcx ; addq %rcx, %rcx ; addb %cl, %cl ; addw %cx, %cx ; addq %rcx, %rcx ; addq %rcx, %rcx
+0x1 4801c94801c900c96601c94801c94801c9 6
+0xdeadbeef 4801c94801c900c96601c94801c94801c9 6
+0x5a5a5a5a5a5a5a5a 4801c94801c900c96601c94801c94801c9 6
+0x7fffffffffffffff 4801c94801c900c96601c94801c94801c9 6
+# asm: addq %rax, %rax ; addq %rax, %rax ; addb %ah, %al ; addw %ax, %ax ; addb %al, %ah ; addq %rax, %rax
+0x1 4801c04801c000e06601c000c44801c0 6
+0xdeadbeef 4801c04801c000e06601c000c44801c0 6
+0x5a5a5a5a5a5a5a5a 4801c04801c000e06601c000c44801c0 6
+0x7fffffffffffffff 4801c04801c000e06601c000c44801c0 6
+# asm: addq %rdx, %rdx ; addq %rdx, %rdx ; addb %dl, %dl ; addw %dx, %dx ; addq %rdx, %rdx ; addq %rdx, %rdx
+0x1 4801d24801d200d26601d24801d24801d2 6
+0xdeadbeef 4801d24801d200d26601d24801d24801d2 6
+0x5a5a5a5a5a5a5a5a 4801d24801d200d26601d24801d24801d2 6
+0x7fffffffffffffff 4801d24801d200d26601d24801d24801d2 6
+
+# ═══ строковые — RSI/RDI/RCX, из них RCX закреплён ═══
+# asm: rep  movsb (%rsi), %es:(%rdi)
+0x1 f3a4 1
+0xdeadbeef f3a4 1
+0x5a5a5a5a5a5a5a5a f3a4 1
+0x7fffffffffffffff f3a4 1
+# asm: rep  movsb (%rsi), %es:(%rdi) ; rep  movsb (%rsi), %es:(%rdi) ; rep  movsb (%rsi), %es:(%rdi) ; rep  movsb (%rsi), %es:(%rdi) ; rep  movsb (%rsi), %es:(%rdi) ; rep  movsb (%rsi)...
+0x1 f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4 12
+0xdeadbeef f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4 12
+0x5a5a5a5a5a5a5a5a f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4 12
+0x7fffffffffffffff f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4f3a4 12
+# asm: rep  stosq %rax, %es:(%rdi)
+0x1 f348ab 1
+0xdeadbeef f348ab 1
+0x5a5a5a5a5a5a5a5a f348ab 1
+0x7fffffffffffffff f348ab 1
+# asm: movsq (%rsi), %es:(%rdi)
+0x1 48a5 1
+0xdeadbeef 48a5 1
+0x5a5a5a5a5a5a5a5a 48a5 1
+0x7fffffffffffffff 48a5 1
+# asm: movsq (%rsi), %es:(%rdi) ; movsq (%rsi), %es:(%rdi) ; movsq (%rsi), %es:(%rdi) ; movsq (%rsi), %es:(%rdi) ; movsq (%rsi), %es:(%rdi) ; movsq (%rsi), %es:(%rdi) ; movsq (%rsi), %...
+0x1 48a548a548a548a548a548a548a548a548a548a548a548a5 12
+0xdeadbeef 48a548a548a548a548a548a548a548a548a548a548a548a5 12
+0x5a5a5a5a5a5a5a5a 48a548a548a548a548a548a548a548a548a548a548a548a5 12
+0x7fffffffffffffff 48a548a548a548a548a548a548a548a548a548a548a548a5 12
+# asm: stosb %al, %es:(%rdi)
+0x1 aa 1
+0xdeadbeef aa 1
+0x5a5a5a5a5a5a5a5a aa 1
+0x7fffffffffffffff aa 1
+# asm: stosb %al, %es:(%rdi) ; stosb %al, %es:(%rdi) ; stosb %al, %es:(%rdi) ; stosb %al, %es:(%rdi) ; stosb %al, %es:(%rdi) ; stosb %al, %es:(%rdi) ; stosb %al, %es:(%rdi) ; stosb %al...
+0x1 aaaaaaaaaaaaaaaaaaaaaaaa 12
+0xdeadbeef aaaaaaaaaaaaaaaaaaaaaaaa 12
+0x5a5a5a5a5a5a5a5a aaaaaaaaaaaaaaaaaaaaaaaa 12
+0x7fffffffffffffff aaaaaaaaaaaaaaaaaaaaaaaa 12
+# asm: lodsq (%rsi), %rax
+0x1 48ad 1
+0xdeadbeef 48ad 1
+0x5a5a5a5a5a5a5a5a 48ad 1
+0x7fffffffffffffff 48ad 1
+# asm: lodsq (%rsi), %rax ; lodsq (%rsi), %rax ; lodsq (%rsi), %rax ; lodsq (%rsi), %rax ; lodsq (%rsi), %rax ; lodsq (%rsi), %rax ; lodsq (%rsi), %rax ; lodsq (%rsi), %rax ; lodsq (%r...
+0x1 48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad 12
+0xdeadbeef 48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad 12
+0x5a5a5a5a5a5a5a5a 48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad 12
+0x7fffffffffffffff 48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad48ad 12
+# всего случаев: 656

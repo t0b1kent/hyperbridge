@@ -458,6 +458,10 @@ test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPM
 	  MACRUNNER_HB_JIT_DIRECT_MEM=0 MACRUNNER_HB_JCC_FUSE_FULL=2 ./$(SSE_ORACLE_RUNNER_BIN) < $$c 2>/dev/null | python3 tests/hb_jcc_fuse/check.py --clean || exit 1; \
 	done
 	MACRUNNER_HB_JIT_DIRECT_MEM=0 MACRUNNER_HB_JCC_FUSE_FULL=2 MACRUNNER_HB_TEST_JCC_FUSE_FLIP=1 ./$(SSE_ORACLE_RUNNER_BIN) < tests/hb_jcc_fuse/flags-x64.cases 2>/dev/null | python3 tests/hb_jcc_fuse/check.py --mismatch
+	@echo "Flag liveness (OWN / IMPRECISE) against the interpreter; dropping live notes must be caught..."
+	python3 tests/hb_flag_live/check.py ./$(SSE_ORACLE_RUNNER_BIN) tests/hb_flag_live/general-x64.cases --arms
+	python3 tests/hb_flag_live/check.py ./$(SSE_ORACLE_RUNNER_BIN) tests/hb_flag_live/pinning-x64.cases --arms
+	python3 tests/hb_flag_live/check.py ./$(SSE_ORACLE_RUNNER_BIN) tests/hb_jcc_fuse/flags-x64.cases --flip
 	@echo "Running Python test suite..."
 	python3 -m unittest discover -s tests -v
 
