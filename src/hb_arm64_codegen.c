@@ -18,6 +18,7 @@ static inline int hb_jit_gate_flag(enum hb_gate_id id, int default_value)
 #include "hb_transit.h"
 #include <mach/mach_time.h>
 #include "hb_regalloc.h"
+#include "hb_reg_forward.h"
 #include "hb_contract_telemetry.h"
 #include <time.h>
 #include "hb_runtime.h"
@@ -25507,6 +25508,14 @@ hb_result_t hb_arm64_codegen_block_with_cfg(hb_arm64_codegen_t* cg, const hb_ir_
     }
     epi_close_pending(out);
     if (r == HB_OK) g_cg_emit_instrs += (unsigned long long)g_cg_last_instrs;
+    /* Run only after every re-emission and branch fixup. SRA owns dirty state;
+     * lean frames remap the ctx base. Neither participates in this pass. */
+    if (r == HB_OK && out && out->arch == HB_ARCH_X64 &&
+        !lean_frame_enabled() && !sra_enabled())
+        hb_reg_forward(out->code, out->size,
+                       hb_jit_gate_flag(HB_GATE_HB_REG_FORWARD, 0),
+                       hb_jit_gate_flag(HB_GATE_HB_XMM_FORWARD, 0),
+                       hb_jit_gate_flag(HB_GATE_HB_TEST_REG_FORWARD_FLIP, 0));
     g_transit_edges_allowed = 0;
     return r;
 }

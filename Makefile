@@ -29,6 +29,7 @@ SRCS = \
   src/hb_lift_x86.c \
   src/hb_interpreter.c \
   src/hb_arm64_codegen.c \
+  src/hb_reg_forward.c \
   src/hb_jit.c \
   src/hb_aot_cache.c \
   src/hb_contract_telemetry.c \
@@ -546,6 +547,52 @@ test: $(SIMD_NATIVE_DIFF_TEST_BIN)
 
 $(SIMD_NATIVE_DIFF_TEST_BIN): tests/hb_simd_native_diff.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+# Store-through forwarding: all gate combinations, canonical fault/SMC state,
+# plus existing independent ALU, SIMD, hardware-oracle, branch and flags corpora.
+REG_FORWARD_TEST_BIN = tests/hb_reg_forward_test
+REG_FORWARD_WORDS_BIN = tests/hb_reg_forward_words
+REG_FORWARD_BENCH_BIN = tests/hb_reg_forward_bench
+$(REG_FORWARD_TEST_BIN): tests/hb_reg_forward_test.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+$(REG_FORWARD_WORDS_BIN): tests/hb_reg_forward_words.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+$(REG_FORWARD_BENCH_BIN): tests/hb_reg_forward_bench.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+.PHONY: reg-forward-test clean-reg-forward
+clean: clean-reg-forward
+clean-reg-forward:
+	rm -f $(REG_FORWARD_TEST_BIN) $(REG_FORWARD_WORDS_BIN) $(REG_FORWARD_BENCH_BIN) $(REG_FORWARD_TEST_BIN).d $(REG_FORWARD_WORDS_BIN).d $(REG_FORWARD_BENCH_BIN).d
+test: reg-forward-test
+reg-forward-test: $(REG_FORWARD_TEST_BIN) $(REG_FORWARD_WORDS_BIN) $(ALUMEM_DIFF_TEST_BIN) $(SIMD_NATIVE_DIFF_TEST_BIN) $(SSE_ORACLE_RUNNER_BIN) $(FLAGS_STATE_TEST_BIN)
+	./$(REG_FORWARD_WORDS_BIN)
+	@set -e; for reg in 0 1; do for xmm in 0 1; do \
+	  env $(NATIVE_MEM_GATES) $(NATIVE_SIMD_GATES) MACRUNNER_HB_REG_FORWARD=$$reg MACRUNNER_HB_XMM_FORWARD=$$xmm ./$(REG_FORWARD_TEST_BIN) 2>/dev/null; \
+	done; done
+	@set -e; for forward in 0 1; do \
+	  env $(NATIVE_MEM_GATES) $(NATIVE_SIMD_GATES) MACRUNNER_HB_REG_FORWARD=$$forward MACRUNNER_HB_XMM_FORWARD=$$forward MACRUNNER_HB_MERGE_BLOCKS=1 MACRUNNER_HB_JCC_FUSE_FULL=2 HB_REG_FORWARD_CASES=8 ./$(REG_FORWARD_TEST_BIN) 2>/dev/null; \
+	done
+	@env $(NATIVE_MEM_GATES) $(NATIVE_SIMD_GATES) MACRUNNER_HB_REG_FORWARD=1 MACRUNNER_HB_XMM_FORWARD=1 MACRUNNER_HB_TEST_REG_FORWARD_FLIP=1 HB_REG_FORWARD_CASES=2 ./$(REG_FORWARD_TEST_BIN) >/dev/null 2>&1; rc=$$?; test $$rc -eq 1
+	@set -e; for forward in 0 1; do \
+	  export MACRUNNER_HB_REG_FORWARD=$$forward MACRUNNER_HB_XMM_FORWARD=$$forward; \
+	  env $(NATIVE_MEM_GATES) ./$(ALUMEM_DIFF_TEST_BIN) 2>/dev/null; \
+	  for fp in 0 1; do env $(NATIVE_SIMD_GATES) MACRUNNER_HB_MXCSR_FPCR=$$fp ./$(SIMD_NATIVE_DIFF_TEST_BIN) 2>/dev/null; done; \
+	  mkdir -p tests/hb_sse_oracle/out; \
+	  for corpus in tests/hb_sse_oracle/corpus/smoke.cases tests/hb_sse_oracle/corpus/regressions.cases; do \
+	    for fp in 0 1; do \
+	      env $(NATIVE_SIMD_GATES) HB_DIFF_IDENTITY=1 HB_DIFF_LIVE_FALLBACK=0 MACRUNNER_HB_MXCSR_FPCR=$$fp ./$(SSE_ORACLE_RUNNER_BIN) < $$corpus > tests/hb_sse_oracle/out/forward.stdout 2>tests/hb_sse_oracle/out/forward.stderr; \
+	      python3 tests/hb_sse_oracle/jit_not_worse.py < tests/hb_sse_oracle/out/forward.stdout; \
+	    done; \
+	  done; \
+	  for corpus in tests/hb_jcc_fuse/*.cases; do \
+	    MACRUNNER_HB_JIT_DIRECT_MEM=0 MACRUNNER_HB_JCC_FUSE_FULL=2 ./$(SSE_ORACLE_RUNNER_BIN) < $$corpus > tests/hb_sse_oracle/out/forward.stdout 2>tests/hb_sse_oracle/out/forward.stderr; \
+	    python3 tests/hb_jcc_fuse/check.py --clean < tests/hb_sse_oracle/out/forward.stdout; \
+	  done; \
+	  gunzip -c tests/hb_absolute/corpus/flags-carry-boundaries.hbfl.gz > tests/hb_sse_oracle/out/forward.flags; \
+	  ./$(FLAGS_STATE_TEST_BIN) - < tests/hb_sse_oracle/out/forward.flags > tests/hb_sse_oracle/out/forward.stdout 2>tests/hb_sse_oracle/out/forward.stderr; \
+	  python3 tests/hb_absolute/check_summary.py --expect-selected 500 < tests/hb_sse_oracle/out/forward.stdout; \
+	done
 
 .PHONY: simd-native-diff-test
 simd-native-diff-test: $(SIMD_NATIVE_DIFF_TEST_BIN)
