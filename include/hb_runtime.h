@@ -27,7 +27,10 @@ typedef struct {
      * zero counters to authorize replay. */
     bool execution_started;
     /* CHAIN_NO_COUNTERS reports C dispatches and entry-block IR counts, not
-     * the number of guest blocks/instructions traversed inside native chains. */
+     * the number of guest blocks/instructions traversed inside native chains.
+     * Successful C fastpaths contribute one dispatch and one work credit.
+     * Explicit limits use these units. A separate 256-entry native quantum
+     * may return nonfault STEP_LIMIT earlier, including with both limits 0. */
     bool counters_are_dispatches;
 } hb_exec_result_t;
 

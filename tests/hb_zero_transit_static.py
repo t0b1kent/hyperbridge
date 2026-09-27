@@ -5,6 +5,7 @@ The benchmark has a 4-block loop. Its first block commits an ADD to RAX,
 then jumps to the second block. Follow the warmed matching path, including
 the trampoline and the target's accounting, stopping at the target ADD body.
 Deadline LO branches are taken; the matching trampoline's NE is not taken.
+The counter-free admission poll has a nonzero remaining budget, so CBNZ is taken.
 Print every counted instruction so these assumptions remain reviewable.
 """
 import argparse
@@ -63,6 +64,9 @@ def measure(directory, mode):
             following = ins.operands[0].imm
         elif ins.mnemonic == "b.ne":
             pass  # warmed trampoline's expected guest PC matches
+        elif ins.mnemonic == "cbnz":
+            assert mode == "on" and ins.op_str.startswith("x20, "), ins.op_str
+            following = ins.operands[1].imm  # hot admission poll has budget
         elif ins.mnemonic.startswith("b."):
             raise AssertionError("unexpected condition " + ins.mnemonic)
         elif ins.mnemonic == "ldr" and ins.operands[1].type == ARM64_OP_IMM:
@@ -84,5 +88,7 @@ if __name__ == "__main__":
     parser.add_argument("on_dump")
     args = parser.parse_args()
     result = [measure(args.off_dump, "off"), measure(args.on_dump, "on")]
-    assert result[1]["instructions"] == 1, result[1]
+    assert result[1]["instructions"] == 5, result[1]
+    assert [ins["asm"].split()[0] for ins in result[1]["trace"]] == [
+        "b", "ldr", "cbnz", "sub", "str"], result[1]
     print(json.dumps(result, indent=2))

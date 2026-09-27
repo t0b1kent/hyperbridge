@@ -95,9 +95,28 @@ static int run_loop(hb_jit_runtime_t* runtime, hb_context_t* ctx,
     ctx->regs.x64.rax = ctx->regs.x64.rbx = ctx->regs.x64.rdx = 0;
     ctx->regs.x64.rcx = n;
     ctx->last_result = HB_OK;
+    uint64_t steps = 0, blocks = 0, duration = 0;
+    bool execution_started = false, counters_are_dispatches = false;
     uint64_t start = now_ns();
-    hb_result_t transport = hb_jit_runtime_run(runtime, func, out);
+    hb_result_t transport;
+    for (;;) {
+        transport = hb_jit_runtime_run(runtime, func, out);
+        steps += out->steps_executed;
+        blocks += out->blocks_executed;
+        duration += out->duration_ns;
+        execution_started |= out->execution_started;
+        counters_are_dispatches |= out->counters_are_dispatches;
+        /* A committed slice resumes from its published guest state. Keep
+         * setup outside this loop and include every resume in the timing. */
+        if (transport != HB_OK || out->result != HB_ERR_STEP_LIMIT ||
+            out->faulted || !hb_exec_result_has_progress(out)) break;
+    }
     *elapsed = now_ns() - start;
+    out->steps_executed = steps;
+    out->blocks_executed = blocks;
+    out->duration_ns = duration;
+    out->execution_started = execution_started;
+    out->counters_are_dispatches = counters_are_dispatches;
     if (transport != HB_OK || out->result != HB_OK || out->faulted ||
         ctx->regs.x64.rax != n || ctx->regs.x64.rbx != 3 * n ||
         ctx->regs.x64.rdx != 5 * n || ctx->regs.x64.rcx ||

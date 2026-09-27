@@ -39,6 +39,7 @@
 #include "hb_flags_delivery.h"
 #include "hb_pe_tls.h"
 #include "hb_continuation_v1.h"
+#include "hb_cooperative_yield.h"
 
 /* Independent entry state machine; Wine context conversion retains its LGPL notice. */
 static void *hb_return_instruction;
@@ -676,7 +677,12 @@ resume_guest:
     /* Resume the same captured x64 state directly. A Wine ARM64 context
      * roundtrip would discard PF/AF/DF, which NZCV cannot represent. */
     if (!params.steps && !params.blocks) RtlRaiseStatus( STATUS_ACCESS_VIOLATION );
-    if (++slices >= 65536) RtlRaiseStatus( STATUS_TIMEOUT );
+    /* A counter-free quantum deliberately returns early so this PE loop can
+     * service suspend/APC work. Only ordinary exits consume the existing
+     * slice guard; quanta have independent fuel and committed progress. */
+    if (!hb_pe_is_counter_free_yield( status, params.hb_result, params.faulted,
+                                     params.steps, params.blocks ) &&
+        ++slices >= HB_PE_MAX_SLICES) RtlRaiseStatus( STATUS_TIMEOUT );
     goto resume_guest;
 }
 

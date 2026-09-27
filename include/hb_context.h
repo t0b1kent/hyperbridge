@@ -576,7 +576,12 @@ struct hb_context {
      * Дописано в КОНЕЦ: смещения прежних полей зашиты в выпущенный код. */
     uint64_t callret_sp;
     uint64_t callret_fill;
+    /* CHAIN_NO_COUNTERS: private admission fuel for one runtime invocation.
+     * Separate from public dispatch counters; append to preserve old offsets. */
+    uint64_t chain_poll_remaining;
 };
+
+#define HB_CHAIN_POLL_QUANTUM 256u
 
 #define HB_CALLRET_BITS 16u   /* кольцо 64 КБ = 4096 пар; область выровнена по своему размеру */
 

@@ -4026,7 +4026,7 @@ static int pin_guest32_base_enabled(void) {
     return cached;
 }
 
-static void emit_prologue(hb_codegen_buffer_t* buf) {
+static void emit_prologue_unpolled(hb_codegen_buffer_t* buf) {
     /* Lean mode: scratch has been remapped into the caller-saved bank, so there is nothing to preserve and no
      * frame to build. Verified over 529 347 call-free blocks: none touches the stack outside this frame, none
      * writes x24-x28, none writes x30. The MOV is remapped along with everything else. */
@@ -4082,6 +4082,14 @@ static void emit_prologue(hb_codegen_buffer_t* buf) {
         buf->pinned_g32_base = 1;
     }
     if (sra) sra_emit_fill(buf);
+}
+
+static void emit_chain_quantum_poll(hb_codegen_buffer_t* buf);
+static void emit_prologue(hb_codegen_buffer_t* buf) {
+    emit_prologue_unpolled(buf);
+    if (buf->arch == HB_ARCH_X64 && jit_block_chain_enabled_for(buf) &&
+        hb_jit_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0))
+        emit_chain_quantum_poll(buf);
 }
 
 static void emit_srok_vyhod(hb_codegen_buffer_t* buf, int schetchik,
@@ -4216,6 +4224,28 @@ static bool shared_epilogue_enabled(void);
 static void emit_epilogue_ex(hb_codegen_buffer_t* buf, bool with_chain_slot);
 
 static void emit_epilogue_mid_block(hb_codegen_buffer_t* buf) { emit_epilogue_ex(buf, false); }
+
+/* All native entry routes (direct, IC, L1, CALLRET and specialized bodies)
+ * pass this point after frame/SRA initialization. Four hot instructions buy
+ * a finite cooperative slice without restoring two native public counters.
+ * C initializes fuel once per runtime invocation, never once per dispatch.
+ * CBNZ/SUB preserve NZCV. The exhausted block has not executed: publish its
+ * address and return a resumable STEP_LIMIT through the existing adapter path. */
+static void emit_chain_quantum_poll(hb_codegen_buffer_t* buf) {
+    const uint32_t fuel = (uint32_t)offsetof(hb_context_t, chain_poll_remaining);
+    emit_ldr_x(buf, 20, 19, fuel);
+    size_t admitted = buf->size;
+    emit_nop(buf);
+    emit_mov_imm_compact(buf, 21, (uint64_t)(unsigned)HB_ERR_STEP_LIMIT);
+    emit_str_w(buf, 21, 19, (uint32_t)offsetof(hb_context_t, last_result));
+    emit_mov_imm_compact(buf, 20, g_cg_note_guest);
+    emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, pc));
+    emit_str_x(buf, 20, 19, (uint32_t)offsetof(hb_context_t, regs.x64.rip));
+    emit_epilogue_mid_block(buf);
+    patch_cbnz_x(buf, admitted, 20, buf->size);
+    emit_sub_imm(buf, 20, 20, 1);
+    emit_str_x(buf, 20, 19, fuel);
+}
 
 /* MacRunner 2026-08-19, лейн РЕГИСТРЫ — ФИНАЛЬНЫЕ ЭПИЛОГИ ТОЖЕ ОБЩИЕ, но только при
  * ВЫКЛЮЧЕННОМ сцеплении блоков.
@@ -25867,7 +25897,7 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
         g_lazy_pair_dead = 0;
         if (exec_native_register_unit(block) && !out->rmap_active && !out->sra_armed && !out->sra_mask)
             return emit_exec_native_register_unit(out, block);
-        emit_prologue(out);
+        emit_prologue_unpolled(out);
         emit_mov_reg(out, 2, 1); /* Preserve caller's result before block arg. */
         emit_mov_reg(out, 0, 19);
         emit_mov_imm64(out, 1, (uint64_t)(uintptr_t)block);

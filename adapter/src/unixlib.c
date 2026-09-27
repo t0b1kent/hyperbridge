@@ -41,6 +41,9 @@
 #include "hb_memory.h"
 #include "hb_result.h"
 #include "hb_runtime.h"
+#include "hb_cooperative_yield.h"
+
+_Static_assert( HB_PE_COUNTER_FREE_YIELD == HB_ERR_STEP_LIMIT, "PE yield reason must match core" );
 #include "hb_cache_notify.h"
 #include "hb_cas128_policy.h"
 #include "hb_packet_flags.h"
@@ -1829,6 +1832,7 @@ static NTSTATUS unix_simulate_context( struct xtajit64_simulate_params *params,
     uint64_t total_steps = 0, total_blocks = 0, dispatched = 0, block_limit;
     BOOL ran_block = FALSE;
     BOOL syscall_boundary = FALSE;
+    BOOL counter_free_yield = FALSE;
     hb_exec_result_t exec;
     hb_result_t result = HB_OK;
     NTSTATUS status;
@@ -2069,6 +2073,7 @@ static NTSTATUS unix_simulate_context( struct xtajit64_simulate_params *params,
         }
         /* Only inspect the doorbell after a committed block/slice. The PE
          * side exports that complete state before Wine performs its handshake. */
+        counter_free_yield = budget_yield && block_out.counters_are_dispatches;
         if (budget_yield || cooperative_suspend_pending() || (!params_v5 && !chain)) break;
     }
 
@@ -2085,7 +2090,11 @@ done_with_exec:
     hb_context_set_scalar_access( thread_ctx, NULL, NULL, 0 );
     hb_context_set_pair_rmw_access( thread_ctx, NULL, NULL, 0 );
     hb_context_set_exec_access( thread_ctx, NULL, NULL );
-    params->hb_result = result;
+    /* Keep the V1 packet layout and success NTSTATUS. Older PE adapters still
+     * resume; updated PE recognizes this reason without charging its ordinary
+     * 65536-slice guard. Fault/pending/syscall paths retain their old results. */
+    params->hb_result = counter_free_yield && result == HB_OK && exec.result == HB_OK && !exec.faulted
+        ? HB_PE_COUNTER_FREE_YIELD : result;
     params->faulted = exec.faulted;
     params->steps = exec.steps_executed;
     params->blocks = exec.blocks_executed;

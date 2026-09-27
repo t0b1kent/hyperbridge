@@ -14808,7 +14808,10 @@ static void account_counter_free_dispatch(hb_context_t* ctx,
                                          hb_exec_result_t* out,
                                          uint64_t* steps, uint64_t* blocks) {
     if (!out->execution_started) return;
-    uint64_t entry_steps = entry->steps ? entry->steps : jit_block_step_count(entry->block);
+    /* A successful C fastpath is one dispatch/work credit too. Besides
+     * honoring finite dispatch limits, nonzero public counters are required
+     * by the PE BeginSimulation no-progress guard (cpu.c). */
+    uint64_t entry_steps = entry ? (entry->steps ? entry->steps : jit_block_step_count(entry->block)) : 1;
     (*blocks)++;
     *steps += entry_steps;
     ctx->block_count++;
@@ -14827,6 +14830,14 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
     int outer;
     hb_context_t* l1_ctx = rt ? rt->ctx : NULL;
     uint64_t l1_saved = 0, cr_saved = 0, crf_saved = 0;
+    const bool chain_poll = l1_ctx && l1_ctx->arch == HB_ARCH_X64 &&
+        !l1_ctx->exec_access && runtime_block_chain_enabled_for(l1_ctx->arch) &&
+        runtime_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0);
+    uint64_t poll_saved = 0;
+    if (chain_poll) {
+        poll_saved = l1_ctx->chain_poll_remaining;
+        l1_ctx->chain_poll_remaining = HB_CHAIN_POLL_QUANTUM;
+    }
     /* Режим FPCR хоста = MXCSR гостя на входе в выпущенный код (см. hb_host_fpcr_apply_mxcsr). */
     if (rt && rt->ctx) hb_host_fpcr_apply_mxcsr(rt->ctx->mxcsr);
     /* Claude 27.09.2026: выпущенный код видит таблицу переходов ТОЙ среды, что его исполняет, и только
@@ -14855,6 +14866,7 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
         l1_ctx->callret_sp = cr_saved;
         l1_ctx->callret_fill = crf_saved;
     }
+    if (chain_poll) l1_ctx->chain_poll_remaining = poll_saved;
     return r;
 }
 
@@ -14908,14 +14920,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
     const bool no_chain_counters = block_chain && rt && rt->ctx &&
         rt->ctx->arch == HB_ARCH_X64 && !rt->ctx->exec_access &&
         runtime_gate_flag(HB_GATE_HB_CHAIN_NO_COUNTERS, 0);
-    /* Counter-free native cycles have no budget poll. Reject finite runs
-     * before any native entry; gate-off retains the exact existing limits. */
-    if (no_chain_counters && (rt->ctx->step_limit || rt->ctx->block_limit)) {
-        if (!out) return HB_ERR_INVALID_ARG;
-        memset(out, 0, sizeof(*out));
-        return set_runtime_fault_result(out, rt->ctx, HB_ERR_INVALID_ARG, 0, 0,
-                                       "CHAIN_NO_COUNTERS requires unlimited step/block budgets");
-    }
+    /* Finite user limits are in dispatch units in this mode. An independent
+     * native quantum also yields from closed chains, even with both limits 0. */
     int single_lookup_gate = runtime_single_lookup_enabled();
     int indirect_ic_gate = runtime_indirect_ic_enabled();
     const int disp_census_on = disp_census_enabled();
@@ -15061,6 +15067,13 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                                             blocks_executed, "block limit reached");
         }
 
+        if (no_chain_counters && !ctx->chain_poll_remaining) {
+            out->result = HB_ERR_STEP_LIMIT;
+            out->steps_executed = steps;
+            out->blocks_executed = blocks_executed;
+            return HB_OK;
+        }
+
         hb_block_cache_entry_t* cached = NULL;
         hb_ir_block_t* block = NULL;
         bool smc_evicted = false;
@@ -15086,7 +15099,11 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
         if (!block) {
             /* родной быстрый путь: обслужен — продолжаем с адреса возврата, не выходя наружу */
             if (native_fastpath_try(ctx)) {
-                if (no_chain_counters) out->execution_started = true;
+                if (no_chain_counters) {
+                    out->execution_started = true;
+                    ctx->chain_poll_remaining--;
+                    account_counter_free_dispatch(ctx, NULL, out, &steps, &blocks_executed);
+                }
                 continue;
             }
             if (func->truncated) {
@@ -15834,8 +15851,17 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             next = find_block(func->cfg, ctx->pc);
         }
         if (!next) {
+            /* The block just consumed credits. Admit the C fastpath only
+             * after the same limit checks as the next native dispatch. */
+            if (no_chain_counters && (!ctx->chain_poll_remaining ||
+                (ctx->step_limit && steps >= ctx->step_limit) ||
+                (ctx->block_limit && blocks_executed >= ctx->block_limit))) continue;
             if (native_fastpath_try(ctx)) {
-                if (no_chain_counters) out->execution_started = true;
+                if (no_chain_counters) {
+                    out->execution_started = true;
+                    ctx->chain_poll_remaining--;
+                    account_counter_free_dispatch(ctx, NULL, out, &steps, &blocks_executed);
+                }
                 continue;
             }
             if (func->truncated) {

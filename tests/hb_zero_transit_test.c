@@ -216,6 +216,9 @@ static void execute(fixture_t *f, hb_ir_func_t *func, unsigned k, result_t *r) {
                            hb_runtime_run(f->ctx[k], func, HB_BACKEND_INTERP, &out);
         r->blocks += out.blocks_executed;
         r->counters_are_dispatches |= out.counters_are_dispatches;
+        /* Resume the same committed state, just like adapter budget_yield. */
+        if (r->transport == HB_OK && out.result == HB_ERR_STEP_LIMIT &&
+            !out.faulted && hb_exec_result_has_progress(&out)) continue;
         if (r->transport != HB_OK || out.result != HB_OK || out.faulted)
             fprintf(stderr, "ZERO_TRANSIT_RUN backend=%u rc=%d result=%d pc=%" PRIx64 " reason=%s\n",
                     k, r->transport, out.result, f->ctx[k]->pc, out.fault_reason ? out.fault_reason : "none");
@@ -412,14 +415,17 @@ static int counter_contract(int no_counters) {
         hb_context_t *ctx = f.ctx[1];
         ctx->step_limit = block_budget ? 0 : 3;
         ctx->block_limit = block_budget ? 3 : 0;
-        hb_regs_x64_t before = ctx->regs.x64;
         hb_exec_result_t out = {0};
         hb_result_t rc = hb_jit_runtime_run(f.rt, func, &out);
         int failed;
         if (no_counters) {
-            failed = rc != HB_ERR_INVALID_ARG || out.result != HB_ERR_INVALID_ARG ||
-                     out.execution_started || hb_exec_result_has_progress(&out) ||
-                     ctx->step_count || ctx->block_count || memcmp(&ctx->regs.x64, &before, sizeof(before));
+            const int quantum_yield = rc == HB_OK && out.result == HB_ERR_STEP_LIMIT && !out.faulted;
+            const int dispatch_limit = block_budget && rc == HB_ERR_BLOCK_LIMIT &&
+                out.result == HB_ERR_BLOCK_LIMIT && out.blocks_executed == 3;
+            failed = (!quantum_yield && !dispatch_limit) ||
+                     !hb_exec_result_has_progress(&out) || !out.counters_are_dispatches ||
+                     !out.blocks_executed || out.blocks_executed > 3 ||
+                     ctx->pc != func->guest_addr || ctx->regs.x64.rip != ctx->pc;
         } else {
             failed = out.result != (block_budget ? HB_ERR_BLOCK_LIMIT : HB_ERR_STEP_LIMIT) ||
                      out.blocks_executed != 3 || out.steps_executed != 3 ||

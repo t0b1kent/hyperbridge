@@ -680,6 +680,39 @@ test: zero-transit-evict-test
 tests/hb_zero_transit_bench: tests/hb_zero_transit_bench.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
 
+tests/hb_zero_transit_budget_test: tests/hb_zero_transit_budget_test.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+.PHONY: zero-transit-budget-test clean-zero-transit-budget-test
+zero-transit-budget-test: tests/hb_zero_transit_budget_test
+	./tests/hb_zero_transit_budget_test --mode on
+	./tests/hb_zero_transit_budget_test --mode counters
+	./tests/hb_zero_transit_budget_test --mode pc
+	./tests/hb_zero_transit_budget_test --mode off
+	./tests/hb_zero_transit_budget_test --mode on --no-ic
+	./tests/hb_zero_transit_budget_test --mode on --ic-only
+	./tests/hb_zero_transit_budget_test --mode on --callret-only
+	./tests/hb_zero_transit_budget_test --mode on --sra
+	MACRUNNER_HB_CALLRET=1 ./tests/hb_zero_transit_budget_test --mode on
+	MACRUNNER_HB_NO_DEADLINE_CHECKS=1 ./tests/hb_zero_transit_budget_test --mode on
+
+test: zero-transit-budget-test
+clean: clean-zero-transit-budget-test
+clean-zero-transit-budget-test:
+	rm -f tests/hb_zero_transit_budget_test tests/hb_zero_transit_budget_test.d
+
+tests/hb_cooperative_yield_test: tests/hb_cooperative_yield_test.c adapter/src/hb_cooperative_yield.h include/hb_result.h
+	$(CC) $(CFLAGS) $< -o $@
+
+.PHONY: cooperative-yield-test clean-cooperative-yield-test
+cooperative-yield-test: tests/hb_cooperative_yield_test
+	./tests/hb_cooperative_yield_test
+
+test: cooperative-yield-test
+clean: clean-cooperative-yield-test
+clean-cooperative-yield-test:
+	rm -f tests/hb_cooperative_yield_test tests/hb_cooperative_yield_test.d
+
 .PHONY: clean-cas128-tests
 clean: clean-cas128-tests
 clean-cas128-tests:
