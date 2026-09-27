@@ -14398,6 +14398,9 @@ static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* in
         uint32_t od;
         int k1;
         if (!is_xmm_reg_operand(&instr->dst)) return false;
+        /* EVEX-формы (маска, рассылка, {er}, длина вектора в target) — только помощником:
+         * отсюда их отсекали лишь размер приёмника и zero_ymm_upper, признак надёжнее. */
+        if (instr->target & HB_EVEX_TARGET_PRESENT) return false;
         if ((instr->op == HB_IR_CVTSS2SD || instr->op == HB_IR_CVTSD2SS || instr->op == HB_IR_CVTSI2SS ||
              instr->op == HB_IR_CVTSI2SD) && instr->src2.type != HB_OP_NONE)
             return false;

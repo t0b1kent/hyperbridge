@@ -1039,6 +1039,113 @@ static int cond_from_cc(uint8_t cc) {
     }
 }
 
+/* ★ 27.09.2026 — ПРЕОБРАЗОВАНИЯ FP ПОД EVEX: vcvtdq2ps, vcvtps2dq, vcvttps2dq (0x5B),
+ * vcvtps2pd, vcvtpd2ps, vcvtss2sd, vcvtsd2ss (0x5A), vcvtdq2pd (F3 0xE6).
+ *
+ * VEX-формы разбирались давно, EVEX-формы уходили в сборный HB_INS_VEC: 6 048 из 93 839
+ * случаев аппаратного корпуса масок (HBUP0002) не исполнялись вовсе.
+ *
+ * Что здесь иначе, чем у VEX:
+ *  - маска стоит на ДОРОЖКАХ ПРИЁМНИКА (evex_mask_lane): у `vcvtps2pd zmm{k}, ymm` бит i
+ *    выбирает qword i, взятый из dword i источника, у `vcvtpd2ps ymm{k}, zmm` — dword i;
+ *  - EVEX.b при памяти — рассылка одного элемента ({1to4/8/16} у FV, {1to2/4/8} у HV);
+ *    размер операнда памяти тогда равен элементу, и им же сжато disp8 (N). Без рассылки
+ *    N = VL у FV и VL/2 у HV, у скалярных (T1S) N = элемент (hb_evex_disp8.h);
+ *  - EVEX.b при регистре — {er} (L'L = RC) у dq2ps/ps2dq/pd2ps/sd2ss либо {sae} у
+ *    ttps2dq/ps2pd/ss2sd; длина вектора тогда 512 бит, что бы ни стояло в L'L;
+ *  - длина вектора кладётся в evex_vl: по размерам операндов её не восстановить.
+ * Недопустимые кодировки (#UD) дочитываются до конца и отдаются как HB_INS_UD: длина верна,
+ * и отказ приходит ровно на этой команде. Прочие сочетания pp/W этих опкодов (vcvtqq2ps,
+ * vcvtqq2pd, vcvt[t]pd2dq) не наши: *taken = false, разбор идёт прежним путём. */
+static hb_result_t decode_evex_fp_convert(hb_dec_t* d, hb_decoded_t* out, uint8_t op, uint8_t pp,
+                                          bool w, uint8_t vex_v, uint8_t ll, bool bbit, bool zbit,
+                                          uint8_t aaa, bool rex_r, bool rex_x, bool rex_b,
+                                          bool r2, bool* taken) {
+    enum { CVT_SAME, CVT_WIDEN, CVT_NARROW, CVT_SCALAR } shape;
+    enum { EMB_NONE, EMB_ER, EMB_SAE } emb;  /* что значит EVEX.b при регистре */
+    int ins;
+    uint8_t src_elem, dst_elem;
+
+    *taken = true;
+    if (op == 0x5b && !w && pp == 0) {
+        ins = HB_INS_CVTDQ2PS; shape = CVT_SAME; emb = EMB_ER; src_elem = 4; dst_elem = 4;
+    } else if (op == 0x5b && !w && pp == 1) {
+        ins = HB_INS_CVTPS2DQ; shape = CVT_SAME; emb = EMB_ER; src_elem = 4; dst_elem = 4;
+    } else if (op == 0x5b && !w && pp == 2) {
+        ins = HB_INS_CVTTPS2DQ; shape = CVT_SAME; emb = EMB_SAE; src_elem = 4; dst_elem = 4;
+    } else if (op == 0x5a && !w && pp == 0) {
+        ins = HB_INS_CVTPS2PD; shape = CVT_WIDEN; emb = EMB_SAE; src_elem = 4; dst_elem = 8;
+    } else if (op == 0x5a && w && pp == 1) {
+        ins = HB_INS_CVTPD2PS; shape = CVT_NARROW; emb = EMB_ER; src_elem = 8; dst_elem = 4;
+    } else if (op == 0x5a && !w && pp == 2) {
+        ins = HB_INS_CVTSS2SD; shape = CVT_SCALAR; emb = EMB_SAE; src_elem = 4; dst_elem = 8;
+    } else if (op == 0x5a && w && pp == 3) {
+        ins = HB_INS_CVTSD2SS; shape = CVT_SCALAR; emb = EMB_ER; src_elem = 8; dst_elem = 4;
+    } else if (op == 0xe6 && !w && pp == 2) {
+        ins = HB_INS_CVTDQ2PD; shape = CVT_WIDEN; emb = EMB_NONE; src_elem = 4; dst_elem = 8;
+    } else {
+        *taken = false;
+        return HB_OK;
+    }
+
+    if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
+    uint8_t modrm = read_u8(d);
+    bool reg_form = (modrm >> 6) == 3;
+    bool ud = false, bcst = false;
+    uint8_t vl = ll == 2 ? 64 : (ll == 1 ? 32 : 16);
+    uint8_t rounding = 0;
+    if (bbit && reg_form) {
+        /* У vcvtdq2pd нет ни {er}, ни {sae} (SDM; в XED у её регистровой формы BCRC=0).
+         * Bochs эту кодировку исполняет как 512-битную — расхождение, железом не проверено. */
+        if (emb == EMB_NONE) ud = true;
+        else if (emb == EMB_ER) rounding = (uint8_t)(ll + 1);  /* RC+1, как у ADDPS */
+        vl = 64;
+    } else {
+        /* L'L = 11 зарезервировано и у скалярных, хоть их длина и «не важна» (LIG):
+         * так у XED (BAD_EVEX_LL) и у Bochs — `62 f1 76 68 5a c2` даёт #UD. */
+        if (ll == 3) ud = true;
+        if (bbit) {
+            if (shape == CVT_SCALAR) ud = true;          /* у скалярных рассылки нет */
+            else bcst = true;
+        }
+    }
+    if (shape != CVT_SCALAR && vex_v != 0) ud = true;    /* vvvv = 1111 и V' = 1 обязательны */
+    if (zbit && aaa == 0) ud = true;                     /* обнуление без маски */
+
+    uint8_t half = (uint8_t)(vl / 2);
+    uint8_t dst_bytes = 16, src_reg_bytes = 16, src_mem_bytes = src_elem;
+    if (shape != CVT_SCALAR) {
+        dst_bytes = shape == CVT_NARROW ? (half < 16 ? 16 : half) : vl;
+        src_reg_bytes = shape == CVT_WIDEN ? (half < 16 ? 16 : half) : vl;
+        src_mem_bytes = bcst ? src_elem : (shape == CVT_WIDEN ? half : vl);
+    }
+    hb_result_t r = parse_modrm(d, modrm, false, rex_r, rex_x, rex_b, src_mem_bytes,
+                                out, 1, 2, false);
+    if (r != HB_OK) return r;
+    int evex_reg = (int)(((modrm >> 3) & 7u) | (rex_r ? 8u : 0u) | (r2 ? 16u : 0u));
+    int evex_rm_reg = (int)((modrm & 7u) | (rex_b ? 8u : 0u) | (rex_x ? 16u : 0u));
+    replace_reg_index(out, 1, evex_reg);
+    if (reg_form) replace_reg_index(out, 2, evex_rm_reg);
+    if (shape == CVT_SCALAR) {
+        /* Раскладка VEX-формы тех же команд: приёмник, vvvv (SRC1), rm (SRC2). */
+        hb_decoded_t tmp = *out;
+        out->op3 = tmp.op2;
+        memset(&out->op2, 0, sizeof(out->op2));
+        set_reg(out, 2, vex_v, 16);
+        mark_vec_operand(out, 2, 16);
+        if (out->op3.is_reg) mark_vec_operand(out, 3, 16);
+    } else if (out->op2.is_reg) {
+        mark_vec_operand(out, 2, src_reg_bytes);
+    }
+    mark_vec_operand(out, 1, dst_bytes);
+    out->opcode = ud ? HB_INS_UD : ins;
+    out->evex_broadcast = bcst;
+    out->evex_rounding = rounding;
+    out->evex_mask_lane = dst_elem;
+    out->evex_vl = vl;
+    return HB_OK;
+}
+
 static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
     if (!require_bytes(d, 1)) return HB_ERR_DECODE_FAILED;
 
@@ -1220,6 +1327,14 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                         out->op2.size = (vex_pp == 2) ? 4 : 8;
                     }
                     return HB_OK;
+                }
+                if (vex_opcode == 0x5a || vex_opcode == 0x5b || vex_opcode == 0xe6) {
+                    bool taken = false;
+                    hb_result_t r2 = decode_evex_fp_convert(d, out, vex_opcode, vex_pp, vex_w != 0,
+                                                            vex_v, evex_ll, evex_b, evex_z,
+                                                            evex_aaa, rex_r, rex_x, rex_b,
+                                                            evex_r2, &taken);
+                    if (taken) return r2;
                 }
                 if ((vex_opcode == 0x10 || vex_opcode == 0x11 ||
                      vex_opcode == 0x28 || vex_opcode == 0x29) &&

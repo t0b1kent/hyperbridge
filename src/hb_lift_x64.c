@@ -105,6 +105,20 @@ static void set_evex_target_arg(hb_ir_instr_t* i, const hb_decoded_t* dec, uint6
 #define HB_EVEX_ARG_ROUND_SHIFT 10
 #define HB_EVEX_ARG_ROUND_MASK  0x1c00u
 
+/* EVEX-преобразования FP (hb_decode_x64.c, decode_evex_fp_convert): ширина дорожки
+ * ПРИЁМНИКА — по ней маска, признак скаляра, рассылка, {er} (RC+1) и длина вектора.
+ * VEX- и старые формы тех же команд `target` не получают и исполняются прежним путём. */
+static void set_evex_convert_arg(hb_ir_instr_t* i, const hb_decoded_t* dec) {
+    uint64_t arg;
+    if (!i || !is_evex_decoded(dec)) return;
+    arg = dec->evex_mask_lane;
+    if (dec->opcode == HB_INS_CVTSS2SD || dec->opcode == HB_INS_CVTSD2SS) arg |= 0x100;
+    if (dec->evex_broadcast) arg |= HB_EVEX_ARG_BROADCAST;
+    arg |= ((uint64_t)(dec->evex_rounding & 7u) << HB_EVEX_ARG_ROUND_SHIFT);
+    arg |= ((uint64_t)(dec->evex_vl / 16u) << HB_EVEX_ARG_VL_SHIFT) & HB_EVEX_ARG_VL_MASK;
+    i->target = evex_target_arg(dec, arg);
+}
+
 
 #include "hb_lift_vec_opory.inc"
 
@@ -1450,6 +1464,7 @@ hb_result_t hb_lift_x64(const hb_decoded_t* dec, hb_ir_builder_t* b) {
             hb_ir_operand_t src = operand_from_dec(dec, 2);
             hb_ir_instr_t *i = hb_ir_emit(b, HB_IR_CVTDQ2PD);
             if (i) { i->dst = dst; i->src1 = src; }
+            set_evex_convert_arg(i, dec);
             emit(b, i, dec);
             return HB_OK;
         }
@@ -1463,6 +1478,7 @@ hb_result_t hb_lift_x64(const hb_decoded_t* dec, hb_ir_builder_t* b) {
             hb_ir_operand_t src = operand_from_dec(dec, 2);
             hb_ir_instr_t *i = hb_ir_emit(b, op);
             if (i) { i->dst = dst; i->src1 = src; }
+            set_evex_convert_arg(i, dec);
             emit(b, i, dec);
             return HB_OK;
         }
@@ -1490,6 +1506,7 @@ hb_result_t hb_lift_x64(const hb_decoded_t* dec, hb_ir_builder_t* b) {
                     i->src2 = hb_ir_none();
                 }
             }
+            set_evex_convert_arg(i, dec);
             emit(b, i, dec);
             return HB_OK;
         }

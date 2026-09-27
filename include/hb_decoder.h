@@ -318,6 +318,12 @@ typedef struct {
     bool is_conditional;
     uint64_t branch_target; /* relative target resolved */
     uint16_t ret_imm;       /* ret N */
+    /* EVEX vector length in bytes (16/32/64) for the FP conversions (0x5A/0x5B/0xE6), whose
+     * operand sizes do not determine it: `vcvtpd2ps xmm{k}, m64bcst` is the same for VL 128
+     * and 256. With EVEX.b on a register source ({er}/{sae}) it is 64 whatever L'L holds.
+     * 0 elsewhere. It sits in the padding after ret_imm on purpose: sizeof(hb_decoded_t)
+     * stays 320, so code built against the previous header keeps a matching layout. */
+    uint8_t evex_vl;
 
     /* Stack info */
     int stack_delta; /* bytes pushed (+) or popped (-) */

@@ -1046,6 +1046,149 @@ static uint64_t hb_quiet_double_nan_bits(uint64_t bits) {
     return bits | 0x0008000000000000ULL;
 }
 
+/* ★ 27.09.2026 — ПРЕОБРАЗОВАНИЯ EVEX-ФОРМ ПО БИТАМ, С РЕЖИМОМ ОКРУГЛЕНИЯ ЯВНО.
+ *
+ * У EVEX режим может прийти из самой команды ({er}, EVEX.RC), а не из MXCSR, и приведения
+ * C здесь не годятся: они округляют по FPCR хозяина (всегда RN, пока гейт
+ * MACRUNNER_HB_MXCSR_FPCR выключен), а FZ хозяина — это DAZ и FTZ разом. Поэтому по битам:
+ *   rc  — 0 к ближайшему чётному, 1 вниз, 2 вверх, 3 к нулю (кодировка и MXCSR.RC, и EVEX.RC);
+ *   DAZ — денормальный ВХОД считается нулём того же знака;
+ *   FTZ — результат, крошечный ПОСЛЕ округления (так x86 определяет исчезновение
+ *         порядка), заменяется нулём того же знака;
+ *   NaN — как у x86: знак и старшие биты полезной нагрузки сохраняются, бит тишины ставится;
+ *   в целое — NaN, бесконечность и выход за диапазон дают 0x80000000.
+ * Флаги исключений MXCSR движок не ведёт вовсе, поэтому {sae} на значение не влияет. */
+static bool hb_cvt_round_up(uint64_t rem, uint64_t half, bool odd, bool negative, unsigned rc) {
+    if (!rem) return false;
+    switch (rc & 3u) {
+        case 0: return rem > half || (rem == half && odd);
+        case 1: return negative;
+        case 2: return !negative;
+        default: return false;
+    }
+}
+
+static uint32_t hb_cvt_i32_to_f32_bits(int32_t v, unsigned rc) {
+    uint32_t sign = v < 0 ? 0x80000000u : 0u;
+    uint32_t mag = v < 0 ? 0u - (uint32_t)v : (uint32_t)v;
+    unsigned msb, shift;
+    uint32_t q;
+    if (!mag) return 0;
+    msb = 31u - (unsigned)__builtin_clz(mag);
+    if (msb <= 23u) return sign | ((msb + 127u) << 23) | ((mag << (23u - msb)) & 0x7fffffu);
+    shift = msb - 23u;                                   /* 1..8 разрядов уходят */
+    q = mag >> shift;
+    if (hb_cvt_round_up(mag & ((1u << shift) - 1u), 1u << (shift - 1u), (q & 1u) != 0,
+                        sign != 0, rc))
+        q++;
+    if (q == 0x1000000u) { q >>= 1; msb++; }
+    return sign | ((msb + 127u) << 23) | (q & 0x7fffffu);
+}
+
+static int32_t hb_cvt_f32_bits_to_i32(uint32_t bits, unsigned rc, bool daz) {
+    bool negative = (bits >> 31) != 0;
+    unsigned exp = (bits >> 23) & 0xffu;
+    uint32_t frac = bits & 0x7fffffu;
+    uint64_t m, q;
+    int e;
+    if (exp == 0xffu) return INT32_MIN;
+    if (!exp && (!frac || daz)) return 0;
+    e = exp ? (int)exp - 127 : -126;
+    if (e >= 31) return INT32_MIN;                       /* |x| >= 2^31; у -2^31 ответ тот же */
+    if (e < 0) {                                         /* 0 < |x| < 1: ответ 0 или ±1 */
+        bool up;
+        switch (rc & 3u) {
+            case 0: up = e == -1 && frac != 0; break;    /* больше половины; ровно 0.5 -> 0 */
+            case 1: up = negative; break;
+            case 2: up = !negative; break;
+            default: up = false; break;
+        }
+        return up ? (negative ? -1 : 1) : 0;
+    }
+    m = (uint64_t)frac | 0x800000u;
+    if (e >= 23) {
+        q = m << (e - 23);
+    } else {
+        unsigned shift = 23u - (unsigned)e;
+        q = m >> shift;
+        if (hb_cvt_round_up(m & ((1ull << shift) - 1u), 1ull << (shift - 1u), (q & 1u) != 0,
+                            negative, rc))
+            q++;
+    }
+    return negative ? (int32_t)(0u - (uint32_t)q) : (int32_t)q;
+}
+
+static uint64_t hb_cvt_f32_bits_to_f64(uint32_t bits, bool daz) {
+    uint64_t sign = (uint64_t)(bits >> 31) << 63;
+    unsigned exp = (bits >> 23) & 0xffu;
+    uint64_t frac = bits & 0x7fffffu;
+    if (exp == 0xffu)
+        return sign | 0x7ff0000000000000ULL | (frac << 29) | (frac ? 0x0008000000000000ULL : 0);
+    if (!exp) {
+        unsigned shift;
+        if (!frac || daz) return sign;
+        shift = (unsigned)__builtin_clzll(frac) - 40u;   /* до бита 23 */
+        return sign | ((uint64_t)(1023u - 126u - shift) << 52) |
+               (((frac << shift) & 0x7fffffu) << 29);
+    }
+    return sign | ((uint64_t)(exp - 127u + 1023u) << 52) | (frac << 29);
+}
+
+static uint32_t hb_cvt_f32_overflow(uint32_t sign, unsigned rc) {
+    bool to_inf = (rc & 3u) == 0 || ((rc & 3u) == 1 && sign) || ((rc & 3u) == 2 && !sign);
+    return sign | (to_inf ? 0x7f800000u : 0x7f7fffffu);
+}
+
+static uint32_t hb_cvt_f64_bits_to_f32(uint64_t bits, unsigned rc, bool daz, bool ftz) {
+    uint32_t sign = (uint32_t)(bits >> 63) << 31;
+    unsigned exp = (unsigned)((bits >> 52) & 0x7ffu);
+    uint64_t frac = bits & 0x000fffffffffffffULL;
+    uint64_t m, q;
+    unsigned shift;
+    int e;
+    if (exp == 0x7ffu)
+        return frac ? (sign | 0x7fc00000u | (uint32_t)(frac >> 29)) : (sign | 0x7f800000u);
+    if (!exp) {
+        /* |x| < 2^-1022, много меньше половины наименьшей денормали binary32. */
+        if (!frac || daz) return sign;
+        if (((rc & 3u) == 1 && sign) || ((rc & 3u) == 2 && !sign)) return ftz ? sign : (sign | 1u);
+        return sign;
+    }
+    m = frac | (1ULL << 52);
+    e = (int)exp - 1023;
+    if (e > 127) return hb_cvt_f32_overflow(sign, rc);
+    if (e >= -126) {
+        q = m >> 29;
+        if (hb_cvt_round_up(m & ((1ULL << 29) - 1u), 1ULL << 28, (q & 1u) != 0, sign != 0, rc)) q++;
+        if (q == (1ULL << 24)) { q >>= 1; e++; }
+        if (e > 127) return hb_cvt_f32_overflow(sign, rc);
+        return sign | ((uint32_t)(e + 127) << 23) | ((uint32_t)q & 0x7fffffu);
+    }
+    if (ftz) {
+        /* Крошечность — после округления до 24 разрядов при неограниченном порядке: только
+         * при e = -127 значение может подняться до 2^-126 и крошечным не считаться. */
+        bool tiny = true;
+        if (e == -127) {
+            uint64_t q24 = m >> 29;
+            if (hb_cvt_round_up(m & ((1ULL << 29) - 1u), 1ULL << 28, (q24 & 1u) != 0,
+                                sign != 0, rc))
+                q24++;
+            tiny = q24 != (1ULL << 24);
+        }
+        if (tiny) return sign;
+    }
+    shift = 29u + (unsigned)(-126 - e);                  /* 30 и больше */
+    if (shift > 63u) {
+        q = hb_cvt_round_up(1, UINT64_MAX, false, sign != 0, rc) ? 1u : 0u;
+    } else {
+        q = m >> shift;
+        if (hb_cvt_round_up(m & ((1ULL << shift) - 1u), 1ULL << (shift - 1u), (q & 1u) != 0,
+                            sign != 0, rc))
+            q++;
+    }
+    return sign | (uint32_t)q;                           /* q = 2^23 — наименьшее нормальное */
+}
+
 /* MacRunner 2026-08-15, лейн ЛЕСТНИЦА, итерация 904 — КОРЕНЬ ИЗ ОТРИЦАТЕЛЬНОГО.
  *
  * Недопустимая операция на x86 даёт QNaN indefinite со ВЗВЕДЁННЫМ знаком (fff8…/ffc0…).
@@ -4771,6 +4914,167 @@ static bool string_budget_yield(const hb_ir_instr_t* instr, hb_result_t result)
      * returning their internal iteration limit. Other families are unchanged. */
     return result == HB_ERR_STEP_LIMIT && instr && instr->guest_len &&
            (instr->op == HB_IR_MOVS || instr->op == HB_IR_STOS);
+}
+
+/* ★ 27.09.2026 — EVEX-ФОРМЫ CVT* (лифтер кладёт в target HB_EVEX_TARGET_PRESENT; VEX- и
+ * старые формы тех же узлов идут прежними ветвями без изменений).
+ *
+ * Дорожек KL = VL / ширина БОЛЬШЕГО элемента; маска выбирает дорожки ПРИЁМНИКА: у
+ * vcvtps2pd бит j — qword j из dword j источника, у vcvtpd2ps — dword j из qword j.
+ * Порядок как у железа: сначала читаются все нужные элементы источника, потом пишется
+ * приёмник. Элементы памяти под нулевым битом маски не читаются вовсе (подавление отказа
+ * доступа), рассылка читает свой единственный элемент, если активна хоть одна дорожка.
+ * Приёмник: дорожки 0..KL-1 — результат или слияние/обнуление, всё выше — нули до
+ * VLMAX (у vcvtpd2ps xmm, xmm это и верхние 64 бита xmm). Скалярные: младший элемент —
+ * результат под битом 0 маски, биты 127:ширина — из SRC1, выше 128 — нули. */
+static hb_result_t exec_evex_fp_convert(hb_context_t* ctx, const hb_ir_instr_t* instr) {
+    const uint32_t arg = evex_target_arg(instr);
+    const unsigned lane = arg & 0xffu;
+    const bool bcst = (arg & HB_EVEX_ARG_BROADCAST) != 0;
+    const unsigned er = (arg & HB_EVEX_ARG_ROUND_MASK) >> HB_EVEX_ARG_ROUND_SHIFT;
+    const unsigned rc = er ? (er - 1u) & 3u : (ctx->mxcsr >> 13) & 3u;
+    const bool daz = (ctx->mxcsr & 0x40u) != 0;
+    const bool ftz = (ctx->mxcsr & 0x8000u) != 0;
+    const bool masked = evex_target_mask(instr) != 0;
+    const uint64_t k = masked ? ctx->k[evex_target_mask(instr) & 7u] : UINT64_MAX;
+    hb_result_t r;
+
+    if (instr->dst.type != HB_OP_REG || !is_xmm_reg(instr->dst.reg)) return HB_ERR_INTERNAL;
+
+    if (instr->op == HB_IR_CVTSS2SD || instr->op == HB_IR_CVTSD2SS) {
+        const bool to_double = instr->op == HB_IR_CVTSS2SD;
+        uint8_t out[16];
+        if (!(arg & 0x100u) || lane != (to_double ? 8u : 4u)) return HB_ERR_INTERNAL;
+        r = read_xmm_operand_bytes(ctx, &instr->src1, out, sizeof(out));
+        if (r != HB_OK) return r;
+        if (k & 1u) {
+            uint8_t in[8] = {0};
+            r = read_xmm_operand_bytes(ctx, &instr->src2, in, to_double ? 4u : 8u);
+            if (r != HB_OK) return r;
+            if (to_double) {
+                uint32_t s;
+                uint64_t v;
+                memcpy(&s, in, sizeof(s));
+                v = hb_cvt_f32_bits_to_f64(s, daz);
+                memcpy(out, &v, sizeof(v));
+            } else {
+                uint64_t s;
+                uint32_t v;
+                memcpy(&s, in, sizeof(s));
+                v = hb_cvt_f64_bits_to_f32(s, rc, daz, ftz);
+                memcpy(out, &v, sizeof(v));
+            }
+        }
+        return write_vec_reg_bytes_evex_scalar_masked(ctx, instr, out, lane);
+    }
+
+    {
+        const unsigned vl = ((arg & HB_EVEX_ARG_VL_MASK) >> HB_EVEX_ARG_VL_SHIFT) * 16u;
+        unsigned src_elem, kl, dst_bytes;
+        uint64_t all, active;
+        uint8_t src[64] = {0}, old[64] = {0}, out[64] = {0};
+        switch (instr->op) {
+            case HB_IR_CVTDQ2PS: case HB_IR_CVTPS2DQ: case HB_IR_CVTTPS2DQ:
+            case HB_IR_CVTPS2PD: case HB_IR_CVTDQ2PD:
+                src_elem = 4;
+                break;
+            case HB_IR_CVTPD2PS:
+                src_elem = 8;
+                break;
+            default:
+                return HB_ERR_INTERNAL;
+        }
+        if ((vl != 16 && vl != 32 && vl != 64) || (lane != 4 && lane != 8) || (arg & 0x100u))
+            return HB_ERR_INTERNAL;
+        kl = vl / (src_elem > lane ? src_elem : lane);
+        dst_bytes = kl * lane < 16 ? 16 : kl * lane;
+        if (bytes_for_size(instr->dst.size) != dst_bytes) return HB_ERR_INTERNAL;
+        all = (1ULL << kl) - 1u;                         /* kl <= 16 */
+        active = k & all;
+
+        if (instr->src1.type == HB_OP_MEM) {
+            uint64_t addr = resolve_addr(ctx, &instr->src1);
+            if (bcst) {
+                if (active) {
+                    r = hb_memory_read(ctx->memory, addr, src, src_elem);
+                    if (r != HB_OK) return r;
+                    for (unsigned j = 1; j < kl; j++) memcpy(src + j * src_elem, src, src_elem);
+                }
+            } else if (active == all) {
+                r = hb_memory_read(ctx->memory, addr, src, (size_t)kl * src_elem);
+                if (r != HB_OK) return r;
+            } else {
+                for (unsigned j = 0; j < kl; j++) {
+                    if (!((active >> j) & 1u)) continue;
+                    r = hb_memory_read(ctx->memory, addr + (uint64_t)j * src_elem,
+                                       src + j * src_elem, src_elem);
+                    if (r != HB_OK) return r;
+                }
+            }
+        } else if (instr->src1.type == HB_OP_REG && is_xmm_reg(instr->src1.reg)) {
+            r = read_vec_reg_bytes(ctx, instr->src1.reg, src, (size_t)kl * src_elem);
+            if (r != HB_OK) return r;
+        } else {
+            return HB_ERR_INTERNAL;
+        }
+        if (masked && !evex_target_zero(instr)) {
+            r = read_vec_reg_bytes(ctx, instr->dst.reg, old, dst_bytes);
+            if (r != HB_OK) return r;
+        }
+
+        for (unsigned j = 0; j < kl; j++) {
+            uint8_t* o = out + j * lane;
+            const uint8_t* s = src + j * src_elem;
+            if (!((active >> j) & 1u)) {
+                memcpy(o, old + j * lane, lane);         /* слияние; при {z} old — нули */
+                continue;
+            }
+            switch (instr->op) {
+                case HB_IR_CVTDQ2PS: {
+                    int32_t v;
+                    uint32_t f;
+                    memcpy(&v, s, sizeof(v));
+                    f = hb_cvt_i32_to_f32_bits(v, rc);
+                    memcpy(o, &f, sizeof(f));
+                    break;
+                }
+                case HB_IR_CVTPS2DQ:
+                case HB_IR_CVTTPS2DQ: {
+                    uint32_t f;
+                    int32_t v;
+                    memcpy(&f, s, sizeof(f));
+                    v = hb_cvt_f32_bits_to_i32(f, instr->op == HB_IR_CVTTPS2DQ ? 3u : rc, daz);
+                    memcpy(o, &v, sizeof(v));
+                    break;
+                }
+                case HB_IR_CVTPS2PD: {
+                    uint32_t f;
+                    uint64_t d;
+                    memcpy(&f, s, sizeof(f));
+                    d = hb_cvt_f32_bits_to_f64(f, daz);
+                    memcpy(o, &d, sizeof(d));
+                    break;
+                }
+                case HB_IR_CVTDQ2PD: {
+                    int32_t v;
+                    uint64_t d;
+                    memcpy(&v, s, sizeof(v));
+                    d = hb_double_to_bits((double)v);    /* точно при любом режиме */
+                    memcpy(o, &d, sizeof(d));
+                    break;
+                }
+                default: {
+                    uint64_t d;
+                    uint32_t f;
+                    memcpy(&d, s, sizeof(d));
+                    f = hb_cvt_f64_bits_to_f32(d, rc, daz, ftz);
+                    memcpy(o, &f, sizeof(f));
+                    break;
+                }
+            }
+        }
+        return write_vec_reg_bytes(ctx, instr->dst.reg, out, dst_bytes);
+    }
 }
 
 static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* instr) {
@@ -10033,6 +10337,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
         }
 
         case HB_IR_CVTDQ2PD: {
+            if (evex_target_present(instr)) return exec_evex_fp_convert(ctx, instr);
             if (instr->dst.type != HB_OP_REG || !is_vec_or_mm_reg(instr->dst.reg)) return HB_ERR_INTERNAL;
             size_t bytes = bytes_for_size(instr->dst.size);
             if (bytes == 0) bytes = 16;
@@ -10053,6 +10358,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
         case HB_IR_CVTDQ2PS:
         case HB_IR_CVTPS2DQ:
         case HB_IR_CVTTPS2DQ: {
+            if (evex_target_present(instr)) return exec_evex_fp_convert(ctx, instr);
             if (instr->dst.type != HB_OP_REG || !is_vec_or_mm_reg(instr->dst.reg)) return HB_ERR_INTERNAL;
             size_t bytes = bytes_for_size(instr->dst.size);
             if (bytes == 0) bytes = 16;
@@ -10086,6 +10392,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
         }
 
         case HB_IR_CVTPS2PD: {
+            if (evex_target_present(instr)) return exec_evex_fp_convert(ctx, instr);
             if (instr->dst.type != HB_OP_REG || !is_vec_or_mm_reg(instr->dst.reg)) return HB_ERR_INTERNAL;
             size_t bytes = bytes_for_size(instr->dst.size);
             if (bytes == 0) bytes = 16;
@@ -10104,6 +10411,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
         }
 
         case HB_IR_CVTPD2PS: {
+            if (evex_target_present(instr)) return exec_evex_fp_convert(ctx, instr);
             if (instr->dst.type != HB_OP_REG || !is_vec_or_mm_reg(instr->dst.reg)) return HB_ERR_INTERNAL;
             size_t src_bytes = bytes_for_size(instr->src1.size);
             if (src_bytes == 0) src_bytes = 16;
@@ -10124,6 +10432,9 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
 
         case HB_IR_CVTPD2DQ:
         case HB_IR_CVTTPD2DQ: {
+            /* EVEX-форм у этих двух декодер пока не даёт; появятся — пусть отказ будет
+             * громким (HB_ERR_INTERNAL), а не молча без маски. */
+            if (evex_target_present(instr)) return exec_evex_fp_convert(ctx, instr);
             if (instr->dst.type != HB_OP_REG || !is_vec_or_mm_reg(instr->dst.reg)) return HB_ERR_INTERNAL;
             size_t src_bytes = bytes_for_size(instr->src1.size);
             if (src_bytes == 0) src_bytes = 16;
@@ -10146,6 +10457,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
         }
 
         case HB_IR_CVTSS2SD: {
+            if (evex_target_present(instr)) return exec_evex_fp_convert(ctx, instr);
             if (instr->dst.type != HB_OP_REG || !is_vec_or_mm_reg(instr->dst.reg)) return HB_ERR_INTERNAL;
             float value = 0.0f;
             const hb_ir_operand_t *value_src = instr->src2.type == HB_OP_NONE ? &instr->src1 : &instr->src2;
@@ -10163,6 +10475,7 @@ static hb_result_t exec_instr_unlocked(hb_context_t* ctx, const hb_ir_instr_t* i
         }
 
         case HB_IR_CVTSD2SS: {
+            if (evex_target_present(instr)) return exec_evex_fp_convert(ctx, instr);
             if (instr->dst.type != HB_OP_REG || !is_vec_or_mm_reg(instr->dst.reg)) return HB_ERR_INTERNAL;
             double value = 0.0;
             const hb_ir_operand_t *value_src = instr->src2.type == HB_OP_NONE ? &instr->src1 : &instr->src2;

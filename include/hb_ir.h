@@ -671,6 +671,10 @@ typedef enum {
 #define HB_EVEX_ARG_BROADCAST     0x200u
 #define HB_EVEX_ARG_ROUND_SHIFT   10
 #define HB_EVEX_ARG_ROUND_MASK    0x1c00u
+/* EVEX-преобразования (CVT*): длина вектора в единицах по 16 байт (1, 2, 4). Нужна
+ * отдельно: у `vcvtpd2ps xmm{k}, m64bcst` приёмник xmm и при VL 128, и при VL 256. */
+#define HB_EVEX_ARG_VL_SHIFT      13
+#define HB_EVEX_ARG_VL_MASK       0xe000u
 
 typedef struct hb_ir_instr {
     hb_ir_op_t op;
