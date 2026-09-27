@@ -3,6 +3,7 @@
 #include "hb_decoder.h"
 #include "hb_zamok_pravilo.h"
 #include "hb_evex_disp8.h"
+#include "hb_evex_legal.h"
 #include "hb_ir.h"
 #include <string.h>
 #include <stdlib.h>
@@ -20,6 +21,7 @@ typedef struct {
     jmp_buf* probe_escape;
     volatile size_t* probe_required;
     size_t shared_required;
+    bool evex_ud;   /* процессор отвечает на эту кодировку EVEX #UD (hb_evex_legal.h) */
 } hb_dec_t;
 
 static inline bool can_read(hb_dec_t* d, size_t n) {
@@ -1167,6 +1169,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
             evex_b = ((evex_p2 >> 4) & 1) != 0;
             evex_aaa = evex_p2 & 7;
             vex_opcode = read_u8(d);
+            /* ЗАКОННОСТЬ (hb_evex_legal.h): вердикт здесь, где поля уже разобраны,
+             * а исполнение — на выходе, в decode_x64_state, когда разбор ветви
+             * отдал честную длину. ModRM только подсматривается: у всех форм из
+             * правил он есть, и без него разбор ниже всё равно остановится. */
+            d->evex_ud = hb_evex_hw_ud(vex_map, vex_pp, vex_w, evex_ll, evex_b, vex_opcode,
+                                       can_read(d, 1) ? (unsigned)(d->code[d->pos] >> 6) : 0u);
             out->evex = true;
             out->evex_mask = evex_aaa;
             out->evex_zero = evex_z;
@@ -6350,6 +6358,7 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
 
 static hb_result_t decode_x64_state(hb_dec_t* d, hb_decoded_t* out) {
     const uint8_t* code = d->code;
+    d->evex_ud = false;
     hb_result_t r = decode_one(d, out);
     if (d->probe_escape && r == HB_ERR_DECODE_FAILED && d->shared_required) {
         if (d->shared_required > 15) longjmp(*d->probe_escape, 2);
@@ -6365,6 +6374,13 @@ static hb_result_t decode_x64_state(hb_dec_t* d, hb_decoded_t* out) {
     }
 
     out->len = (uint8_t)d->pos;
+
+    /* ЗАКОННОСТЬ EVEX — вердикт вынесен в ветви EVEX (hb_evex_legal.h), здесь он
+     * исполняется: длина к этому месту разобрана той же ветвью, что разбирала
+     * команду прежде, поэтому #UD приходит ровно на ней и блок не рушится.
+     * Заглушку VEC (команда не опознана) правило не трогает — как и ветвь i386,
+     * где неопознанная форма отвергается раньше правила. */
+    if (d->evex_ud && out->opcode != HB_INS_VEC) hb_evex_mark_ud(out);
 
     /* УНАРНЫЕ ФОРМЫ VEX — ПОСЛЕПРОВЕРКА, а не заплата в каждой ветви.
      *

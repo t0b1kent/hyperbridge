@@ -3,6 +3,7 @@
 #include "hb_decoder.h"
 #include "hb_zamok_pravilo.h"
 #include "hb_evex_disp8.h"
+#include "hb_evex_legal.h"
 #include "hb_vex_formy.h"
 #include "hb_ir.h"
 #include <string.h>
@@ -1669,6 +1670,12 @@ static hb_result_t decode_one(hb_dec_t* d, hb_decoded_t* out) {
                 out->has_imm8 = true;
                 out->imm8 = read_u8(d);
             }
+            /* ЗАКОННОСТЬ — то же правило, что у x64 (hb_evex_legal.h). Общий список
+             * форм порождён с декодера x64 и нёс те же недопустимые кодировки;
+             * длина к этому месту разобрана полностью, #UD придёт на самой команде. */
+            if (hb_evex_hw_ud(evex_map, evex_pp, evex_w, evex_ll, evex_b, evex_op,
+                              (unsigned)(evex_modrm >> 6)))
+                hb_evex_mark_ud(out);
             /* disp8*N — после разметки и рассылки: размер операнда окончателен
              * (hb_evex_disp8.h, общий текст с x64-ветвью). */
             hb_evex_scale_disp8(out);
