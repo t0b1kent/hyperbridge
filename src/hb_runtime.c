@@ -1505,11 +1505,18 @@ static __thread int t_l1_prev_term = HB_TERM_OTHER;
 static __thread uint64_t t_l1_hit_term[HB_TERM_N], t_l1_miss_term[HB_TERM_N];
 
 static void dispatch_stats_note_terminal(const hb_ir_block_t* block) {
-    int slot = term_slot_of(block);
+    const int l1_stats = l1_term_stats_enabled();
+    const int dispatch_stats = trace_dispatch_stats_enabled();
+    int slot;
+    /* The classification only feeds these diagnostics. Its first-transfer
+     * index is lazily cached, but neither the index nor the final terminal
+     * classification is needed here without an enabled consumer. */
+    if (!l1_stats && !dispatch_stats) return;
+    slot = term_slot_of(block);
     /* Запоминаем вид завершителя ТОЛЬКО что отправленного блока: следующий поиск в кеше
      * порождён именно им, и его попадание/промах приписывается сюда. */
-    if (l1_term_stats_enabled()) t_l1_prev_term = slot;
-    if (!trace_dispatch_stats_enabled()) return;
+    if (l1_stats) t_l1_prev_term = slot;
+    if (!dispatch_stats) return;
     t_dispatch_term[slot]++;
     if (slot == HB_TERM_JCC && block->instr_count) {
         const hb_ir_instr_t* last = &block->instrs[block->instr_count - 1];
@@ -5379,6 +5386,13 @@ static const uint8_t* smc_bytes_current(hb_jit_runtime_t* rt, uint64_t start, si
     /* ★ Отображение проверяем ДО чтения — см. разбор у jit_cache_key_for_block: быстрый путь
      * hb_memory_read на macOS копирует хозяйским memcpy и падает SIGBUS вне обработки отказов,
      * если регион заявлен шире, чем отображён. Слияние блоков растит span и попадает туда. */
+    /* Same-region READ admission already proves what can_read_span would
+     * check. Resolve it once without changing the last-fault packet. Keep the
+     * entire legacy fallback below for boundaries and other non-direct cases. */
+    if (runtime_gate_flag(HB_GATE_HB_SMC_DIRECT_HASH, 0)) {
+        const uint8_t* hp = (const uint8_t*)hb_memory_probe_read_ptr(rt->ctx->memory, start, len);
+        if (hp) return hp;
+    }
     if (!hb_memory_can_read_span(rt->ctx->memory, start, len)) return 0;
     /* ★ Claude 27.09.2026 — СВЕРКА БЕЗ ВЫЗОВА ЯДРА (гейт MACRUNNER_HB_SMC_DIRECT_HASH, умолчание 0).
      * С aab4391 копия шла через hb_memory_read_nofault = mach_vm_read_overwrite: вызов ядра и 4 КБ копии на
@@ -7807,13 +7821,15 @@ static uint64_t jit_watch_ring_idx;
 static void trace_jit_cached_watch_block_once(hb_jit_runtime_t* rt, const hb_block_cache_entry_t* entry) {
     static uint64_t dumped_guest;
     static uint64_t fires;
-    uint64_t guest = trace_jit_guest_addr();
-    uint64_t guest2 = trace_jit_guest_addr2();
+    uint64_t guest;
+    uint64_t guest2;
     uint64_t f;
     hb_context_t* ctx = rt ? rt->ctx : NULL;
     int matched;
     if (!entry || !entry->valid || !entry->block || !trace_jit_blocks_enabled())
         return;
+    guest = trace_jit_guest_addr();
+    guest2 = trace_jit_guest_addr2();
     matched = (guest && trace_jit_block_contains_guest(entry->block, guest)) ||
               (guest2 && trace_jit_block_contains_guest(entry->block, guest2));
     if (!matched)

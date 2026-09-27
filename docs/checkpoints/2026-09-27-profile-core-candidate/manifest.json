@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "status": "experimental; unselected; preliminary A/B/A game observations, no significance claim",
+  "date": "2026-09-27",
+  "base_commit": "97068eaed1bf72c4aecc9100aae0e7fe2c06b320",
+  "scope": "core-only; no Wine adapter or CAS change",
+  "files_sha256": {
+    "include/hb_memory.h": "cfbb2feb561f0ad94d32c1647948daf026225659ade6f92a7d0aa12b230c3689",
+    "src/hb_memory.c": "1610a5b96a49332e372ae68d9642b104de10f2f09f96d8bbea85b81bb4cf589b",
+    "src/hb_runtime.c": "ad0804deabacd733f594a0f4a06b53b67e74ff5eabd22e8e3f3e19fc561889d4",
+    "tests/smc_single_query/fixture.c": "5861e868dcb87d04b63008713f73ddaa4a71344a1d4143ea9da13ed0de544205",
+    "tests/smc_single_query/fixture-v2.c": "660efdfcf855a1464366560af24b599ec5988fa06dec377ea80ffad51ddbf5c2",
+    "tests/smc_single_query/run.py": "9cdd0b95db66b7f5cf7a657a1a5f78fa86ae2375a1f2f362ff0dd79c78e18457",
+    "tests/smc_single_query/README.md": "1df9b774bb01afc1ca2c08530db0d0fcef7f9ab3a70445db3f41157a3a35d753",
+    "docs/checkpoints/2026-09-27-profile-core-candidate/README.md": "6efea36922eb336832041d9a08251d729a6f0aa0cc5efedd03135d2f1eb7cdd6"
+  },
+  "retained_validation": {
+    "archive_sha256": "6db2db61a91d055214047800837710bd6782f0f00acde2a0322335b3426026ca",
+    "core_only_provider_sha256": "1b3ec375aff17f71e5d2d21393fc843baca3f9bc6f80f0dadea8c50fcc8472b6",
+    "core_suite": {
+      "decoded_source_0": {
+        "passed": 516,
+        "failed": 0
+      },
+      "decoded_source_1": {
+        "passed": 516,
+        "failed": 0
+      }
+    },
+    "decoded_source_focused": [
+      {
+        "source": 0,
+        "merge": 0,
+        "checks": 45,
+        "failed": 0
+      },
+      {
+        "source": 0,
+        "merge": 1,
+        "checks": 55,
+        "failed": 0
+      },
+      {
+        "source": 1,
+        "merge": 0,
+        "checks": 94,
+        "failed": 0
+      },
+      {
+        "source": 1,
+        "merge": 1,
+        "checks": 118,
+        "failed": 0
+      }
+    ],
+    "smc_differential": {
+      "checks": 381,
+      "failed": 0
+    },
+    "core_only_wine": {
+      "checks_passed": 4
+    }
+  },
+  "preparation_validation": "Source-only: exact candidate file equivalence, Python AST and extraction boundaries, diff and sensitive-data review. No fresh native execution; portable runner not executed."
+}

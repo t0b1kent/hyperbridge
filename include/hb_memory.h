@@ -178,6 +178,11 @@ hb_result_t hb_memory_read(hb_memory_t* mem, hb_gva_t addr, void* out, size_t si
 hb_result_t hb_memory_read_nofault(hb_memory_t* mem, hb_gva_t addr, void* out, size_t size);
 hb_result_t hb_memory_write(hb_memory_t* mem, hb_gva_t addr, const void* in, size_t size);
 void* hb_memory_host_ptr(hb_memory_t* mem, hb_gva_t addr, size_t size, hb_perm_t perm);
+/* Lookup only: READ permission and a single containing region are required.
+ * No dereference, callback, or last-fault update. NULL leaves callers free to
+ * use their existing multi-region/fault-safe fallback. Do not retain the
+ * returned pointer across a memory-map mutation. */
+const void* hb_memory_probe_read_ptr(hb_memory_t* mem, hb_gva_t addr, size_t size);
 
 /* Теневая карта прав: адрес карты для выпущенного кода (NULL, если её нет) и запись
  * диапазона. Значение в карте — те же биты HB_PERM_*, что у региона. */

@@ -4239,6 +4239,15 @@ void* hb_memory_host_ptr(hb_memory_t* mem, hb_gva_t addr, size_t size, hb_perm_t
     return p;
 }
 
+const void* hb_memory_probe_read_ptr(hb_memory_t* mem, hb_gva_t addr, size_t size) {
+    /* The mirror normalization below can only reduce addr. Reject wrapping
+     * input before the existing host-pointer extent comparison. Unlike the
+     * public host_ptr wrapper, a failed speculative lookup must not publish a
+     * guest fault; smc_bytes_current has not yet chosen its fallback. */
+    if (!mem || !size || size > UINT64_MAX - addr) return NULL;
+    return hb_memory_host_ptr_inner(mem, addr, size, HB_PERM_READ);
+}
+
 static hb_result_t hb_memory_read_inner(hb_memory_t* mem, hb_gva_t addr, void* out, size_t size) {
     hb_region_t* region = NULL;
     bool is_hit = false;
