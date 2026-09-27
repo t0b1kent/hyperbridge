@@ -43,6 +43,10 @@ typedef struct { uint64_t rax, rcx, rdx, rdi, fl; uint8_t mem[64]; int ok; } sna
 static uint8_t* g_code;
 static uint8_t* g_data;
 static size_t g_page;
+/* Сегменты (Claude 27.09.2026): отдельная область 256 КБ, GS = seg+0x1000, FS = seg+0x20000 — содержимое
+ * у баз разное, так что перепутанный сегмент виден в значении. */
+enum { SEG_LEN = 0x40000, GS_OFF = 0x1000, FS_OFF = 0x20000 };
+static uint8_t* g_seg;
 
 static snap_t run(const uint8_t* code, size_t len, const uint64_t in[4], uint64_t fl, const uint8_t mem[64],
                   int jit) {
@@ -52,6 +56,9 @@ static snap_t run(const uint8_t* code, size_t len, const uint64_t in[4], uint64_
     c->config.fallback_enabled = false; c->memory = m;
     hb_memory_sync_live_range(m, (hb_gva_t)(uintptr_t)g_code, g_page, HB_PERM_READ | HB_PERM_WRITE | HB_PERM_EXEC);
     hb_memory_sync_live_range(m, (hb_gva_t)(uintptr_t)g_data, g_page, HB_PERM_READ | HB_PERM_WRITE);
+    hb_memory_sync_live_range(m, (hb_gva_t)(uintptr_t)g_seg, SEG_LEN, HB_PERM_READ | HB_PERM_WRITE);
+    c->gs_base = (uint64_t)(uintptr_t)(g_seg + GS_OFF);
+    c->fs_base = (uint64_t)(uintptr_t)(g_seg + FS_OFF);
     memcpy(g_code, code, len);
     memcpy(g_data + 64, mem, 64);                     /* окно: [data+64, data+128) */
     memset(&c->regs, 0, sizeof c->regs);
@@ -104,6 +111,11 @@ int main(void) {
     g_page = 16384;
     g_code = mmap(NULL, g_page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     g_data = mmap(NULL, g_page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    g_seg = mmap(NULL, SEG_LEN, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    {   /* свой генератор: остальные разделы получают прежние случайные последовательности */
+        uint64_t z = 0x2545f4914f6cdd1dull;
+        for (size_t k = 0; k < SEG_LEN; k++) { z ^= z << 13; z ^= z >> 7; z ^= z << 17; g_seg[k] = (uint8_t)z; }
+    }
     for (unsigned fi = 0; fi < sizeof forms / sizeof forms[0]; fi++)
         for (unsigned si = 0; si < 4; si++)
             for (int mis = 0; mis < 2; mis++)
@@ -318,6 +330,151 @@ int main(void) {
                                     (unsigned long long)b.rdx, (unsigned long long)a.fl, (unsigned long long)b.fl);
                     }
                 }
+    }
+    /* Чтения fs:/gs:[disp] (Claude 27.09.2026, MACRUNNER_HB_NATIVE_SEG_LOAD): mov r, seg:[disp32] через SIB без
+     * базы и индекса (8B /r, modrm 00 reg 100, SIB 25) и moffs (A1, 8-байтовый адрес), 32/64 бита, r = rax/rcx/rdx.
+     * Смещения: кратные ширине (одна команда LDR), любые до 0xffff и край 0x7ff8 (адрес через X22), отрицательные и
+     * за 0xffff (эмиттер отказывается — проверяется прежний помощник). Приёмник до чтения случайный: 32-битная
+     * форма обязана обнулить верх. */
+    {
+        unsigned long sec_total = total, sec_bad = bad, sec_nok = nok;
+        for (int form = 0; form < 2; form++)            /* 0 SIB-абсолют, 1 moffs (приёмник только rax) */
+            for (int seg = 0; seg < 2; seg++)           /* 0 FS, 1 GS */
+                for (int wide = 0; wide < 2; wide++)
+                    for (int it = 0; it < 400; it++) {
+                        uint8_t code[24], mem[64];
+                        size_t n = 0;
+                        int reg = form ? 0 : (int)(rnd() % 3);
+                        int64_t disp;
+                        switch (rnd() % 5) {
+                        case 0: disp = (int64_t)((rnd() % 0x1000) * (wide ? 8 : 4)); break;
+                        case 1: disp = (int64_t)(rnd() % 0x10000); break;
+                        case 2: disp = (int64_t)(0x7ff0 + rnd() % 0x20); break;
+                        case 3: disp = -(int64_t)(1 + rnd() % 0x800); break;
+                        default: disp = (int64_t)(0x10000 + rnd() % 0xf00); break;
+                        }
+                        code[n++] = seg ? 0x65 : 0x64;
+                        if (wide) code[n++] = 0x48;
+                        if (form == 0) {
+                            int32_t d32 = (int32_t)disp;
+                            code[n++] = 0x8b; code[n++] = (uint8_t)(0x04 | (reg << 3)); code[n++] = 0x25;
+                            memcpy(code + n, &d32, 4); n += 4;
+                        } else {
+                            uint64_t d64 = (uint64_t)disp;
+                            code[n++] = 0xa1;
+                            memcpy(code + n, &d64, 8); n += 8;
+                        }
+                        uint64_t in[4] = { edge(), edge(), edge(), (uint64_t)(uintptr_t)(g_data + 64) };
+                        for (int k = 0; k < 64; k++) mem[k] = (uint8_t)rnd();
+                        uint64_t fl = rnd() & 0x8d5;
+                        snap_t a = run(code, n, in, fl, mem, 0);
+                        snap_t b = run(code, n, in, fl, mem, 1);
+                        total++;
+                        if (!a.ok || !b.ok) { nok++; if (nok <= 5) fprintf(stderr, "RUN FAIL seg form=%d seg=%d/%d disp=%lld a=%d b=%d\n", form, seg, wide ? 64 : 32, (long long)disp, a.ok, b.ok); continue; }
+                        if (a.rax != b.rax || a.rcx != b.rcx || a.rdx != b.rdx || ((a.fl ^ b.fl) & 0x8d5)) {
+                            bad++;
+                            if (bad <= 12)
+                                fprintf(stderr, "MISMATCH seg form=%d %s/%d reg=%d disp=%lld: rax %llx/%llx rcx %llx/%llx rdx %llx/%llx\n",
+                                        form, seg ? "gs" : "fs", wide ? 64 : 32, reg, (long long)disp,
+                                        (unsigned long long)a.rax, (unsigned long long)b.rax, (unsigned long long)a.rcx,
+                                        (unsigned long long)b.rcx, (unsigned long long)a.rdx, (unsigned long long)b.rdx);
+                        }
+                    }
+        fprintf(stderr, "SECTION seg cases=%lu mismatch=%lu run_fail=%lu\n", total - sec_total, bad - sec_bad, nok - sec_nok);
+    }
+    /* MUL/IMUL с одним операндом и DIV/IDIV (Claude 27.09.2026, MACRUNNER_HB_NATIVE_MULDIV): F7 /4../7, 32/64 бита,
+     * операнд — rcx (чаще) / rax / rdx или [rdi+8], выровненный и нет (невыровненный идёт помощнику). Делимое
+     * подобрано так, чтобы шли и быстрая ветвь (EDX < делителя, RDX = 0 / знак RAX), и все отказы: делитель 0,
+     * частное не влезает, INT_MIN / -1 (#DE с обеих сторон — совпадение), 64-битное делимое шире 64 бит. Верх
+     * RAX/RDX у 32-битных форм случайный: команда обязана его не читать и обнулить. Сверка RAX RCX RDX; у
+     * MUL/IMUL ещё CF и OF; у деления флаги не определены и не сверяются. */
+    {
+        unsigned long sec_total = total, sec_bad = bad, sec_nok = nok, both_fault = 0;
+        for (int opi = 0; opi < 4; opi++)            /* 0 mul, 1 imul, 2 div, 3 idiv */
+            for (int wide = 0; wide < 2; wide++)
+                for (int form = 0; form < 3; form++)   /* 0 регистр, 1 [rdi+8] выровнено, 2 невыровнено */
+                    for (int it = 0; it < 300; it++) {
+                        uint8_t code[8], mem[64];
+                        size_t n = 0;
+                        int digit = 4 + opi;
+                        int reg = (rnd() % 4) ? 1 : ((rnd() & 1) ? 0 : 2);
+                        uint64_t in[4] = { edge(), edge(), edge(), (uint64_t)(uintptr_t)(g_data + 64) + (form == 2 ? 3 : 0) };
+                        uint64_t opnd = edge();
+                        for (int k = 0; k < 64; k++) mem[k] = (uint8_t)rnd();
+                        if (opi >= 2) {
+                            unsigned mode = (unsigned)(rnd() % 8);
+                            if (mode == 0) opnd = 0;
+                            else if (mode == 1) opnd = ~0ull;
+                            else if (mode <= 3) opnd = 1 + rnd() % 1000;
+                            if (wide) {
+                                if (mode == 1 && (rnd() & 1)) in[0] = 0x8000000000000000ull;
+                                if (mode != 7) in[2] = opi == 2 ? 0 : (uint64_t)((int64_t)in[0] >> 63);
+                            } else {
+                                uint64_t d32 = opnd & 0xffffffffull, hi = edge() & 0xffffffff00000000ull;
+                                if (mode == 1 && (rnd() & 1)) { in[0] &= 0xffffffff00000000ull; in[2] = hi | 0x80000000ull; }
+                                else if (mode != 7)
+                                    in[2] = hi | (opi == 2 ? (in[2] & 0xffffffffull) % (d32 ? d32 : 1)
+                                                           : (uint64_t)(uint32_t)((int32_t)(uint32_t)in[0] >> 31));
+                            }
+                        }
+                        if (form == 0) in[reg] = opnd;
+                        else memcpy(mem + 8 + (form == 2 ? 3 : 0), &opnd, wide ? 8 : 4);
+                        if (wide) code[n++] = 0x48;
+                        code[n++] = 0xf7;
+                        if (form == 0) code[n++] = (uint8_t)(0xc0 | (digit << 3) | reg);
+                        else { code[n++] = (uint8_t)(0x40 | (digit << 3) | 7); code[n++] = 0x08; }
+                        uint64_t fl = rnd() & 0x8d5;
+                        snap_t a = run(code, n, in, fl, mem, 0);
+                        snap_t b = run(code, n, in, fl, mem, 1);
+                        uint64_t fm = opi < 2 ? 0x801 : 0;
+                        total++;
+                        if (!a.ok && !b.ok) both_fault++;
+                        if (a.ok != b.ok || a.rax != b.rax || a.rcx != b.rcx || a.rdx != b.rdx || ((a.fl ^ b.fl) & fm)) {
+                            bad++;
+                            if (bad - sec_bad <= 12)
+                                fprintf(stderr, "MISMATCH muldiv op=%d/%d form=%d reg=%d ok=%d/%d: rax %llx/%llx rcx %llx/%llx rdx %llx/%llx fl %llx/%llx\n",
+                                        opi, wide ? 64 : 32, form, reg, a.ok, b.ok, (unsigned long long)a.rax, (unsigned long long)b.rax,
+                                        (unsigned long long)a.rcx, (unsigned long long)b.rcx, (unsigned long long)a.rdx,
+                                        (unsigned long long)b.rdx, (unsigned long long)a.fl, (unsigned long long)b.fl);
+                        }
+                    }
+        fprintf(stderr, "SECTION muldiv cases=%lu mismatch=%lu run_fail=%lu both_fault=%lu\n", total - sec_total, bad - sec_bad,
+                nok - sec_nok, both_fault);
+    }
+    /* Чтение «приёмник = база» (Claude 27.09.2026, MACRUNNER_HB_SELF_BASE_NATIVE): mov r,[r] для rax/rcx/rdx,
+     * 16/32/64 бита, указатель в окно со смещением 0..56 — половина выровнена (идёт LDAR), прочие уходят
+     * помощнику по проверке выравнивания. 16-битная форма обязана сохранить верх регистра. */
+    {
+        unsigned long sec_total = total, sec_bad = bad, sec_nok = nok;
+        const int ssz[] = { 16, 32, 64 };
+        for (unsigned si = 0; si < 3; si++)
+            for (int it = 0; it < 600; it++) {
+                uint8_t code[8], mem[64];
+                size_t n = 0;
+                int reg = (int)(rnd() % 3);
+                unsigned off = (unsigned)(rnd() % 57);
+                if (rnd() & 1) off &= ~7u;
+                uint64_t in[4] = { edge(), edge(), edge(), (uint64_t)(uintptr_t)(g_data + 64) };
+                in[reg] = (uint64_t)(uintptr_t)(g_data + 64 + off);
+                for (int k = 0; k < 64; k++) mem[k] = (uint8_t)rnd();
+                if (ssz[si] == 16) code[n++] = 0x66;
+                if (ssz[si] == 64) code[n++] = 0x48;
+                code[n++] = 0x8b; code[n++] = (uint8_t)((reg << 3) | reg);
+                uint64_t fl = rnd() & 0x8d5;
+                snap_t a = run(code, n, in, fl, mem, 0);
+                snap_t b = run(code, n, in, fl, mem, 1);
+                total++;
+                if (!a.ok || !b.ok) { nok++; continue; }
+                if (a.rax != b.rax || a.rcx != b.rcx || a.rdx != b.rdx) {
+                    bad++;
+                    if (bad - sec_bad <= 12)
+                        fprintf(stderr, "MISMATCH selfbase %d reg=%d off=%u: rax %llx/%llx rcx %llx/%llx rdx %llx/%llx\n",
+                                ssz[si], reg, off, (unsigned long long)a.rax, (unsigned long long)b.rax,
+                                (unsigned long long)a.rcx, (unsigned long long)b.rcx,
+                                (unsigned long long)a.rdx, (unsigned long long)b.rdx);
+                }
+            }
+        fprintf(stderr, "SECTION selfbase cases=%lu mismatch=%lu run_fail=%lu\n", total - sec_total, bad - sec_bad, nok - sec_nok);
     }
     printf("{\"cases\":%lu,\"mismatch\":%lu,\"run_fail\":%lu}\n", total, bad, nok);
     return (bad || nok) ? 1 : 0;

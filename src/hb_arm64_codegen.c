@@ -7703,6 +7703,32 @@ static bool no_align_check_enabled(void) {
     return hb_jit_gate_flag( HB_GATE_HB_NO_ALIGN_CHECK, 0) != 0;
 }
 
+/* ★ Claude 27.09.2026 — ЧТЕНИЯ БЕЗ ПРОВЕРКИ ВЫРАВНИВАНИЯ (гейт MACRUNNER_HB_LOAD_ALIGN_NATIVE, умолчание 0).
+ *
+ * Проверка выравнивания у чтений отдаёт невыровненный адрес помощнику ЦЕЛИКОМ. А помощник читает ту же
+ * память `DMB ISH; memcpy; DMB ISHLD` (hb_jit_helper_host_load_u64_acquire) — обычной невыровненной
+ * загрузкой с барьером, то есть ровно тем, что выпущенный код делает и так: при TRUE_LDAR_ALIGNED=0
+ * (умолчание) emit_ldar_to_reg_off выпускает LDR + DMB ISHLD, и невыровненность она терпит. FEX для
+ * невыровненного TSO-чтения делает то же (MemoryOps.cpp: LDAPR перешивается в LDR + DMB ISHLD,
+ * «half-barrier»). Право чтения проверяет MMU хозяина — как у выровненного чтения, которое давно идёт без
+ * помощника; отказ на границе страницы ловит тот же обработчик.
+ * Снятие проверки 25.08 уронило прогон из-за ЗАПИСЕЙ: там она попутно несла проверку прав (разбор 03.09
+ * ниже). Записи, атомарные и 128-битные формы здесь не трогаются. Под TRUE_LDAR_ALIGNED проверка остаётся:
+ * там она доказывает право на настоящую LDAR.
+ * Перепись меню HK: `cmp rax,[rdx+rcx]` (strcmp по словам, вторая строка с любого смещения) — 3,0 млн
+ * вызовов помощника за отрезок переписи. */
+static bool load_align_native_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_LOAD_ALIGN_NATIVE, 0) != 0;
+}
+
+static uint64_t direct_mem_alignment_mask(hb_size_t size);
+
+static uint64_t load_alignment_guard_mask(hb_size_t size) {
+    if (no_align_check_enabled()) return 0;
+    if (load_align_native_enabled() && !true_ldar_aligned_enabled()) return 0;
+    return direct_mem_alignment_mask(size);
+}
+
 /* ★★★★★★ 03.09.2026 — ПРАВА НАРУЖУ, ПРОВЕРКА ВЫРАВНИВАНИЯ ВОН.
  *
  * Разбор 25.08 «проверка НЕСУЩАЯ» был верен, но причину не назвал. Она записана у
@@ -7773,8 +7799,7 @@ static bool emit_direct_mem_load_to_gpr_tso(hb_codegen_buffer_t* buf,
             return true;
         }
     }
-    mask = direct_mem_alignment_mask(src->size);
-    if (no_align_check_enabled()) mask = 0;   /* разбор у no_align_check_enabled */
+    mask = load_alignment_guard_mask(src->size);   /* разбор у no_align_check_enabled и load_align_native_enabled */
     if (mask) {
         ea_materialize(buf);  /* X21 идёт как ЗНАЧЕНИЕ — база обязана быть прибавлена */
         aligned_branch = emit_align_guard_deferred(buf, mask, &aligned_is_tbz);
@@ -8090,6 +8115,64 @@ static void emit_direct_mem128_load_to_x20_x22(hb_codegen_buffer_t* buf) {
 }
 
 static bool store_perm_checked_by_host_mmu(const hb_codegen_buffer_t* buf);
+
+/* ★ Claude 27.09.2026 — ЧТЕНИЕ fs:/gs:[disp] БЕЗ ПОМОЩНИКА (гейт MACRUNNER_HB_NATIVE_SEG_LOAD, умолчание 0).
+ *
+ * Перепись помощников меню HK: `mov rax, gs:[58h]` (TEB.ThreadLocalStoragePointer — TLS Mono/MSVC),
+ * `mov r11, gs:[10h]` (StackLimit, проверка стека Mono), `mov rcx, gs:[30h]` (TEB.Self) — ~17 млн вызовов
+ * за прогон, каждый через помощника: прямой путь к памяти отвергает любой сегмент (проверка SEGMENT).
+ * Здесь узкая форма x64: без базы и индекса, приёмник — регистр, 32/64 бита. Адрес = ctx->gs_base
+ * (или fs_base) + disp — ровно то, что считает помощник (hb_jit_resolve_addr). TEB отображён всегда. */
+static int native_seg_load_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_NATIVE_SEG_LOAD, 0);
+}
+
+static bool emit_native_seg_absolute_load(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    const hb_ir_operand_t* m = &instr->src1;
+    hb_ir_operand_t dst;
+    uint64_t disp;
+    bool is64, gs;
+    if (!native_seg_load_enabled() || buf->arch != HB_ARCH_X64) return false;
+    if (!jit_direct_mem_codegen_enabled(buf)) return false;   /* гость = хозяин по адресам, как у прямых чтений */
+    if (m->type != HB_OP_MEM || (m->mem.segment != 0x64 && m->mem.segment != 0x65)) return false;
+    if (m->mem.addr32 || m->mem.base != HB_REG_COUNT || m->mem.index != HB_REG_COUNT) return false;
+    if (m->size != HB_SIZE_32 && m->size != HB_SIZE_64) return false;
+    if (!is_plain_gpr_reg_operand(&instr->dst)) return false;
+    if (m->mem.disp < 0 || m->mem.disp > 0xffff) return false;
+    disp = (uint64_t)m->mem.disp;
+    is64 = (m->size == HB_SIZE_64);
+    gs = (m->mem.segment == 0x65);
+    /* отрицательный контроль разностного теста: база ДРУГОГО сегмента — тест обязан расходиться */
+    if (hb_jit_gate_flag( HB_GATE_HB_TEST_MEM_NATIVE_FLIP, 0)) gs = !gs;
+    emit_ldr_x(buf, 21, 19, (uint32_t)(gs ? offsetof(hb_context_t, gs_base) : offsetof(hb_context_t, fs_base)));
+    if (is64 ? (disp % 8 == 0 && disp < 32768) : (disp % 4 == 0 && disp < 16384)) {
+        if (is64) emit_ldr_x(buf, 20, 21, (uint32_t)disp);
+        else emit_ldr_w(buf, 20, 21, (uint32_t)disp);
+    } else {
+        emit_mov_imm_compact(buf, 22, disp);
+        emit_add_reg(buf, 21, 21, 22);
+        if (is64) emit_ldr_x(buf, 20, 21, 0);
+        else emit_ldr_w(buf, 20, 21, 0);
+    }
+    dst = instr->dst;
+    dst.size = m->size;
+    emit_store_x20_to_gpr_sized(buf, &dst);
+    return true;
+}
+
+/* ★ Claude 27.09.2026 — ЧТЕНИЕ `mov rax,[rax]` ПРЯМЫМ ПУТЁМ (гейт MACRUNNER_HB_SELF_BASE_NATIVE, умолчание 0).
+ *
+ * Отказ `wide_self_base_load_needs_helper` поставлен 04.06 (MacRunner d0c0f6da3, «Fenced helper fallback
+ * for dynamic wide self-base loads that can be unaligned»): тогда прямое чтение было голым LDR без
+ * проверки выравнивания, и конечное чтение split-lock лакмуса `mov rax,[rax]` по адресу через границу
+ * строки шло мимо шлюза. Сейчас emit_direct_mem_load_to_gpr_tso сам отдаёт невыровненный адрес помощнику,
+ * а выровненный читает LDAR — неделимо и с порядком TSO; чтению в ЧУЖОЙ регистр этого хватает давно, и
+ * «приёмник = база» к этому ничего не добавляет. Перепись помощников меню HK: `mov r8,[r8]`,
+ * `mov rax,[rax]`, `mov rsi,[rsi]`, `mov eax,[rax]` — 3-5 млн вызовов за отрезок переписи.
+ * Без проверки выравнивания (MACRUNNER_HB_NO_ALIGN_CHECK=1) отказ остаётся: там он единственная защита. */
+static bool self_base_native_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_SELF_BASE_NATIVE, 0) != 0 && !no_align_check_enabled();
+}
 
 /* ★ Claude 27.09.2026 — 128-БИТНАЯ ЗАПИСЬ x64 СЫРОЙ, КАК YMM И СКАЛЯРНЫЕ (гейт MACRUNNER_HB_NATIVE_XMM_STORE,
  * умолчание 0). Профиль меню HK после родных быстрых путей: hb_jit_helper_store_u128 ->
@@ -15087,8 +15170,7 @@ static hb_result_t emit_cmp_test_native_mem(hb_codegen_buffer_t* buf, const hb_i
     prev_stack = hb_emit_mark_stack_access(m);
     emit_direct_mem_addr(buf, m);
     ea_materialize(buf);   /* X21 — хозяйский адрес для обеих ветвей */
-    mask = direct_mem_alignment_mask(m->size);
-    if (no_align_check_enabled()) mask = 0;
+    mask = load_alignment_guard_mask(m->size);
     if (mask) {
         aligned_branch = emit_align_guard_deferred(buf, mask, &aligned_is_tbz);
         emit_mov_reg(buf, 0, 19);
@@ -15161,8 +15243,7 @@ static hb_result_t emit_binop_native_mem(hb_codegen_buffer_t* buf, const hb_ir_i
     prev_stack = hb_emit_mark_stack_access(m);
     emit_direct_mem_addr(buf, m);
     ea_materialize(buf);
-    mask = direct_mem_alignment_mask(m->size);
-    if (no_align_check_enabled()) mask = 0;
+    mask = load_alignment_guard_mask(m->size);
     if (mask) {
         aligned_branch = emit_align_guard_deferred(buf, mask, &aligned_is_tbz);
         emit_mov_reg(buf, 0, 19);
@@ -15252,8 +15333,7 @@ static hb_result_t emit_imul_native(hb_codegen_buffer_t* buf, const hb_ir_instr_
         unsigned char prev_stack = hb_emit_mark_stack_access(m);
         emit_direct_mem_addr(buf, m);
         ea_materialize(buf);
-        mask = direct_mem_alignment_mask(sz);
-        if (no_align_check_enabled()) mask = 0;
+        mask = load_alignment_guard_mask(sz);
         if (mask) {
             aligned_branch = emit_align_guard_deferred(buf, mask, &aligned_is_tbz);
             emit_mov_reg(buf, 0, 19);
@@ -15303,6 +15383,167 @@ static hb_result_t emit_imul_native(hb_codegen_buffer_t* buf, const hb_ir_instr_
     return HB_OK;
 }
 
+/* ★ Claude 27.09.2026 — MUL/IMUL С ОДНИМ ОПЕРАНДОМ И DIV/IDIV БЕЗ ПОМОЩНИКА
+ * (гейт MACRUNNER_HB_NATIVE_MULDIV, умолчание 0).
+ *
+ * Перепись помощников меню HK (runs/hk-vt88cvar): `div r12d` 6,5 млн, `mul rdx` 1,2 млн,
+ * `div rbx` 1,1 млн, `div dword [rdi+18h]` 1,0 млн, `idiv rcx` 0,68 млн — всё через
+ * hb_jit_helper_exec_mul_div_operand. Здесь 32 и 64 бита; второй операнд — регистр или память
+ * (прямое чтение, как у IMUL; невыровненное — помощнику).
+ *
+ * Деление. Деления 128/64 у ARM64 нет, поэтому 64-битный DIV берётся при RDX == 0, IDIV — при
+ * RDX, равном знаку RAX: ровно то, что дают `xor edx,edx` и `cqo` перед делением. 32-битное
+ * делимое EDX:EAX целиком помещается в X-регистр, и условий там нет. Всё, что x86 делает #DE
+ * (делитель 0, частное не влезает, INT_MIN / -1), и 64-битное делимое шире 64 бит уходит в
+ * прежнего помощника: он поднимает #DE точно, по адресу команды. До развилки гостевое
+ * состояние не тронуто.
+ *
+ * Флаги — как у помощника: MUL/IMUL пишут CF=OF (значима ли старшая половина) и снимают ленивое
+ * состояние; DIV/IDIV не определяют ни одного флага и только снимают ленивое. */
+static int native_muldiv_enabled(void) {
+    return hb_jit_gate_flag( HB_GATE_HB_NATIVE_MULDIV, 0);
+}
+
+static bool muldiv_native_ok(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    const hb_ir_operand_t* s = &instr->src1;
+    if (!native_muldiv_enabled() || buf->arch != HB_ARCH_X64) return false;
+    if (instr->op == HB_IR_IMUL) {
+        if (instr->dst.type != HB_OP_NONE) return false;
+    } else if (instr->op != HB_IR_MUL && instr->op != HB_IR_DIV && instr->op != HB_IR_IDIV) {
+        return false;
+    }
+    if (s->size != HB_SIZE_32 && s->size != HB_SIZE_64) return false;
+    if (s->type == HB_OP_REG) return is_plain_gpr_reg_operand(s);
+    if (s->type != HB_OP_MEM) return false;
+    if (!jit_native_mem_ir_enabled(buf) || !jit_native_mem_side_load() || !direct_user_mem_load_allowed(buf, s))
+        return false;
+    if (s->size == HB_SIZE_64 && !jit_native_mem_ir_qword_loads_enabled()) return false;
+    return true;
+}
+
+enum { MD_B, MD_BCOND, MD_CBZ, MD_CBNZ };
+
+static hb_result_t emit_muldiv_native(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    const hb_ir_operand_t* s = &instr->src1;
+    const hb_size_t sz = s->size;
+    const bool w64 = sz == HB_SIZE_64;
+    const bool is_div = instr->op == HB_IR_DIV || instr->op == HB_IR_IDIV;
+    const bool sgn = instr->op == HB_IR_IDIV || instr->op == HB_IR_IMUL;
+    const bool flip = hb_jit_gate_flag( HB_GATE_HB_TEST_MEM_NATIVE_FLIP, 0) != 0;
+    hb_ir_operand_t rax = hb_ir_reg(HB_REG_RAX, sz), rdx = hb_ir_reg(HB_REG_RDX, sz);
+    struct { size_t pos; int kind, arg; } slow[6];
+    int nslow = 0, i;
+    uint32_t r20, r21, r22, r23;
+
+    /* 1. Второй операнд -> X21 (32 бита приходят с нулевым верхом: LDR W / LDAR W). */
+    if (s->type == HB_OP_MEM) {
+        unsigned char prev_stack = hb_emit_mark_stack_access(s);
+        uint64_t mask = load_alignment_guard_mask(sz);
+        emit_direct_mem_addr(buf, s);
+        ea_materialize(buf);
+        if (mask) {
+            int is_tbz = 0;
+            size_t aligned = emit_align_guard_deferred(buf, mask, &is_tbz);
+            slow[nslow].pos = emit_b_deferred(buf); slow[nslow].kind = MD_B; slow[nslow++].arg = 0;
+            patch_align_guard(buf, aligned, is_tbz, buf->size);
+            emit_direct_mem_load_to_reg_base_aligned(buf, 21, sz, 21);
+        } else {
+            emit_direct_mem_load_to_reg_base(buf, 21, sz, 21);
+        }
+        hb_emit_restore_stack_access(prev_stack);
+    } else if (!emit_load_gpr_sized_to_reg(buf, s, 21)) {
+        return HB_ERR_INTERNAL;
+    }
+    /* 2. RAX -> X20; для деления RDX -> X22. */
+    emit_load_gpr_sized_to_reg(buf, &rax, 20);
+    if (is_div) emit_load_gpr_sized_to_reg(buf, &rdx, 22);
+    r20 = (uint32_t)hb_rm(buf, 20); r21 = (uint32_t)hb_rm(buf, 21);
+    r22 = (uint32_t)hb_rm(buf, 22); r23 = (uint32_t)hb_rm(buf, 23);
+
+    if (is_div) {
+        if (w64) {
+            if (!sgn) {                                                          /* RDX != 0 -> помощник */
+                slow[nslow].pos = emit_cbnz_x_deferred(buf, 22); slow[nslow].kind = MD_CBNZ; slow[nslow++].arg = 22;
+            } else {                                                             /* RDX != знак RAX */
+                emit_u32(buf, 0xeb800000u | (r20 << 16) | (63u << 10) | (r22 << 5) | 31u);   /* CMP x22, x20, ASR #63 */
+                slow[nslow].pos = emit_bcond_deferred(buf, 1); slow[nslow].kind = MD_BCOND; slow[nslow++].arg = 1;
+            }
+        } else {
+            emit_u32(buf, 0xaa000000u | (r22 << 16) | (32u << 10) | (r20 << 5) | r20);     /* ORR x20, x20, x22, LSL #32 */
+            if (sgn) emit_sbfm(buf, 21, 21, 31);                                             /* делитель со знаком */
+        }
+        slow[nslow].pos = emit_cbz_x_deferred(buf, 21); slow[nslow].kind = MD_CBZ; slow[nslow++].arg = 21;
+        if (sgn && w64) {                                                         /* INT64_MIN / -1 */
+            size_t not_m1;
+            emit_u32(buf, 0xb1000400u | (r21 << 5) | 31u);                                   /* CMN x21, #1 */
+            not_m1 = emit_bcond_deferred(buf, 1);                                            /* NE */
+            emit_u32(buf, 0xeb0003ffu | (r20 << 16));                        /* CMP xzr, x20: V <=> x20 == INT64_MIN */
+            slow[nslow].pos = emit_bcond_deferred(buf, 6); slow[nslow].kind = MD_BCOND; slow[nslow++].arg = 6;   /* VS */
+            patch_bcond(buf, not_m1, 1, buf->size);
+        }
+        emit_u32(buf, (sgn ? 0x9ac00c00u : 0x9ac00800u) | (r21 << 16) | (r20 << 5) | r23);  /* SDIV/UDIV x23, x20, x21 */
+        if (!w64) {
+            if (!sgn) {
+                emit_u32(buf, 0xd360fc00u | (r23 << 5) | r22);                               /* LSR x22, x23, #32 */
+                slow[nslow].pos = emit_cbnz_x_deferred(buf, 22); slow[nslow].kind = MD_CBNZ; slow[nslow++].arg = 22;
+            } else {
+                emit_u32(buf, 0xeb20c000u | (r23 << 16) | (r23 << 5) | 31u);                 /* CMP x23, w23, SXTW */
+                slow[nslow].pos = emit_bcond_deferred(buf, 1); slow[nslow].kind = MD_BCOND; slow[nslow++].arg = 1;
+            }
+        }
+        emit_u32(buf, 0x9b008000u | (r21 << 16) | (r20 << 10) | (r23 << 5) | r22);          /* MSUB x22, x23, x21, x20 */
+        if (flip) emit_mov_reg(buf, 23, 22);                  /* отрицательный контроль теста: в RAX остаток */
+        emit_mov_reg(buf, 20, 23);
+        emit_store_x20_to_gpr_sized(buf, &rax);
+        emit_mov_reg(buf, 20, 22);
+        emit_store_x20_to_gpr_sized(buf, &rdx);
+        emit_clear_lazy_flags_pending(buf);
+    } else {
+        if (w64) {
+            emit_u32(buf, 0x9b007c00u | (r21 << 16) | (r20 << 5) | r22);                     /* MUL x22, x20, x21 */
+            emit_u32(buf, (sgn ? 0x9b407c00u : 0x9bc07c00u) | (r21 << 16) | (r20 << 5) | r23);   /* SMULH/UMULH x23 */
+            if (sgn) emit_u32(buf, 0xeb800000u | (r22 << 16) | (63u << 10) | (r23 << 5) | 31u);   /* CMP x23, x22, ASR #63 */
+            else     emit_u32(buf, 0xf100001fu | (r23 << 5));                                     /* CMP x23, #0 */
+        } else {
+            if (sgn) { emit_sbfm(buf, 20, 20, 31); emit_sbfm(buf, 21, 21, 31); }
+            emit_u32(buf, 0x9b007c00u | (r21 << 16) | (r20 << 5) | r22);                     /* MUL x22: точное произведение */
+            emit_u32(buf, 0xd360fc00u | (r22 << 5) | r23);                                   /* LSR x23, x22, #32 */
+            if (sgn) {
+                emit_sbfm(buf, 21, 22, 31);                                                  /* x21 = sext(w22) */
+                emit_u32(buf, 0xeb000000u | (r21 << 16) | (r22 << 5) | 31u);                 /* CMP x22, x21 */
+            } else {
+                emit_u32(buf, 0xf100001fu | (r23 << 5));                                     /* CMP x23, #0 */
+            }
+        }
+        emit_u32(buf, (flip ? 0x1a9f17e0u : 0x1a9f07e0u) | r21);   /* CSET w21, NE (контроль теста — EQ) */
+        emit_store_flag_bool_from_w(buf, 21, offsetof(hb_flags_t, cf));
+        emit_store_flag_bool_from_w(buf, 21, offsetof(hb_flags_t, of));
+        emit_clear_lazy_flags_pending(buf);
+        emit_mov_reg(buf, 20, 22);
+        emit_store_x20_to_gpr_sized(buf, &rax);
+        emit_mov_reg(buf, 20, 23);
+        emit_store_x20_to_gpr_sized(buf, &rdx);
+    }
+    if (nslow) {
+        size_t done = emit_b_deferred(buf);
+        for (i = 0; i < nslow; i++) {
+            switch (slow[i].kind) {
+                case MD_B:     patch_b(buf, slow[i].pos, buf->size); break;
+                case MD_BCOND: patch_bcond(buf, slow[i].pos, slow[i].arg, buf->size); break;
+                case MD_CBZ:   patch_cbz_x(buf, slow[i].pos, slow[i].arg, buf->size); break;
+                default:       patch_cbnz_x(buf, slow[i].pos, slow[i].arg, buf->size); break;
+            }
+        }
+        emit_mov_reg(buf, 0, 19);
+        emit_mov_imm64(buf, 1, (uint64_t)(uintptr_t)instr);
+        emit_call_helper(buf, (void*)hb_jit_helper_exec_mul_div_operand);
+        emit_return_if_helper_failed(buf);
+        patch_b(buf, done, buf->size);
+    }
+    hb_emit_note_native_exit();
+    return HB_OK;
+}
+
 /* ★ Claude 27.09.2026 — CMOVcc r, [m] БЕЗ ПОМОЩНИКА (гейт MACRUNNER_HB_CMOV_MEM_NATIVE). Перепись HK в меню:
  * `cmovs ecx,[rsp+60h]` — 336 млн вызовов hb_jit_helper_exec_cmovcc_operand_lazy на одном рабочем потоке.
  * x86 читает память ВСЕГДА, и при ложном условии тоже (отказ доступа обязан случиться), а r32 обнуляет верх
@@ -15332,8 +15573,7 @@ static bool emit_cmovcc_native_mem(hb_codegen_buffer_t* buf, const hb_ir_instr_t
     prev_stack = hb_emit_mark_stack_access(m);
     emit_direct_mem_addr(buf, m);
     ea_materialize(buf);
-    mask = direct_mem_alignment_mask(m->size);
-    if (no_align_check_enabled()) mask = 0;
+    mask = load_alignment_guard_mask(m->size);
     if (mask) {
         aligned_branch = emit_align_guard_deferred(buf, mask, &aligned_is_tbz);
         emit_mov_reg(buf, 0, 19);
@@ -15655,6 +15895,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 int imul_mem_side = 0;
                 if (imul_native_ok(buf, instr, &imul_mem_side)) return emit_imul_native(buf, instr, imul_mem_side);
             }
+            if (muldiv_native_ok(buf, instr)) return emit_muldiv_native(buf, instr);   /* Claude 27.09 */
             emit_mov_reg(buf, 0, 19);
             emit_mov_imm64(buf, 1, (uint64_t)(uintptr_t)instr);
             emit_call_helper(buf, (void*)hb_jit_helper_exec_mul_div_operand);
@@ -15847,6 +16088,10 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
 
         case HB_IR_LOAD: {
             if (instr->src1.type != HB_OP_MEM) return HB_ERR_INTERNAL;
+            if (emit_native_seg_absolute_load(buf, instr)) {   /* Claude 27.09: fs:/gs:[disp] */
+                hb_emit_note_native_exit();
+                return HB_OK;
+            }
             perepis_shirin_vzvesti();
             if (jit_evex_write_masked(instr)) {
                 perepis_uchest(buf, 0, instr->src1.size, SH_POM_NE_REG);
@@ -15932,12 +16177,19 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 direct_user_mem_load_allowed(buf, &instr->src1) &&
                 (instr->src1.size != HB_SIZE_64 ||
                  jit_native_mem_ir_qword_loads_enabled()) &&
-                !wide_self_base_load_needs_helper(instr)) {
+                (!wide_self_base_load_needs_helper(instr) || self_base_native_enabled())) {
                 /* Итерация 1109: парная пометка к записи — здесь виден операнд чтения. */
                 unsigned char prev_stack = hb_emit_mark_stack_access(&instr->src1);
                 bool ok_load = emit_direct_mem_load_to_gpr_tso(buf, &instr->src1, &instr->dst);
                 hb_emit_restore_stack_access(prev_stack);
                 if (!ok_load) return HB_ERR_INTERNAL;
+                /* Отрицательный контроль разностного теста (Claude 27.09): только у чтений, которые
+                 * открыл MACRUNNER_HB_SELF_BASE_NATIVE, приёмник +1 — тест обязан расходиться. */
+                if (wide_self_base_load_needs_helper(instr) && hb_jit_gate_flag( HB_GATE_HB_TEST_MEM_NATIVE_FLIP, 0)) {
+                    emit_load_gpr_sized_to_reg(buf, &instr->dst, 20);
+                    emit_add_imm(buf, 20, 20, 1);
+                    emit_store_x20_to_gpr_sized(buf, &instr->dst);
+                }
                 perepis_uchest(buf, 0, instr->src1.size, SH_NATIV_GPR);
                 jit_native_mem_count(0);
                 hb_emit_note_native_exit();
