@@ -18,6 +18,9 @@
 #include <sys/ucontext.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+#include <dlfcn.h>
 #include <unistd.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -173,6 +176,43 @@ static unsigned long long hb_diff_fence_hi(void) {
 static unsigned long g_fence_holes;
 static unsigned long long g_fence_bytes;
 
+/* ★★★ Claude 28.09.2026 — ЧТО СТЕНД НАКРЫЛ САМ.
+ *
+ * Рабочие области гостя кладутся `MAP_FIXED`, и до этой правки стенд не проверял, ЧЬЮ память
+ * он накрывает. Здесь запоминаются диапазоны, которые стенд отобразил сам (дыры ограды и
+ * окна), и `hb_diff_map_identity` кладёт область только внутрь них. Разбор причины — у
+ * `hb_diff_reserve_window`. */
+#define HB_DIFF_OWN_MAX 512
+static struct { unsigned long long lo, hi; } g_own[HB_DIFF_OWN_MAX];
+static unsigned g_own_n;
+static unsigned long g_own_overflow;
+
+static void hb_diff_own_add(unsigned long long lo, unsigned long long hi) {
+    if (g_own_n < HB_DIFF_OWN_MAX) {
+        g_own[g_own_n].lo = lo;
+        g_own[g_own_n].hi = hi;
+        g_own_n++;
+    } else {
+        g_own_overflow++;
+    }
+}
+
+static int hb_diff_own_covers(unsigned long long lo, unsigned long long hi) {
+    unsigned long long cur = lo;
+    while (cur < hi) {
+        unsigned i;
+        int moved = 0;
+        for (i = 0; i < g_own_n; i++)
+            if (g_own[i].lo <= cur && cur < g_own[i].hi) {
+                cur = g_own[i].hi;
+                moved = 1;
+                break;
+            }
+        if (!moved) return 0;
+    }
+    return 1;
+}
+
 static int hb_diff_fence_off(void) {
     static int cached = -1;
     if (cached < 0) {
@@ -214,9 +254,84 @@ static void hb_diff_fence(unsigned long long lo, unsigned long long hi) {
             if (p != MAP_FAILED && (mach_vm_address_t)(uintptr_t)p == a) {
                 g_fence_holes++;
                 g_fence_bytes += len;
+                hb_diff_own_add((unsigned long long)a, (unsigned long long)gap_end);
             } else {
                 fprintf(stderr, "hb-diff-ограда: дыра 0x%llx+0x%zx не накрыта (%p)\n",
                         (unsigned long long)a, len, p);
+            }
+        }
+        a = next > a ? next : a + 0x4000;
+    }
+}
+
+/* ★★★ Claude 28.09.2026 — ОКНО НЕ НАКРЫВАЕТ ЗАПИСЫВАЕМУЮ ЧУЖУЮ ПАМЯТЬ (обрыв оракула, ДОЛГ HB-ОРАКУЛ-ОБРЫВ).
+ *
+ * Было: три окна ставились `mmap(MAP_FIXED, PROT_NONE)` целиком, в расчёте на комментарий в
+ * main «в самом начале там заведомо пусто». Это НЕВЕРНО: к первой строке main распределитель
+ * (xzone malloc) уже может держать сегмент внутри окна кода [0x140000000, 0x141000000).
+ * MAP_FIXED молча заменял его пустой страницей без прав.
+ *
+ * ИЗМЕРЕНО (smoke-корпус оракула SSE, 20 проходов подряд, раннер с диагностикой в обработчике):
+ * отказ SIGBUS по 0x140e00000 с pc в `_xzm_reclaim_mark_used_locked` (libsystem_malloc) —
+ * распределитель повторно выдавал свой кешированный кусок, уже накрытый окном. Отказ пришёл
+ * внутри hb_runtime_run, ограждение стенда ушло `siglongjmp` из malloc с захваченным замком
+ * группы сегментов, и следующий крупный malloc (`hb_jit_runtime_create`, calloc среды) падал
+ * `BUG IN CLIENT OF LIBPLATFORM: Trying to recursively lock an os_unfair_lock` -> SIGKILL, код 137.
+ * Два таких отчёта о падении за 28.09 (00:25 и 02:53) — ровно «обрыв под нагрузкой».
+ * Частота плавает от раскладки адресов (ASLR), поэтому обрыв выглядел случайным.
+ *
+ * Стало: дыры накрываются как прежде; занятое ТОЛЬКО ДЛЯ ЧТЕНИЯ (максимальные права без
+ * записи — страницы общего кеша dyld, куда попадают окна данных и стека по 0x270000000)
+ * накрывается как прежде, чтобы не сдвинуть чужие корпуса; занятое С ПРАВОМ ЗАПИСИ (куча,
+ * стеки потоков, __DATA) не трогается никогда и печатается. Рабочая область потом кладётся
+ * только внутрь накрытого (`hb_diff_own_covers`). */
+static void hb_diff_reserve_window(unsigned long long lo, unsigned long long hi) {
+    mach_vm_address_t a = (mach_vm_address_t)lo;
+    while (a < (mach_vm_address_t)hi) {
+        mach_vm_address_t r = a, gap_end, next;
+        mach_vm_size_t sz = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t obj = MACH_PORT_NULL;
+        kern_return_t kr = mach_vm_region(mach_task_self(), &r, &sz, VM_REGION_BASIC_INFO_64,
+                                          (vm_region_info_t)&info, &cnt, &obj);
+        int occupied = (kr == KERN_SUCCESS && r < (mach_vm_address_t)hi);
+        if (!occupied) {
+            gap_end = (mach_vm_address_t)hi;
+            next = (mach_vm_address_t)hi;
+        } else {
+            gap_end = r > a ? r : a;
+            next = r + sz;
+        }
+        if (gap_end > a) {
+            size_t len = (size_t)(gap_end - a);
+            void* p = mmap((void*)(uintptr_t)a, len, PROT_NONE,
+                           MAP_PRIVATE | MAP_ANON | MAP_FIXED | MAP_NORESERVE, -1, 0);
+            if (p != MAP_FAILED && (mach_vm_address_t)(uintptr_t)p == a)
+                hb_diff_own_add((unsigned long long)a, (unsigned long long)gap_end);
+            else
+                fprintf(stderr, "hb-diff-identity: дыра окна 0x%llx+0x%zx не накрыта (%p)\n",
+                        (unsigned long long)a, len, p);
+        }
+        if (occupied) {
+            mach_vm_address_t o_lo = r > a ? r : a;
+            mach_vm_address_t o_hi = next < (mach_vm_address_t)hi ? next : (mach_vm_address_t)hi;
+            if (o_hi > o_lo && !hb_diff_own_covers((unsigned long long)o_lo, (unsigned long long)o_hi)) {
+                /* Своё (соседнее окно уже накрыло этот кусок) пропускается молча. */
+                if (info.max_protection & VM_PROT_WRITE) {
+                    fprintf(stderr, "hb-diff-identity: окно 0x%llx..0x%llx пересекает ЗАПИСЫВАЕМОЕ чужое "
+                            "0x%llx..0x%llx prot=%d/%d — не накрываю\n",
+                            lo, hi, (unsigned long long)o_lo, (unsigned long long)o_hi,
+                            info.protection, info.max_protection);
+                } else {
+                    void* p = mmap((void*)(uintptr_t)o_lo, (size_t)(o_hi - o_lo), PROT_NONE,
+                                   MAP_PRIVATE | MAP_ANON | MAP_FIXED | MAP_NORESERVE, -1, 0);
+                    if (p != MAP_FAILED && (mach_vm_address_t)(uintptr_t)p == o_lo)
+                        hb_diff_own_add((unsigned long long)o_lo, (unsigned long long)o_hi);
+                    else
+                        fprintf(stderr, "hb-diff-identity: заглушка 0x%llx..0x%llx не встала (%p)\n",
+                                (unsigned long long)o_lo, (unsigned long long)o_hi, p);
+                }
             }
         }
         a = next > a ? next : a + 0x4000;
@@ -234,11 +349,16 @@ static void hb_diff_identity_reserve(void) {
     if (done) return;
     done = 1;
     for (i = 0; i < sizeof(okna) / sizeof(okna[0]); i++) {
-        void* p = mmap((void*)(uintptr_t)okna[i][0], (size_t)okna[i][1], PROT_NONE,
-                       MAP_PRIVATE | MAP_ANON | MAP_FIXED | MAP_NORESERVE, -1, 0);
-        if (p == MAP_FAILED || (unsigned long long)(uintptr_t)p != okna[i][0])
-            fprintf(stderr, "hb-diff-identity: заглушка 0x%llx+0x%llx не встала (%p)\n",
-                    okna[i][0], okna[i][1], p);
+        const char* old = getenv("HB_DIFF_TEST_OLD_RESERVE");
+        if (old && *old == '1') {
+            /* Отрицательный контроль: прежняя заглушка, MAP_FIXED по всему окну. */
+            void* p = mmap((void*)(uintptr_t)okna[i][0], (size_t)okna[i][1], PROT_NONE,
+                           MAP_PRIVATE | MAP_ANON | MAP_FIXED | MAP_NORESERVE, -1, 0);
+            if (p != MAP_FAILED && (unsigned long long)(uintptr_t)p == okna[i][0])
+                hb_diff_own_add(okna[i][0], okna[i][0] + okna[i][1]);
+            continue;
+        }
+        hb_diff_reserve_window(okna[i][0], okna[i][0] + okna[i][1]);
     }
     /* Ограда ПОСЛЕ окон: окна уже заняты и в дыры не попадут. */
     if (!hb_diff_fence_off()) hb_diff_fence(hb_diff_fence_lo(), hb_diff_fence_hi());
@@ -289,6 +409,15 @@ static hb_result_t hb_diff_map_identity(hb_memory_t* mem, unsigned long long bas
     for (i = 0; i < g_ident_slot_n; i++)
         if (g_ident_slots[i].base == base && g_ident_slots[i].size >= size) break;
     if (i == g_ident_slot_n) {
+        /* ★ Claude 28.09.2026: MAP_FIXED только внутрь того, что стенд накрыл сам (см.
+         * hb_diff_reserve_window). Иначе область легла бы поверх чужой памяти — кучи. */
+        size_t ps = hb_diff_page_size();
+        unsigned long long span = ((unsigned long long)size + ps - 1) & ~((unsigned long long)ps - 1);
+        if (!hb_diff_own_covers(base, base + span)) {
+            fprintf(stderr, "hb-diff-identity: область 0x%llx+0x%llx лежит вне своего окна "
+                    "(занято чужим) — режим НЕ применим\n", base, span);
+            return HB_ERR_OUT_OF_MEMORY;
+        }
         void* p = mmap((void*)(uintptr_t)base, size, PROT_READ | PROT_WRITE,
                        MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
         if (p == MAP_FAILED || (unsigned long long)(uintptr_t)p != base) {
@@ -823,6 +952,27 @@ static volatile uint64_t hb_diff_host_addr;
 /* Сколько раз отказ забрала ДВЕРЬ ДВИЖКА и сколько — ограждение стенда. Разница между
  * этими двумя числами и есть ответ на вопрос «есть ли у нас вид отказа на прямом пути». */
 static unsigned long hb_diff_door_taken, hb_diff_guard_taken;
+/* Диапазон __TEXT libsystem_malloc — снимается в main один раз (в обработчике dladdr не зовём). */
+static uint64_t hb_diff_malloc_text_lo, hb_diff_malloc_text_hi;
+
+static void hb_diff_note_malloc_text(void) {
+    Dl_info di;
+    unsigned long sz = 0;
+    uint8_t* t;
+    if (!dladdr((const void*)(uintptr_t)&malloc, &di) || !di.dli_fbase) return;
+    t = getsegmentdata((const struct mach_header_64*)di.dli_fbase, "__TEXT", &sz);
+    if (!t || !sz) return;
+    hb_diff_malloc_text_lo = (uint64_t)(uintptr_t)t;
+    hb_diff_malloc_text_hi = (uint64_t)(uintptr_t)t + sz;
+}
+
+/* ★ ПРОВЕРКА ПРАВКИ — ЧУЖАЯ ЗАПИСЫВАЕМАЯ СТРАНИЦА В ОКНЕ КОДА (Claude 28.09.2026).
+ * `HB_DIFF_TEST_FOREIGN_AT=0x...` ДО заглушки кладёт свою RW-страницу с меткой по этому адресу
+ * (так, как туда ложится сегмент malloc), а на выходе проверяет, что страница осталась RW и
+ * метка цела; иначе выход 87. `HB_DIFF_TEST_OLD_RESERVE=1` возвращает прежнюю заглушку
+ * (MAP_FIXED по всему окну) — отрицательный контроль: страница обязана погибнуть. */
+static uint64_t g_foreign_at;
+#define HB_DIFF_FOREIGN_MARK 0x5a17c0de5a17c0deULL
 
 /* ★★★ MacRunner 2026-09-07, лейн ОРАКУЛ — ОТКАЗ ВЫПУЩЕННОГО КОДА ОТДАЁТСЯ ДВИЖКУ.
  *
@@ -874,6 +1024,21 @@ static void hb_diff_fault_handler(int sig, siginfo_t* info, void* uctx) {
         }
     }
 #endif
+    /* ★ Claude 28.09.2026 — ИЗ РАСПРЕДЕЛИТЕЛЯ longjmp НЕ ДЕЛАЕТСЯ. Отказ с pc внутри
+     * libsystem_malloc случается, когда кто-то испортил или накрыл его память, и приходит с
+     * захваченным замком: уход longjmp оставил бы замок захваченным, и процесс погиб бы на
+     * СЛЕДУЮЩЕМ malloc с чужой подписью (recursive os_unfair_lock, SIGKILL, код 137). Здесь
+     * он гибнет СРАЗУ и называет причину. Разбор — у hb_diff_reserve_window. */
+    if (uctx && hb_diff_malloc_text_hi) {
+        const ucontext_t* uc = (const ucontext_t*)uctx;
+        uint64_t mpc = uc->uc_mcontext ? (uint64_t)uc->uc_mcontext->__ss.__pc : 0;
+        if (mpc >= hb_diff_malloc_text_lo && mpc < hb_diff_malloc_text_hi) {
+            static const char msg[] = "hb-diff-ограждение: отказ ВНУТРИ malloc (память распределителя "
+                                      "накрыта или испорчена) — longjmp невозможен, выход 86\n";
+            (void)!write(2, msg, sizeof(msg) - 1);
+            _exit(86);
+        }
+    }
     if (hb_diff_fault_armed) {
         hb_diff_fault_armed = 0;
         hb_diff_guard_taken++;
@@ -1506,6 +1671,36 @@ int main(void) {
     hb_arch_t arch = (arch_env && strcmp(arch_env, "x86") == 0) ? HB_ARCH_X86 : HB_ARCH_X64;
     /* Заглушка ставится ДО первого выделения памяти движком: MAP_FIXED поверх уже занятого
      * снёс бы чужое отображение, а в самом начале там заведомо пусто. */
+    hb_diff_note_malloc_text();
+    {
+        const char* fa = getenv("HB_DIFF_TEST_FOREIGN_AT");
+        if (fa && *fa) {
+            /* Первая СВОБОДНАЯ страница в [want, want + 8 МБ): сегмент malloc сам может лежать
+             * по want — тогда проверка взяла бы не ту страницу. */
+            uint64_t want = strtoull(fa, NULL, 0), at;
+            for (at = want; at < want + 0x800000ULL && !g_foreign_at; at += 0x4000ULL) {
+                mach_vm_address_t r = (mach_vm_address_t)at;
+                mach_vm_size_t sz = 0;
+                vm_region_basic_info_data_64_t info;
+                mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+                mach_port_t obj = MACH_PORT_NULL;
+                kern_return_t kr = mach_vm_region(mach_task_self(), &r, &sz, VM_REGION_BASIC_INFO_64,
+                                                  (vm_region_info_t)&info, &cnt, &obj);
+                if (kr == KERN_SUCCESS && r < (mach_vm_address_t)(at + 0x4000ULL)) continue;  /* занято */
+                void* p = mmap((void*)(uintptr_t)at, 0x4000, PROT_READ | PROT_WRITE,
+                               MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+                if (p != MAP_FAILED && (uint64_t)(uintptr_t)p == at) {
+                    *(volatile uint64_t*)p = HB_DIFF_FOREIGN_MARK;
+                    g_foreign_at = at;
+                }
+            }
+            if (!g_foreign_at) {
+                fprintf(stderr, "hb-diff-чужое: свободной страницы у 0x%llx нет — проверка не состоялась\n",
+                        (unsigned long long)want);
+                return 88;
+            }
+        }
+    }
     if (arch != HB_ARCH_X86 && hb_diff_identity_gate()) hb_diff_identity_reserve();
     /* ★ ОГРАЖДЕНИЕ СТАВИТСЯ ЗДЕСЬ, А НЕ ПРИ ПЕРВОМ СЛУЧАЕ.
      *
@@ -1671,6 +1866,23 @@ int main(void) {
             hb_diff_door_taken, hb_diff_guard_taken, g_porcha_tronuto,
             g_fence_holes, g_fence_bytes);
     fflush(stderr);
+    if (g_foreign_at) {
+        mach_vm_address_t r = (mach_vm_address_t)g_foreign_at;
+        mach_vm_size_t sz = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t obj = MACH_PORT_NULL;
+        kern_return_t kr = mach_vm_region(mach_task_self(), &r, &sz, VM_REGION_BASIC_INFO_64,
+                                          (vm_region_info_t)&info, &cnt, &obj);
+        int rw = kr == KERN_SUCCESS && r <= (mach_vm_address_t)g_foreign_at &&
+                 (info.protection & (VM_PROT_READ | VM_PROT_WRITE)) == (VM_PROT_READ | VM_PROT_WRITE);
+        int mark = rw && *(volatile uint64_t*)(uintptr_t)g_foreign_at == HB_DIFF_FOREIGN_MARK;
+        fprintf(stderr, "hb-diff-чужое: 0x%llx prot=%d метка=%s — %s\n",
+                (unsigned long long)g_foreign_at, kr == KERN_SUCCESS ? info.protection : -1,
+                mark ? "цела" : "нет", mark ? "ЦЕЛО" : "СНЕСЕНО");
+        fflush(stderr);
+        if (!mark) return 87;
+    }
 
     /* MacRunner 2026-08-11, лейн ЛЕСТНИЦА, итерация 368 — КАРТА «НАТИВНО ИЛИ ПОМОЩНИК».
      *

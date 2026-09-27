@@ -447,6 +447,12 @@ test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPM
 	        echo "runner exit=$$rc corpus=$$c FPCR=$$fp; stderr tail:"; tail -5 tests/hb_sse_oracle/out/runner.stderr; exit 1; }; \
 	  done; \
 	done
+	@echo "Oracle runner: identity windows must not clobber foreign writable memory (control: old reserve destroys it)..."
+	head -3 tests/hb_sse_oracle/corpus/smoke.cases | HB_DIFF_IDENTITY=1 HB_DIFF_TEST_FOREIGN_AT=0x140e00000 \
+	  ./$(SSE_ORACLE_RUNNER_BIN) > /dev/null 2> tests/hb_sse_oracle/out/foreign.stderr
+	grep -q "ЦЕЛО" tests/hb_sse_oracle/out/foreign.stderr
+	head -3 tests/hb_sse_oracle/corpus/smoke.cases | HB_DIFF_IDENTITY=1 HB_DIFF_TEST_FOREIGN_AT=0x140e00000 HB_DIFF_TEST_OLD_RESERVE=1 \
+	  ./$(SSE_ORACLE_RUNNER_BIN) > /dev/null 2> tests/hb_sse_oracle/out/foreign-old.stderr; test $$? -eq 87
 	@echo "Running Python test suite..."
 	python3 -m unittest discover -s tests -v
 
