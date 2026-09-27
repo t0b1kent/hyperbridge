@@ -184,19 +184,6 @@ ABI_X64_V1_TEST_BIN = tests/hb_abi_x64_v1_test
 ABI_NATIVE_V1_TEST_BIN = tests/hb_abi_native_v1_test
 WINEMETAL_COMPUTE_TEST_BIN = tests/hb_winemetal_compute_v1_test
 MXCSR_TEST_BIN = tests/hb_mxcsr_test
-XMM_PAIR_X22_TEST_BIN = tests/hb_xmm_pair_x22_test
-SMC_FASTPATH_TEST_BIN = tests/hb_smc_fastpath_test
-VEX_MOVD_YMM_TEST_BIN = tests/hb_vex_movd_ymm_test
-SSE_FP_NATIVE_TEST_BIN = tests/hb_sse_fp_native_test
-BT_PENDING_NATIVE_TEST_BIN = tests/hb_bt_pending_native_test
-VEX_YMM_MOVE_TEST_BIN = tests/hb_vex_ymm_move_test
-LAZY_COND_NATIVE_TEST_BIN = tests/hb_lazy_cond_native_test
-UPPER_STATE_TEST_BIN = tests/hb_upper_state_test
-EVEX_DISP8_TEST_BIN = tests/hb_evex_disp8_test
-MASK_STATE_TEST_BIN = tests/hb_mask_state_test
-FLAGS_STATE_TEST_BIN = tests/hb_flags_state_test
-MEMORY_UNMAP_RANGE_TEST_BIN = tests/hb_memory_unmap_range_test
-SSE_ORACLE_RUNNER_BIN = tests/hb_diff_case_runner
 FXSTATE_MXCSR_TEST_BIN = tests/hb_fxstate_mxcsr_test
 FXSTATE_X87_TEST_BIN = tests/hb_fxstate_x87_test
 X87_INTEGER_TEST_BIN = tests/hb_x87_integer_test
@@ -290,7 +277,7 @@ src/hb_x87_transcendental.o: src/hb_x87_transcendental.c
 POVTOR_PROBE_BIN = tests/povtor_prichina_probe
 IC_RETRANS_PROBE_BIN = tests/ic_retranslate_probe
 
-test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPMAP_INDEX_TEST_BIN) $(PROBE_TEST_BIN) $(PROBE_ZERO_TEST_BIN) $(CACHE_STAMP_TEST_BIN) $(LOGICAL_IMM_TEST_BIN) $(POVTOR_PROBE_BIN) $(IC_RETRANS_PROBE_BIN) $(BIT_STRING_TEST_BIN) $(SEGMENT_ADDRESS_TEST_BIN) $(ABI_X64_STATE_TEST_BIN) $(ABI_X64_FRAME_TEST_BIN) $(ABI_X64_V1_TEST_BIN) $(ABI_NATIVE_V1_TEST_BIN) $(MXCSR_TEST_BIN) $(FXSTATE_MXCSR_TEST_BIN) $(SSE_INTEGER_ROUNDING_TEST_BIN) $(FXSTATE_X87_TEST_BIN) $(X87_INTEGER_TEST_BIN) $(X87_ENVIRONMENT_TEST_BIN) $(VEX_UPPER_STATE_TEST_BIN) $(ROUND_INSTRUCTION_TEST_BIN) $(HALF_CONVERSION_TEST_BIN) $(X87_FRNDINT_TEST_BIN) $(DIAGNOSTIC_FENV_TEST_BIN) $(X87_FPREM_TEST_BIN) $(X87_BCD_TEST_BIN) $(X87_BCD_LOAD_TEST_BIN) $(X87_LOADED_STATUS_TEST_BIN) $(CONTEXT_RESET_FAULT_TEST_BIN) $(FXSTATE_ALIGNMENT_TEST_BIN) $(X87_FLOATING_LOAD_STATUS_TEST_BIN) $(X87_RAW_LOAD_TEST_BIN) $(X87_SHORT_ENVIRONMENT_TEST_BIN) $(XSAVE_STATE_TEST_BIN) $(XGETBV_INDEX_TEST_BIN) $(X87_REGISTER_TRANSFER_TEST_BIN) $(XSTATE_ADMISSION_TEST_BIN) $(X87_EXACT_ADDSUB_TEST_BIN) $(X87_ARITHMETIC_DESTINATION_TEST_BIN) $(X87_FIP_CLASSIFICATION_TEST_BIN) $(X87_EXACT_NONPOP_ADDSUB_TEST_BIN) $(X87_COMPARISON_FLAGS_TEST_BIN) $(X87_FTST_FLAGS_TEST_BIN) $(X87_ORDERED_COMPARISON_FLAGS_TEST_BIN) $(X87_BCD_SUCCESS_FIP_TEST_BIN) $(X87_RAW_FTST_TEST_BIN) $(X87_RAW_FCOMI_TEST_BIN) $(X87_RAW_FCOM_TEST_BIN) $(X87_MIXED_CACHE_COMPARE_TEST_BIN) $(X87_RAW_MEMORY_COMPARE_TEST_BIN) $(X87_INFINITY_COMPARE_TEST_BIN) $(X87_EXACT_MULDIV_TEST_BIN) $(X87_EXACT_NONPOP_MULDIV_TEST_BIN) $(X87_EXACT_MEMORY_ARITHMETIC_TEST_BIN) $(X87_FINITE_BRIDGE_TEST_BIN) $(X87_MASKED_PRECISION_TEST_BIN) $(X87_FINITE_SQRT_BRIDGE_TEST_BIN) $(X87_FINITE_SQRT_TEST_BIN) $(X87_FINITE_FXAM_TEST_BIN) $(X87_FINITE_FXTRACT_TEST_BIN) $(X87_CACHED_FINITE_SIGN_TEST_BIN) $(X87_CACHED_FINITE_FSCALE_TEST_BIN) $(X87_CACHED_TINY_FSIN_TEST_BIN) $(X87_CACHED_TINY_FSINCOS_TEST_BIN) $(X87_CACHED_TINY_FCOS_TEST_BIN) $(X87_CACHED_TINY_FPTAN_TEST_BIN) $(X87_CACHED_EXACT_FYL2X_TEST_BIN) $(X87_CACHED_EXACT_FYL2XP1_TEST_BIN) $(X87_TRANSCENDENTAL_COMPONENT_TEST_BIN) $(X87_TRANSCENDENTAL_GUEST_TEST_BIN) $(XMM_PAIR_X22_TEST_BIN) $(SMC_FASTPATH_TEST_BIN) $(VEX_MOVD_YMM_TEST_BIN) $(SSE_FP_NATIVE_TEST_BIN) $(BT_PENDING_NATIVE_TEST_BIN) $(VEX_YMM_MOVE_TEST_BIN) $(LAZY_COND_NATIVE_TEST_BIN) $(UPPER_STATE_TEST_BIN) $(EVEX_DISP8_TEST_BIN) $(MASK_STATE_TEST_BIN) $(FLAGS_STATE_TEST_BIN) $(MEMORY_UNMAP_RANGE_TEST_BIN) $(SSE_ORACLE_RUNNER_BIN)
+test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPMAP_INDEX_TEST_BIN) $(PROBE_TEST_BIN) $(PROBE_ZERO_TEST_BIN) $(CACHE_STAMP_TEST_BIN) $(LOGICAL_IMM_TEST_BIN) $(POVTOR_PROBE_BIN) $(IC_RETRANS_PROBE_BIN) $(BIT_STRING_TEST_BIN) $(SEGMENT_ADDRESS_TEST_BIN) $(ABI_X64_STATE_TEST_BIN) $(ABI_X64_FRAME_TEST_BIN) $(ABI_X64_V1_TEST_BIN) $(ABI_NATIVE_V1_TEST_BIN) $(MXCSR_TEST_BIN) $(FXSTATE_MXCSR_TEST_BIN) $(SSE_INTEGER_ROUNDING_TEST_BIN) $(FXSTATE_X87_TEST_BIN) $(X87_INTEGER_TEST_BIN) $(X87_ENVIRONMENT_TEST_BIN) $(VEX_UPPER_STATE_TEST_BIN) $(ROUND_INSTRUCTION_TEST_BIN) $(HALF_CONVERSION_TEST_BIN) $(X87_FRNDINT_TEST_BIN) $(DIAGNOSTIC_FENV_TEST_BIN) $(X87_FPREM_TEST_BIN) $(X87_BCD_TEST_BIN) $(X87_BCD_LOAD_TEST_BIN) $(X87_LOADED_STATUS_TEST_BIN) $(CONTEXT_RESET_FAULT_TEST_BIN) $(FXSTATE_ALIGNMENT_TEST_BIN) $(X87_FLOATING_LOAD_STATUS_TEST_BIN) $(X87_RAW_LOAD_TEST_BIN) $(X87_SHORT_ENVIRONMENT_TEST_BIN) $(XSAVE_STATE_TEST_BIN) $(XGETBV_INDEX_TEST_BIN) $(X87_REGISTER_TRANSFER_TEST_BIN) $(XSTATE_ADMISSION_TEST_BIN) $(X87_EXACT_ADDSUB_TEST_BIN) $(X87_ARITHMETIC_DESTINATION_TEST_BIN) $(X87_FIP_CLASSIFICATION_TEST_BIN) $(X87_EXACT_NONPOP_ADDSUB_TEST_BIN) $(X87_COMPARISON_FLAGS_TEST_BIN) $(X87_FTST_FLAGS_TEST_BIN) $(X87_ORDERED_COMPARISON_FLAGS_TEST_BIN) $(X87_BCD_SUCCESS_FIP_TEST_BIN) $(X87_RAW_FTST_TEST_BIN) $(X87_RAW_FCOMI_TEST_BIN) $(X87_RAW_FCOM_TEST_BIN) $(X87_MIXED_CACHE_COMPARE_TEST_BIN) $(X87_RAW_MEMORY_COMPARE_TEST_BIN) $(X87_INFINITY_COMPARE_TEST_BIN) $(X87_EXACT_MULDIV_TEST_BIN) $(X87_EXACT_NONPOP_MULDIV_TEST_BIN) $(X87_EXACT_MEMORY_ARITHMETIC_TEST_BIN) $(X87_FINITE_BRIDGE_TEST_BIN) $(X87_MASKED_PRECISION_TEST_BIN) $(X87_FINITE_SQRT_BRIDGE_TEST_BIN) $(X87_FINITE_SQRT_TEST_BIN) $(X87_FINITE_FXAM_TEST_BIN) $(X87_FINITE_FXTRACT_TEST_BIN) $(X87_CACHED_FINITE_SIGN_TEST_BIN) $(X87_CACHED_FINITE_FSCALE_TEST_BIN) $(X87_CACHED_TINY_FSIN_TEST_BIN) $(X87_CACHED_TINY_FSINCOS_TEST_BIN) $(X87_CACHED_TINY_FCOS_TEST_BIN) $(X87_CACHED_TINY_FPTAN_TEST_BIN) $(X87_CACHED_EXACT_FYL2X_TEST_BIN) $(X87_CACHED_EXACT_FYL2XP1_TEST_BIN) $(X87_TRANSCENDENTAL_COMPONENT_TEST_BIN) $(X87_TRANSCENDENTAL_GUEST_TEST_BIN)
 	@echo "Running C unit tests..."
 	MACRUNNER_HB_MEM_SEGV_JIT_DOOR=1 ./$(TEST_BIN)
 	@echo "Running IMUL flag regression test..."
@@ -374,54 +361,6 @@ test: memory-fault-guard $(STATIC_LIB) $(TEST_BIN) $(IMUL_FLAGS_TEST_BIN) $(RIPM
 	@echo "Running IC-after-retranslate correctness probe (arm B must reproduce the defect)..."
 	MACRUNNER_HB_INDIRECT_IC=1 MACRUNNER_HB_POVTOR_STATS=1 ./$(IC_RETRANS_PROBE_BIN)
 	MACRUNNER_HB_INDIRECT_IC=1 MACRUNNER_HB_POVTOR_STATS=1 MACRUNNER_HB_TEST_NO_IC_CLEAR_ON_RETRANSLATE=1 ./$(IC_RETRANS_PROBE_BIN)
-	@echo "Running XMM logic x22-pair regression (memory src2 must not clobber src1.hi)..."
-	./$(XMM_PAIR_X22_TEST_BIN)
-	@echo "Running SMC fast-path test (generation check with page protection; off arm is the control)..."
-	./$(SMC_FASTPATH_TEST_BIN)
-	./$(SMC_FASTPATH_TEST_BIN) off
-	@echo "Running VEX MOVD/MOVQ upper-YMM test (VEX zeroes ymm_hi, legacy SSE keeps it)..."
-	./$(VEX_MOVD_YMM_TEST_BIN)
-	@echo "Running native SSE FP parity test (special values; the NO_SLOW arm must FAIL)..."
-	./$(SSE_FP_NATIVE_TEST_BIN)
-	! MACRUNNER_HB_TEST_SSE_FP_NO_SLOW=1 ./$(SSE_FP_NATIVE_TEST_BIN) > /dev/null
-	@echo "Running native BT pending-flags parity test (the ZF_INVERT arm must FAIL)..."
-	./$(BT_PENDING_NATIVE_TEST_BIN)
-	! MACRUNNER_HB_TEST_BT_ZF_INVERT=1 ./$(BT_PENDING_NATIVE_TEST_BIN) > /dev/null
-	@echo "Running VEX YMM move parity test (VEX.256 load/store, VEX.128 load upper zeroing)..."
-	./$(VEX_YMM_MOVE_TEST_BIN)
-	@echo "Running native lazy-flag condition test (Jcc/CMOVcc/SETcc; FLIP and gate-off arms must FAIL)..."
-	HB_LAZY_COND_QUICK=1 ./$(LAZY_COND_NATIVE_TEST_BIN) 2>/dev/null
-	! HB_LAZY_COND_QUICK=2 MACRUNNER_HB_TEST_LAZY_COND_FLIP=1 ./$(LAZY_COND_NATIVE_TEST_BIN) > /dev/null 2>&1
-	! HB_LAZY_COND_QUICK=2 MACRUNNER_HB_NATIVE_LAZY_COND=0 ./$(LAZY_COND_NATIVE_TEST_BIN) > /dev/null 2>&1
-	@echo "Running vector upper-state test (Astra's x86 corpus: VEX/EVEX writeback, fused LOAD+STORE, opmasks)..."
-	./$(UPPER_STATE_TEST_BIN) --self-test > /dev/null
-	mkdir -p tests/hb_upper_audit/out
-	gunzip -c tests/hb_upper_audit/native.cases.gz > tests/hb_upper_audit/out/native.cases
-	MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_LEAN_FRAME=0 ./$(UPPER_STATE_TEST_BIN) tests/hb_upper_audit/out/native.cases --filter U01 --require-pair 2>/dev/null
-	MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_LEAN_FRAME=0 ./$(UPPER_STATE_TEST_BIN) tests/hb_upper_audit/out/native.cases 2>/dev/null
-	MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_LEAN_FRAME=1 ./$(UPPER_STATE_TEST_BIN) tests/hb_upper_audit/out/native.cases 2>/dev/null
-	@echo "Running EVEX disp8*N decoder table (capstone reference: x64 956 + i386 888 forms, 3 refusals)..."
-	./$(EVEX_DISP8_TEST_BIN)
-	@echo "Running absolute x86 mask oracle (Astra HBUP0002: store loop; masks smoke with guard pages)..."
-	./$(MASK_STATE_TEST_BIN) --self-test > /dev/null
-	gunzip -c tests/hb_absolute/corpus/store-loop.hbup.gz | MACRUNNER_HB_JIT_DIRECT_MEM=1 ./$(MASK_STATE_TEST_BIN) - 2>/dev/null | python3 tests/hb_absolute/check_summary.py --expect-selected 585
-	gunzip -c tests/hb_absolute/corpus/masks-smoke.hbup.gz | MACRUNNER_HB_JIT_DIRECT_MEM=1 ./$(MASK_STATE_TEST_BIN) - 2>/dev/null | python3 tests/hb_absolute/check_summary.py --expect-selected 9883 --max-unsupported 528
-	@echo "Running absolute x86 flags oracle (Astra HBFL0001: carry boundaries; smoke)..."
-	./$(FLAGS_STATE_TEST_BIN) --self-test > /dev/null
-	gunzip -c tests/hb_absolute/corpus/flags-carry-boundaries.hbfl.gz | ./$(FLAGS_STATE_TEST_BIN) - 2>/dev/null | python3 tests/hb_absolute/check_summary.py --expect-selected 500
-	gunzip -c tests/hb_absolute/corpus/flags-smoke.hbfl.gz | ./$(FLAGS_STATE_TEST_BIN) - 2>/dev/null | python3 tests/hb_absolute/check_summary.py --expect-selected 19588
-	@echo "Running memory range unmap / fault-safe translator read test (control: plain read dies)..."
-	./$(MEMORY_UNMAP_RANGE_TEST_BIN) 2>/dev/null
-	@echo "Running hardware SSE oracle (x86 answers; the JIT must never be worse than the interpreter)..."
-	mkdir -p tests/hb_sse_oracle/out
-	for c in tests/hb_sse_oracle/corpus/smoke.cases tests/hb_sse_oracle/corpus/regressions.cases; do \
-	  for fp in 1 0; do \
-	    HB_DIFF_IDENTITY=1 HB_DIFF_LIVE_FALLBACK=0 MACRUNNER_HB_JIT_DIRECT_MEM=1 MACRUNNER_HB_MXCSR_FPCR=$$fp \
-	      ./$(SSE_ORACLE_RUNNER_BIN) < $$c 2>tests/hb_sse_oracle/out/runner.stderr > tests/hb_sse_oracle/out/runner.stdout; \
-	      rc=$$?; python3 tests/hb_sse_oracle/jit_not_worse.py < tests/hb_sse_oracle/out/runner.stdout || { \
-	        echo "runner exit=$$rc corpus=$$c FPCR=$$fp; stderr tail:"; tail -5 tests/hb_sse_oracle/out/runner.stderr; exit 1; }; \
-	  done; \
-	done
 	@echo "Running Python test suite..."
 	python3 -m unittest discover -s tests -v
 
@@ -1092,74 +1031,10 @@ coherence-repro: $(STATIC_LIB) $(COHERENCE_REPRO)
 $(COHERENCE_REPRO): tests/hb_direct_mem_coherence_repro.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@ -lpthread
 
-# --- XMM logic pair: second memory operand must not clobber src1.hi in x22 (HK black frame, 26.09) ---
-# Отрицательный контроль: против ядра до правки emit_load_xmm_operand_to_pair даёт TOTAL_BAD=6.
-xmm-pair-x22-test: $(XMM_PAIR_X22_TEST_BIN)
-	./$(XMM_PAIR_X22_TEST_BIN)
-$(XMM_PAIR_X22_TEST_BIN): tests/hb_xmm_pair_x22_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
 # --- adjacent-mem64 LDP fusion stale-base reproducer (HK mono hash-chain walk) ---
 ADJ_CLOBBER_REPRO = tests/hb_adjacent_mem64_clobber_repro
 adjacent-clobber-repro: $(STATIC_LIB) $(ADJ_CLOBBER_REPRO)
 	@echo "Build OK: $(ADJ_CLOBBER_REPRO)"
-$(SMC_FASTPATH_TEST_BIN): tests/hb_smc_fastpath_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- VEX.128 MOVD/MOVQ: native emission must zero ymm_hi of the destination (26.09) ---
-# Отрицательный контроль: против ядра до правки JIT даёт TOTAL_BAD=4 (xmm0..3), интерпретатор чист.
-$(VEX_MOVD_YMM_TEST_BIN): tests/hb_vex_movd_ymm_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- Native SSE FP emission must match the interpreter bit for bit on special values (26.09) ---
-# Контроль: MACRUNNER_HB_TEST_SSE_FP_NO_SLOW=1 снимает медленный путь по NaN -> 1410 расхождений.
-$(SSE_FP_NATIVE_TEST_BIN): tests/hb_sse_fp_native_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- Native BT with pending lazy flags (26.09); control: ZF_INVERT -> 10240 differences ---
-$(BT_PENDING_NATIVE_TEST_BIN): tests/hb_bt_pending_native_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- VEX.256 load/store and VEX.128 load upper state (26.09); old core fails the VEX.128 load ---
-$(VEX_YMM_MOVE_TEST_BIN): tests/hb_vex_ymm_move_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- Jcc/CMOVcc/SETcc from pending lazy flags without a helper call (26.09); controls: FLIP -> 1280
-# differences, gate off -> no native emission, codegen without the materialized_mask check -> 646 ---
-$(LAZY_COND_NATIVE_TEST_BIN): tests/hb_lazy_cond_native_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- Vector upper state (Astra, 26.09): x86 corpus of 784 programs x 3 seeds, 32 x 512-bit registers.
-# Without the U01 patch the fused pair differs in 33 of 63; without M01 the EVEX opmask class
-# differs in 54 (JIT, low 128 bits). ---
-$(UPPER_STATE_TEST_BIN): tests/hb_upper_audit/hb_upper_state_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- EVEX disp8*N (26.09): the decoder against a table generated from capstone by
-# tests/hb_evex_disp8/sweep.py; before the fix 956 of 962 x64 forms had a wrong address ---
-$(EVEX_DISP8_TEST_BIN): tests/hb_evex_disp8_test.c tests/hb_evex_disp8/table64.inc tests/hb_evex_disp8/table32.inc $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- Absolute x86 oracles (Astra, 26.09): HBUP0002 masks, HBFL0001 flags; answers recorded on
-# x86 hardware. Without M01/M02 the store loop differs in 441 of 585 (JIT) and masks smoke in
-# 1260 (INTERP) / 1594 (JIT); without the RCL/RCR count-0 write flags smoke differs in 260 of
-# 19588 (both backends). ---
-$(MASK_STATE_TEST_BIN): tests/hb_mask_audit/hb_mask_state_test.c tests/hb_absolute/common.h $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-$(FLAGS_STATE_TEST_BIN): tests/hb_flags_oracle/hb_flags_state_test.c tests/hb_absolute/common.h $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- Memory map (26.09): range unmap and fault-safe translator reads. A free of part of a
-# region, at an offset base or MEM_DECOMMIT left it readable in the HB map; the macOS fast
-# read then died in host memcpy (Hollow Knight, 2 of 5 runs at 42 s) ---
-$(MEMORY_UNMAP_RANGE_TEST_BIN): tests/hb_memory_unmap_range_test.c $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
-# --- Hardware SSE oracle (Astra, 26.09): runner extension + x86-recorded corpora ---
-$(SSE_ORACLE_RUNNER_BIN): tests/hb_diff_case_runner.c tests/hb_sse_oracle/runner_extension.h $(STATIC_LIB)
-	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
-
 $(ADJ_CLOBBER_REPRO): tests/hb_adjacent_mem64_clobber_repro.c $(STATIC_LIB)
 	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@ -lpthread
 

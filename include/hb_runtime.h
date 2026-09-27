@@ -68,10 +68,12 @@ typedef struct {
     uint64_t smc_span_start;
     uint64_t smc_hash;
     uint32_t smc_span_len;
+    struct hb_smc_snapshot* smc_snapshot; /* private immutable byte owner */
     /* Итерация 979: отпечаток ПОКОЛЕНИЯ страницы (приказ 123). Сравнение одного числа
      * заменяет хеш по всем байтам блока, когда защита страниц включена. */
     uint32_t smc_gen;
     uint8_t  smc_gen_valid;
+    uint8_t  smc_exact_hits; /* lazy admission; 255 = attempted */
     /* Claude 26.09.2026: хозяйский адрес начала отпечатка — быстрый путь сверки без поиска
      * области (hot_cache_lookup был в профиле HK рядом со сверкой). Действителен при smc_gen_valid. */
     uint64_t smc_host;
@@ -261,6 +263,11 @@ typedef struct {
     uintptr_t run_frame[16];
     int run_frames;
     int run_frames_lost;
+    /* Claude 27.09.2026 — таблица переходов потока (MACRUNNER_HB_L1_TABLE), см. hb_context_t.l1_table.
+     * Дописано В КОНЕЦ. */
+    uint64_t* l1_table;
+    uint64_t* callret_stack;     /* Claude 27.09.2026 — кольцо теневого стека вызовов (MACRUNNER_HB_CALLRET) */
+    uint64_t callret_sp_saved;   /* вершина кольца между прогонами этой среды */
 }hb_jit_runtime_t;
 
 hb_jit_runtime_t* hb_jit_runtime_create(hb_context_t* ctx);

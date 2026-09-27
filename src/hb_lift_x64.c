@@ -5,6 +5,7 @@
 #include "hb_ir.h"
 #include <string.h>
 #include "hb_alloc_count.h"
+#include "hb_lift_source.h"
 
 /* Регистрация кеша гейта в общем сбросе — см. hb_codegen.h. */
 
@@ -2145,10 +2146,12 @@ hb_result_t hb_lift_func_x64(hb_decoder_t* dec, hb_ir_func_t** out) {
     size_t count = 0;
     const size_t instr_limit = 10000;
     size_t merged = 0;   /* сколько условных переходов уже поглощено этой единицей */
+    const uint8_t* source_original = hb_lift_source_begin(func, dec);
     while (hb_decode_next(dec, &d) == HB_OK || d.opcode == HB_INS_UNSUPPORTED) {
         size_t pre_instr = block->instr_count;
         hb_result_t r = hb_lift_x64(&d, b);
         if (r != HB_OK && r != HB_ERR_UNSUPPORTED_FEATURE) {
+            hb_lift_source_end(func, dec, source_original);
             hb_ir_builder_destroy(b);
             hb_ir_func_destroy(func);
             return r;
@@ -2214,6 +2217,8 @@ hb_result_t hb_lift_func_x64(hb_decoder_t* dec, hb_ir_func_t** out) {
             break;
         }
     }
+
+    hb_lift_source_end(func, dec, source_original);
 
     /* ★ ПОСТРОЕНИЕ ГРАФА АНАЛИЗА — после окончания разбора и ДО публикации IR.
      * Отказ построения означает «анализ недоступен» (`acfg->complete == 0`), а не

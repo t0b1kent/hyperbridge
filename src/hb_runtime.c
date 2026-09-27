@@ -39,6 +39,7 @@ static inline int runtime_gate_flag(enum hb_gate_id id, int default_value)
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
 #include <sys/ucontext.h>
+#include <sys/mman.h>   /* таблица переходов потока — mmap с ленивыми нулями */
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include "hb_alloc_count.h"
@@ -399,6 +400,7 @@ static uint64_t g_guard_claim_taken;
  * диспетчеризаций, поэтому итог подвешен к ней: есть строка с xb_total=0 —
  * смотрел, событий нет; нет самой строки — движок не исполнялся.
  * Поля дописаны В КОНЕЦ: разборщики читают её как key=value. */
+static inline int hb_xborder_stats_enabled(void);
 static void hb_xborder_totals(uint64_t* all, uint64_t* host, uint64_t* guest);
 /* ★ 07.09.2026, лейн ПОВТОРНЫЙ-ВЫПУСК — по той же причине, что и xborder выше: своя
  * строка вышла бы только на atexit, а прогоны снимаются убийством. Определение — рядом
@@ -427,7 +429,7 @@ static void guard_census_flush(hb_jit_runtime_t* rt, const char* why) {
             "thread_recover_per_1e6=%.3f total_dispatch=%llu total_recover=%llu "
             "total_recover_per_1e6=%.3f claim_calls=%llu claim_taken=%llu "
             "claim_declined_frame=%llu claim_declined_range=%llu "
-            "xb_total=%llu xb_host=%llu xb_guest=%llu xb_other=%llu\n",
+            "xb_total=%llu xb_host=%llu xb_guest=%llu xb_other=%llu%s\n",
             why,
             (unsigned long long)rt->guard_dispatch, (unsigned long long)rt->guard_recover,
             rt->guard_dispatch ? 1000000.0 * (double)rt->guard_recover / (double)rt->guard_dispatch : 0.0,
@@ -438,7 +440,8 @@ static void guard_census_flush(hb_jit_runtime_t* rt, const char* why) {
             (unsigned long long)__atomic_load_n(&g_guard_claim_declined_frame, __ATOMIC_RELAXED),
             (unsigned long long)__atomic_load_n(&g_guard_claim_declined_range, __ATOMIC_RELAXED),
             (unsigned long long)xb_all, (unsigned long long)xb_host,
-            (unsigned long long)xb_guest, (unsigned long long)(xb_all - xb_host - xb_guest));
+            (unsigned long long)xb_guest, (unsigned long long)(xb_all - xb_host - xb_guest),
+            hb_xborder_stats_enabled() ? "" : " xb_enabled=0");
 
     /* ★★★ ПУЛЬС ПЕРЕПИСИ ПРИБОРОВ (лейн ОСНАСТКА, 07.09.2026).
      *
@@ -992,6 +995,24 @@ static uint64_t g_xborder_in_band, g_xborder_out_band;
 #define HB_XBORDER_BAND_LO   0x87e00000000ull
 #define HB_XBORDER_BAND_HI   0x88000000000ull
 
+/* Optional telemetry, not an execution decision. Cache the immutable environment
+ * snapshot setting per process; the hot path is one relaxed load and a branch.
+ * Atomic publication also makes simultaneous first entries from guest threads
+ * safe. A new process is required to change this diagnostic setting. */
+static inline int hb_xborder_stats_enabled(void)
+{
+    static int cached = -1;
+    int enabled = __atomic_load_n(&cached, __ATOMIC_RELAXED);
+    if (enabled < 0) {
+        int expected = -1;
+        enabled = hb_env_flag("MACRUNNER_HB_XBORDER_STATS", 0);
+        if (!__atomic_compare_exchange_n(&cached, &expected, enabled, false,
+                                        __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+            enabled = expected;
+    }
+    return enabled;
+}
+
 static void hb_xborder_totals(uint64_t* all_out, uint64_t* host_out, uint64_t* guest_out)
 {
     uint64_t host = 0, guest = 0, all = 0;
@@ -1035,8 +1056,9 @@ static void hb_xborder_report(const char* why)
     fflush(stderr);
 }
 
-/* site: 0 = RUNEXIT_NO_BLOCK, 1 = RUNEXIT_EXT_XFER. Зовётся БЕЗУСЛОВНО с обоих
- * мест — «не смотрел» и «не было» обязаны остаться разными ответами. */
+/* site: 0 = RUNEXIT_NO_BLOCK, 1 = RUNEXIT_EXT_XFER. Both sites are guarded by
+ * MACRUNNER_HB_XBORDER_STATS. Disabled census output explicitly says xb_enabled=0
+ * so an unobserved boundary count cannot be mistaken for a measured zero. */
 static void hb_xborder_note(hb_jit_runtime_t* rt, uint64_t pc, int site)
 {
     int cls;
@@ -1712,10 +1734,13 @@ static hb_ir_block_t* block_clone_for_cache(const hb_ir_block_t* block) {
 /* Освобождение карты «хозяйский pc -> гостевая команда». Определение ниже по файлу, рядом с
  * ripmap_attach; объявление здесь, потому что снимать карту обязаны ВСЕ пути, где запись кеша
  * перестаёт описывать свой код, а три из них лежат выше. */
+#include "hb_smc_exact_owner.inc"
+
 static void ripmap_release(hb_block_cache_entry_t* entry);
 
 static void block_cache_release_owned_block(hb_block_cache_entry_t* entry,
                                             const hb_ir_block_t* replacement) {
+    smc_snapshot_release(entry);
     if (!entry || !entry->owns_block || !entry->block || entry->block == replacement)
         return;
     hb_ir_block_destroy((hb_ir_block_t*)entry->block);
@@ -1984,11 +2009,25 @@ static void unchain_stats_report(void) {
 static uint64_t* chain_trampoline_slot(uint8_t* tramp);
 static uint8_t* chain_trampoline_bailout(uint8_t* tramp);
 
+/* Claude 27.09.2026 — стереть из таблицы переходов потока запись этого гостевого адреса (если она его).
+ * Зовётся на ЛЮБОЙ замене записи кеша (выселение SMC/диапазона, повторный перевод): родной вход старого
+ * тела после этого недействителен. Таблица среды потоковая — гонки с читателем нет. */
+_Static_assert(offsetof(hb_context_t, l1_table) % 8 == 0 && offsetof(hb_context_t, l1_table) < 32760,
+               "l1_table must be reachable by LDR X, [X19, #imm12*8]");
+static inline void l1_forget(hb_jit_runtime_t* rt, uint64_t guest) {
+    uint64_t* s;
+    if (!rt || !rt->l1_table) return;
+    if (hb_gate_on( HB_GATE_HB_TEST_L1_NO_FORGET )) return;   /* отрицательный контроль стенда, в игре не ставить */
+    s = rt->l1_table + 2u * hb_l1_index(guest);
+    if (s[0] == guest) { s[1] = 0; s[0] = 0; }
+}
+
 static void block_cache_prepare_replace_entry(hb_jit_runtime_t* rt, hb_block_cache_t* cache,
                                               hb_block_cache_entry_t* entry) {
     int made_writable = 0;
 
     if (!entry || !entry->valid) return;
+    l1_forget(rt, entry->guest_addr);
     /* MacRunner 2026-07-30 — the eviction literal store USED TO HAPPEN OUTSIDE THE WRITABLE BRACKET, and
      * that is the same defect class already fixed in chain_trampoline_for: a plain store into the JIT arena
      * while it is mapped read+execute.
@@ -3967,6 +4006,51 @@ static int runtime_indirect_ic_ret_enabled(void) {
     return runtime_gate_flag( HB_GATE_HB_INDIRECT_IC_RET, 0);
 }
 
+static int runtime_l1_table_enabled(void) {
+    return runtime_gate_flag( HB_GATE_HB_L1_TABLE, 0);
+}
+
+uint32_t hb_l1_bits_v = 12u, hb_l1_shift_v = 13u;
+
+/* Claude 27.09.2026 — ЦЕЛЬ ТАБЛИЦЫ И СЛОТА МЕСТА С ЛЮБЫМ ЗАВЕРШИТЕЛЕМ (гейт MACRUNNER_HB_L1_ANY_TERM,
+ * умолчание 0). Прежде цель обязана была кончаться сшиваемым переходом (JMP/Jcc/CALL) и нести щель —
+ * условия, списанные с правил СШИВКИ. Для входа на +16 важно другое: стандартный кадр 48 (проверяется
+ * первым словом) и точный pc на выходе, а его пишет каждая единица сама
+ * (codegen_emit_tail_pc_if_needed, «единственная точка, где единица объявляет свой выход»).
+ * Перепись меню HK при 2^20 записей: 42 % входов в диспетчер — цель в кеше, запись таблицы ПУСТА. */
+static int runtime_l1_any_term(void) {
+    return runtime_gate_flag( HB_GATE_HB_L1_ANY_TERM, 0);
+}
+
+static int runtime_callret_enabled(void) {
+    return runtime_gate_flag( HB_GATE_HB_CALLRET, 0);
+}
+
+void hb_l1_table_config(void) {
+    static int done;
+    if (__atomic_load_n(&done, __ATOMIC_ACQUIRE)) return;
+    {
+        const char* v = hb_gate( HB_GATE_HB_L1_TABLE_BITS );
+        long b = (v && *v) ? strtol(v, NULL, 0) : 12;
+        if (b < 10) b = 10;
+        if (b > 20) b = 20;
+        hb_l1_bits_v = (uint32_t)b;
+        hb_l1_shift_v = (b == 12) ? 13u : (uint32_t)b;
+        if (b != 12) {
+            fprintf(stderr, "macrunner-hb-l1-table: бит=%ld записей=%llu сдвиг=%u байт_на_поток=%llu\n",
+                    b, (unsigned long long)(1ull << b), hb_l1_shift_v,
+                    (unsigned long long)((1ull << b) * 16u));
+            fflush(stderr);
+        }
+    }
+    __atomic_store_n(&done, 1, __ATOMIC_RELEASE);
+}
+
+static size_t l1_table_bytes(void) {
+    hb_l1_table_config();
+    return (size_t)hb_l1_entries() * 2u * sizeof(uint64_t);
+}
+
 static int runtime_indirect_ic_enabled(void) {
     return runtime_gate_flag( HB_GATE_HB_INDIRECT_IC, 0);
 }
@@ -5279,7 +5363,7 @@ void hb_jit_smc_reverify_stats(uint64_t* tracked, uint64_t* reverified,
 
 /* Hash the CURRENT guest bytes of [start, start+len).  Returns 0 when the
  * span is unreadable — treated as unverifiable, never evicts blind. */
-static uint64_t smc_hash_current(hb_jit_runtime_t* rt, uint64_t start, size_t len) {
+static const uint8_t* smc_bytes_current(hb_jit_runtime_t* rt, uint64_t start, size_t len) {
     /* MacRunner 19.08, лейн ЛЕСТНИЦА итерация 2547 — БУФЕР СО СТЕКА В ОБЛАСТЬ ПОТОКА.
      * Перебор всех проб стека в ntdll.so (23 функции) показал: этот буфер ровно 4096 байт,
      * то есть САМ порог, за которым компилятор ставит ___chkstk_darwin — любые прочие
@@ -5306,11 +5390,19 @@ static uint64_t smc_hash_current(hb_jit_runtime_t* rt, uint64_t start, size_t le
      * Через границу областей — прежний путь. */
     if (runtime_gate_flag( HB_GATE_HB_SMC_DIRECT_HASH, 0)) {
         const uint8_t* hp = (const uint8_t*)hb_memory_host_ptr(rt->ctx->memory, start, len, HB_PERM_READ);
-        if (hp) return smc_fnv1a(hp, len);
+        if (hp) return hp;
     }
     if (hb_memory_read_nofault(rt->ctx->memory, start, bytes, len) != HB_OK) return 0;
-    return smc_fnv1a(bytes, len);
+    return bytes;
 }
+
+static uint64_t smc_hash_current(hb_jit_runtime_t* rt, uint64_t start, size_t len) {
+    const uint8_t* bytes = smc_bytes_current(rt, start, len);
+    return bytes ? smc_fnv1a(bytes, len) : 0;
+}
+
+#include "hb_smc_exact_compare.inc"
+#include "hb_smc_exact_lazy.inc"
 
 /* ★ 2026-09-03: гейт отпечатка по всей функции (см. комментарий в smc_track_entry). Значение, не наличие. */
 static int hb_smc_func_span_enabled(void) {
@@ -5333,6 +5425,8 @@ static void smc_track_entry(hb_jit_runtime_t* rt, hb_block_cache_entry_t* entry,
     hb_region_t* region;
     uint64_t h;
     if (!entry) return;
+    smc_snapshot_release(entry);
+    entry->smc_exact_hits = 0;
     entry->smc_hash = 0;
     entry->smc_span_start = 0;
     entry->smc_span_len = 0;
@@ -5418,7 +5512,7 @@ static void smc_track_entry(hb_jit_runtime_t* rt, hb_block_cache_entry_t* entry,
             hb_smc_page_state((uint64_t)(uintptr_t)hp_first, &gen_now))
             gen_ok = 1;
     }
-    h = smc_hash_current(rt, start, len);
+    h = smc_snapshot_capture(rt, entry, start, len);
     if (!h) { g_smc_unreadable++; return; }
     smc_len_note(len);
     entry->smc_span_start = start;
@@ -6502,6 +6596,9 @@ static hb_block_cache_entry_t* smc_reverify_entry(hb_jit_runtime_t* rt,
     if (smc_time_gate) smc_t0 = mach_absolute_time();
     if (evicted) *evicted = false;
     if (!entry || !entry->smc_hash) return entry;
+    /* Отрицательный контроль стенда HB_CTRL (Claude 27.09.2026): без сверки записи самоправки обязаны
+     * провалиться — иначе стенд устаревших переводов не видит. В прогонах игры НЕ ставить. */
+    if (hb_gate_on( HB_GATE_HB_TEST_NO_SMC_REVERIFY )) return entry;
     g_smc_reverified++;
     /* Positive-liveness aggregate: proves the instrument is executing even when
      * nothing is ever evicted ("not logged" != "did not happen").  Bounded:
@@ -6522,6 +6619,13 @@ static hb_block_cache_entry_t* smc_reverify_entry(hb_jit_runtime_t* rt,
      * Итерации 979/984 (взведение на каждом входе, быстрый путь отключён) — заменены этим. */
     uint32_t gen_now = 0;
     int rearmed = 0;
+    if (entry->smc_snapshot) {
+        int comparison = smc_snapshot_compare(rt, entry, &now);
+        if (comparison < 0) { g_smc_unreadable++; return entry; }
+        if (comparison > 0) return entry;
+        /* Exact inequality is authoritative even if the diagnostic digest collides. */
+        goto smc_exact_changed;
+    }
     if (entry->smc_gen_valid && entry->smc_host && hb_smc_protect_enabled()) {
         if (hb_smc_page_state(entry->smc_host, &gen_now) && gen_now == entry->smc_gen) {
             g_smc_fast_accept++;
@@ -6531,12 +6635,13 @@ static hb_block_cache_entry_t* smc_reverify_entry(hb_jit_runtime_t* rt,
             hb_smc_page_state(entry->smc_host, &gen_now))
             rearmed = 1;
     }
-    now = smc_hash_current(rt, entry->smc_span_start, entry->smc_span_len);
+    now = smc_snapshot_reverify_hash(rt, entry);
     if (!now) { g_smc_unreadable++; return entry; }
     if (now == entry->smc_hash) {
         if (rearmed) { entry->smc_gen = gen_now; g_smc_rearmed++; }
         return entry;
     }
+smc_exact_changed:
     /* Итерация 984: хеш РАЗОШЁЛСЯ — гость точно записал. Спрашиваем права страницы ИМЕННО
      * СЕЙЧАС: если 5 (READ|EXECUTE), защита стояла и запись должна была дать отказ, которого
      * не было; если 7 — право записи кто-то вернул до записи гостя. */
@@ -8284,6 +8389,27 @@ hb_jit_runtime_t* hb_jit_runtime_create(hb_context_t* ctx) {
     }
     /* Кеш пуст — прошлые объявления инвалидации к нему не относятся. */
     rt->inval_seen = __atomic_load_n(&g_inval_seq, __ATOMIC_ACQUIRE);
+    /* Claude 27.09.2026 — таблица переходов потока (MACRUNNER_HB_L1_TABLE). Контексту её показывает
+     * hb_jit_runtime_run на время прогона ЭТОЙ среды: hb_runtime_run заводит временные среды на тот же
+     * контекст, и постоянный указатель в контексте пережил бы их таблицу. */
+    if (runtime_l1_table_enabled()) {
+        /* mmap, а не posix_memalign+memset: нули ленивые, поток платит только за тронутые страницы
+         * (при 20 битах таблица 16 МБ на поток). */
+        size_t bytes = l1_table_bytes();
+        void* t = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if (t != MAP_FAILED) rt->l1_table = (uint64_t*)t;
+    }
+    /* Claude 27.09.2026 — кольцо теневого стека вызовов (MACRUNNER_HB_CALLRET), выровнено по размеру:
+     * выпущенный код шагает по нему BFXIL младших HB_CALLRET_BITS бит. Вершина — с середины. */
+    if (runtime_callret_enabled()) {
+        void* c = NULL;
+        size_t cbytes = (size_t)1u << HB_CALLRET_BITS;
+        if (posix_memalign(&c, cbytes, cbytes) == 0 && c) {
+            memset(c, 0, cbytes);
+            rt->callret_stack = (uint64_t*)c;
+            rt->callret_sp_saved = (uint64_t)(uintptr_t)c + cbytes / 2u;
+        }
+    }
     return rt;
 }
 
@@ -8320,7 +8446,10 @@ void hb_jit_runtime_destroy(hb_jit_runtime_t* rt) {
     hb_cache_close(rt->persistent_cache);
     hb_jit_buffer_destroy(rt->jit_mem);
     block_cache_destroy(rt->block_cache);
+    smc_exact_report_destroy();
     free(rt->jit_signal_quarantine);
+    if (rt->l1_table) munmap(rt->l1_table, l1_table_bytes());
+    free(rt->callret_stack);
     free(rt);
 }
 
@@ -8342,6 +8471,12 @@ void hb_jit_runtime_reset_at(hb_jit_runtime_t* rt, hb_context_t* ctx, int mesto)
     if (!rt) return;
     t_reset_mesto = (mesto >= 0 && mesto < HB_POVTOR_M_N) ? mesto : HB_POVTOR_M_PROCHEE;
     rt->ctx = ctx;
+    if (rt->l1_table) {  /* арена перематывается — все родные входы таблицы недействительны */
+        /* Поверх той же области новое анонимное отображение: страницы отдаются ядру, нули ленивые. */
+        void* t = mmap(rt->l1_table, l1_table_bytes(), PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+        if (t == MAP_FAILED) memset(rt->l1_table, 0, l1_table_bytes());
+    }
     if (rt->jit_mem) hb_jit_buffer_reset(rt->jit_mem);
     /* Арена перемотана: свободные куски и карантин указывают в место, которое вершина
      * сейчас займёт заново, — забыть их ДО первого занесения. */
@@ -9184,6 +9319,25 @@ static inline bool chain_target_refused_smc(const hb_block_cache_entry_t* entry)
     return entry && entry->smc_hash && __atomic_load_n(&g_chain_skip_smc_tracked, __ATOMIC_ACQUIRE);
 }
 
+/* Only prune work for the current target. Do not cache a refusal across an entry
+ * replacement or a policy change: either can make a later visit eligible. */
+static bool chain_prune_denied_enabled(void) {
+    static int cached = -1;
+    int value = __atomic_load_n(&cached, __ATOMIC_RELAXED);
+    if (value < 0) {
+        int expected = -1;
+        value = hb_env_flag("MACRUNNER_HB_CHAIN_PRUNE_DENIED", 0);
+        if (!__atomic_compare_exchange_n(&cached, &expected, value, false,
+                                         __ATOMIC_RELAXED, __ATOMIC_RELAXED)) value = expected;
+    }
+    return value != 0;
+}
+
+static inline bool chain_patch_work_refused(const hb_block_cache_entry_t* target) {
+    return chain_prune_denied_enabled() && target && target->valid && target->native_code &&
+           chain_target_refused_smc(target);
+}
+
 static uint8_t* chain_trampoline_for(hb_jit_runtime_t* rt, hb_block_cache_entry_t* entry) {
     hb_block_chain_meta_t* meta;
     uint8_t zeros[HB_CHAIN_TRAMPOLINE_BYTES];
@@ -9321,6 +9475,10 @@ static bool patch_block_tail(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
     if (!rt || !rt->jit_mem || !cur || !next ||
         !runtime_block_chain_enabled_for(rt->ctx ? rt->ctx->arch : HB_ARCH_X64)) {
         t_chain_decline[CHAIN_DECL_GATE]++;
+        return false;
+    }
+    if (chain_patch_work_refused(next)) {
+        t_chain_decline[CHAIN_DECL_TRAMP]++;
         return false;
     }
     /* ★ 04.09.2026 — НЕ СШИВАТЬ РЕБРО ИЗ БЛОКА, ОКАНЧИВАЮЩЕГОСЯ ВЫЗОВОМ.
@@ -9777,6 +9935,35 @@ static bool patch_block_tail(hb_jit_runtime_t* rt, hb_block_cache_entry_t* cur,
     return true;
 }
 
+/* Claude 27.09.2026 — заполнение таблицы переходов потока при входе диспетчера в блок. Условия пригодности
+ * цели — те же, что у слота места (update_indirect_ic): вход +16 после стандартного кадра, сшиваемый
+ * завершитель, щель сцепления, не код под отказом SMC. Совпадающую запись не переписываем. */
+static void l1_fill(hb_jit_runtime_t* rt, hb_block_cache_entry_t* e) {
+    uint64_t* s;
+    uint64_t native;
+    uint32_t w0 = 0;
+    if (!rt || !rt->l1_table || !e || !e->valid || !e->native_code || e->native_size <= 16) return;
+    s = rt->l1_table + 2u * hb_l1_index(e->guest_addr);
+    native = (uint64_t)(uintptr_t)(e->native_code + 16);
+    if (s[0] == e->guest_addr && s[1] == native) return;
+    memcpy(&w0, e->native_code, sizeof w0);
+    if (w0 != HB_CHAIN_FRAME48_PUSH) return;
+    if (chain_target_refused_smc(e)) return;
+    if (!runtime_l1_any_term() &&
+        (!block_terminal_is_chainable(e->block) || !entry_has_chain_slot(e, NULL))) return;
+    s[0] = 0;
+    s[1] = native;
+    s[0] = e->guest_addr;
+}
+
+/* Вход +16 допустим только в блок со стандартным кадром 48 (первое слово — STP X19,X20,[SP,#-48]!). */
+static bool ic_target_frame48(const hb_block_cache_entry_t* e) {
+    uint32_t w0 = 0;
+    if (!e || !e->native_code || e->native_size <= 16) return false;
+    memcpy(&w0, e->native_code, sizeof w0);
+    return w0 == HB_CHAIN_FRAME48_PUSH;
+}
+
 static void update_indirect_ic(hb_context_t* ctx, hb_block_cache_entry_t* target,
                                bool enabled) {
     hb_ic_slot_t* slot;
@@ -9819,7 +10006,9 @@ static void update_indirect_ic(hb_context_t* ctx, hb_block_cache_entry_t* target
     }
 
     if (!enabled || !target || !target->valid || !target->native_code || chain_target_refused_smc(target) ||
-        !block_terminal_is_chainable(target->block) || !entry_has_chain_slot(target, NULL)) {
+        target->native_size <= 16 || !ic_target_frame48(target) ||
+        (!runtime_l1_any_term() &&
+         (!block_terminal_is_chainable(target->block) || !entry_has_chain_slot(target, NULL)))) {
         if (slot) {
             /* Порядок гашения тот же, что в hb_ic_slots_clear_all: сперва натив. */
             __atomic_store_n(&slot->native, 0ull, __ATOMIC_RELAXED);
@@ -9841,6 +10030,20 @@ static void update_indirect_ic(hb_context_t* ctx, hb_block_cache_entry_t* target
 
     ctx->indirect_ic_guest_addr = target->guest_addr;
     ctx->indirect_ic_native_code = (uint64_t)(uintptr_t)(target->native_code + 16);
+}
+
+/* Claude 27.09.2026 — ЗАПОЛНЕНИЕ СЛОТА МЕСТА ВОЗВРАТА (MACRUNNER_HB_CALLRET). Возврат, чья пара совпала,
+ * а слот пуст или чужой, оставил слот в ctx->callret_fill; здесь — заход диспетчера в цель этого
+ * возврата. Условия пригодности те же, что у слота места и таблицы. */
+static void callret_fill_slot(hb_context_t* ctx, hb_block_cache_entry_t* e) {
+    hb_ic_slot_t* slot = (hb_ic_slot_t*)(uintptr_t)ctx->callret_fill;
+    ctx->callret_fill = 0;
+    if (!slot || !e || !e->valid || !e->native_code || e->guest_addr != ctx->pc) return;
+    if (!ic_target_frame48(e) || chain_target_refused_smc(e)) return;
+    if (!runtime_l1_any_term() &&
+        (!block_terminal_is_chainable(e->block) || !entry_has_chain_slot(e, NULL))) return;
+    __atomic_store_n(&slot->native, (uint64_t)(uintptr_t)(e->native_code + 16), __ATOMIC_RELAXED);
+    __atomic_store_n(&slot->guest, e->guest_addr, __ATOMIC_RELAXED);
 }
 
 /* ЕДИНИЦА, итерация 47 — ПРЕДПОСЫЛКА БЕЗОПАСНОСТИ для слияния блоков.
@@ -13525,6 +13728,7 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
             const hb_ir_block_t* guard_stable = (cached && cached->block)
                                                 ? cached->block
                                                 : (func && func->cfg ? find_block(func->cfg, ctx->pc) : NULL);
+            if (rt->l1_table) l1_fill(rt, cached);
             hb_result_t run_result = run_jit_block_with_signal_guard(rt, func, cached, guard_stable, out,
                                                                       steps, blocks_executed);
             mr_dc_after(mr_dc_t0);
@@ -13769,6 +13973,7 @@ static hb_result_t hb_jit_runtime_run_legacy(hb_jit_runtime_t* rt, const hb_ir_f
             const hb_ir_block_t* guard_stable = (cached && cached->block)
                                                 ? cached->block
                                                 : (func && func->cfg ? find_block(func->cfg, ctx->pc) : NULL);
+            if (rt->l1_table) l1_fill(rt, cached);
             hb_result_t run_result = run_jit_block_with_signal_guard(rt, func, cached, guard_stable, out,
                                                                       steps, blocks_executed);
             mr_dc_after(mr_dc_t0);
@@ -14078,7 +14283,8 @@ static hb_result_t hb_jit_runtime_run_exec_unit(hb_jit_runtime_t* rt,
     block = func->cfg->entry;
     ctx->last_result = HB_OK;
     rt->cur_func_addr = func->guest_addr;
-    rt->cur_func_len = func->guest_len;
+    rt->cur_func_len = func->decoded_source && func->decoded_source_len
+        ? func->decoded_source_len : func->guest_len;
     runtime_apply_pending_inval(rt);
     cached = block_cache_find(rt->block_cache, ctx->pc);
     if (cached && (!cached->owns_block || cached->fused || !cached->native_code ||
@@ -14132,6 +14338,135 @@ static hb_result_t hb_jit_runtime_run_exec_unit(hb_jit_runtime_t* rt,
     return r;
 }
 
+
+/* Claude 27.09.2026 — ПЕРЕПИСЬ ВХОДОВ В ДИСПЕТЧЕР (гейт MACRUNNER_HB_DISP_CENSUS, умолчание 0).
+ * Главный поток HK в меню входит в диспетчер ~600 тыс. раз в секунду; чтобы убирать входы, а не
+ * удешевлять их, нужно знать, ОТКУДА они. После каждого захода в выпущенный код:
+ *   источник — промах стража трамплина / отказ помощника / несшитая щель (свидетель) / прочее
+ *              (возврат или косвенный переход мимо слота места и таблицы, конец без щели);
+ *   цель     — в кеше нет / есть / есть под отпечатком SMC;
+ *   таблица  — запись по индексу цели: совпадает / чужая / пусто.
+ * Для «прочего» с целью в кеше — почему таблица эту цель не берёт (те же условия, что l1_fill).
+ * Счётчики потоковые, печать раз в 2^21 заходов потока. Стоит лишний поиск в кеше на заход:
+ * только для замера, не для прогонов FPS. */
+enum { DCS_MISPRED, DCS_HELPER, DCS_SLOT, DCS_OTHER, DCS_N };
+enum { DCT_NC, DCT_C, DCT_SMC, DCT_N };
+enum { DCL_NA, DCL_HIT, DCL_CONF, DCL_EMPTY, DCL_N };
+enum { DCF_OK, DCF_SMALL, DCF_NF48, DCF_SMC, DCF_TERM, DCF_NOSLOT, DCF_N };
+static const char* const dcs_s_names[DCS_N] = { "mispred", "helper", "slot", "other" };
+static const char* const dcs_t_names[DCT_N] = { "nc", "c", "smc" };
+static const char* const dcs_l_names[DCL_N] = { "na", "l1hit", "l1conf", "l1empty" };
+static const char* const dcs_f_names[DCF_N] = { "ok", "small", "nf48", "smcref", "term", "noslot" };
+static __thread uint64_t t_dcs[DCS_N][DCT_N][DCL_N];
+static __thread uint64_t t_dcs_slot_term[HB_TERM_N];
+static __thread uint64_t t_dcs_fill[DCF_N];
+static __thread uint64_t t_dcs_fill_term[HB_TERM_N];
+static __thread uint64_t t_dcs_n, t_dcs_runs;
+
+static int disp_census_enabled(void) {
+    return runtime_gate_flag( HB_GATE_HB_DISP_CENSUS, 0);
+}
+
+/* Цели выходов наружу (блока нет): какие адреса зовут чаще всего. Открытая адресация, 1024 слота на
+ * поток; не влезшее считается отдельно, чтобы верх списка не выдавал себя за полный. */
+#define DCX_SLOTS 1024u
+static __thread uint64_t t_dcx_pc[DCX_SLOTS], t_dcx_n[DCX_SLOTS];
+static __thread uint64_t t_dcx_overflow;
+
+static void disp_census_exit_pc(uint64_t pc) {
+    uint32_t h = (uint32_t)((pc * 0x9e3779b97f4a7c15ull) >> 54);
+    uint32_t i;
+    for (i = 0; i < 16u; i++) {
+        uint32_t k = (h + i) & (DCX_SLOTS - 1u);
+        if (t_dcx_pc[k] == pc) { t_dcx_n[k]++; return; }
+        if (!t_dcx_pc[k]) { t_dcx_pc[k] = pc; t_dcx_n[k] = 1; return; }
+    }
+    t_dcx_overflow++;
+}
+
+static void disp_census_exit_top(void) {
+    uint64_t shown[16];
+    unsigned ns = 0, r, k, j;
+    fprintf(stderr, " | exit_top(overflow=%llu):", (unsigned long long)t_dcx_overflow);
+    for (r = 0; r < 16u; r++) {
+        uint64_t best = 0, bpc = 0;
+        for (k = 0; k < DCX_SLOTS; k++) {
+            int seen = 0;
+            if (!t_dcx_pc[k] || t_dcx_n[k] <= best) continue;
+            for (j = 0; j < ns; j++) if (shown[j] == t_dcx_pc[k]) { seen = 1; break; }
+            if (!seen) { best = t_dcx_n[k]; bpc = t_dcx_pc[k]; }
+        }
+        if (!bpc) break;
+        shown[ns++] = bpc;
+        fprintf(stderr, " %#llx=%llu", (unsigned long long)bpc, (unsigned long long)best);
+    }
+}
+
+static void disp_census_print(void) {
+    int s, t, l;
+    fprintf(stderr, "macrunner-hb-disp-census: thr=%p n=%llu runs=%llu", (void*)pthread_self(),
+            (unsigned long long)t_dcs_n, (unsigned long long)t_dcs_runs);
+    for (s = 0; s < DCS_N; s++)
+        for (t = 0; t < DCT_N; t++)
+            for (l = 0; l < DCL_N; l++)
+                if (t_dcs[s][t][l])
+                    fprintf(stderr, " %s.%s.%s=%llu", dcs_s_names[s], dcs_t_names[t], dcs_l_names[l],
+                            (unsigned long long)t_dcs[s][t][l]);
+    fprintf(stderr, " | slot_src:");
+    for (t = 0; t < HB_TERM_N; t++)
+        if (t_dcs_slot_term[t]) fprintf(stderr, " %s=%llu", hb_term_slot_names[t],
+                                        (unsigned long long)t_dcs_slot_term[t]);
+    fprintf(stderr, " | miss_fill:");
+    for (t = 0; t < DCF_N; t++)
+        if (t_dcs_fill[t]) fprintf(stderr, " %s=%llu", dcs_f_names[t], (unsigned long long)t_dcs_fill[t]);
+    fprintf(stderr, " | refused_term:");
+    for (t = 0; t < HB_TERM_N; t++)
+        if (t_dcs_fill_term[t]) fprintf(stderr, " %s=%llu", hb_term_slot_names[t],
+                                        (unsigned long long)t_dcs_fill_term[t]);
+    fprintf(stderr, " | runexit:");
+    for (t = 0; t < RUNEXIT_N; t++)
+        if (t_runexit[t]) fprintf(stderr, " %s=%llu", hb_runexit_names[t], (unsigned long long)t_runexit[t]);
+    disp_census_exit_top();
+    fprintf(stderr, "\n");
+    fflush(stderr);
+}
+
+static void disp_census_note(hb_jit_runtime_t* rt, hb_context_t* ctx) {
+    int s, t, l = DCL_NA;
+    hb_block_cache_entry_t* e;
+    if (ctx->chain_mispredict) s = DCS_MISPRED;
+    else if (ctx->last_result != HB_OK) s = DCS_HELPER;
+    else if (ctx->chain_exit_src) s = DCS_SLOT;
+    else s = DCS_OTHER;
+    e = block_cache_find(rt->block_cache, ctx->pc);
+    if (!e || !e->valid || !e->native_code) t = DCT_NC;
+    else t = e->smc_hash ? DCT_SMC : DCT_C;
+    if (rt->l1_table) {
+        const uint64_t* sl = rt->l1_table + 2u * hb_l1_index(ctx->pc);
+        l = sl[0] == ctx->pc ? DCL_HIT : (sl[0] ? DCL_CONF : DCL_EMPTY);
+    }
+    t_dcs[s][t][l]++;
+    if (s == DCS_SLOT) {
+        hb_block_cache_entry_t* src = block_cache_find_exit_src(rt->block_cache, ctx->chain_exit_src);
+        t_dcs_slot_term[src ? term_slot_of((const hb_ir_block_t*)src->block) : HB_TERM_OTHER]++;
+    }
+    if (t != DCT_NC && l != DCL_HIT) {
+        uint32_t w0 = 0;
+        int f = DCF_OK;
+        if (e->native_size <= 16) f = DCF_SMALL;
+        else {
+            memcpy(&w0, e->native_code, sizeof w0);
+            if (w0 != HB_CHAIN_FRAME48_PUSH) f = DCF_NF48;
+            else if (chain_target_refused_smc(e)) f = DCF_SMC;
+            else if (!runtime_l1_any_term() && !block_terminal_is_chainable(e->block)) f = DCF_TERM;
+            else if (!runtime_l1_any_term() && !entry_has_chain_slot(e, NULL)) f = DCF_NOSLOT;
+        }
+        t_dcs_fill[f]++;
+        if (f == DCF_TERM) t_dcs_fill_term[term_slot_of((const hb_ir_block_t*)e->block)]++;
+    }
+    if ((++t_dcs_n & ((1ull << 21) - 1)) == 0) disp_census_print();
+}
+
 static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_func_t* func,
                                            hb_exec_result_t* out);
 
@@ -14143,14 +14478,36 @@ hb_result_t hb_jit_runtime_run(hb_jit_runtime_t* rt, const hb_ir_func_t* func, h
     hb_result_t r;
     uintptr_t fp;
     int outer;
+    hb_context_t* l1_ctx = rt ? rt->ctx : NULL;
+    uint64_t l1_saved = 0, cr_saved = 0, crf_saved = 0;
     /* Режим FPCR хоста = MXCSR гостя на входе в выпущенный код (см. hb_host_fpcr_apply_mxcsr). */
     if (rt && rt->ctx) hb_host_fpcr_apply_mxcsr(rt->ctx->mxcsr);
-    if (!rt || !arena_reclaim_mode()) return hb_jit_runtime_run_body(rt, func, out);
-    fp = (uintptr_t)__builtin_frame_address(0);
-    outer = run_frames_enter(rt, fp);
-    if (outer) arena_reclaim_safe_point(rt);
-    r = hb_jit_runtime_run_body(rt, func, out);
-    run_frames_leave(rt, fp);
+    /* Claude 27.09.2026: выпущенный код видит таблицу переходов ТОЙ среды, что его исполняет, и только
+     * на время её прогона; вложенный прогон другой среды возвращает прежнее значение. */
+    if (l1_ctx) {
+        l1_saved = l1_ctx->l1_table;
+        l1_ctx->l1_table = (uint64_t)(uintptr_t)rt->l1_table;
+        /* теневой стек вызовов — той же среды и на тот же срок */
+        cr_saved = l1_ctx->callret_sp;
+        crf_saved = l1_ctx->callret_fill;
+        l1_ctx->callret_sp = rt->callret_stack ? rt->callret_sp_saved : 0;
+        l1_ctx->callret_fill = 0;
+    }
+    if (!rt || !arena_reclaim_mode()) {
+        r = hb_jit_runtime_run_body(rt, func, out);
+    } else {
+        fp = (uintptr_t)__builtin_frame_address(0);
+        outer = run_frames_enter(rt, fp);
+        if (outer) arena_reclaim_safe_point(rt);
+        r = hb_jit_runtime_run_body(rt, func, out);
+        run_frames_leave(rt, fp);
+    }
+    if (l1_ctx) {
+        l1_ctx->l1_table = l1_saved;
+        if (rt->callret_stack && l1_ctx->callret_sp) rt->callret_sp_saved = l1_ctx->callret_sp;
+        l1_ctx->callret_sp = cr_saved;
+        l1_ctx->callret_fill = crf_saved;
+    }
     return r;
 }
 
@@ -14178,10 +14535,23 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
      * загрузки статики (hb_record.c). */
     if (rt && rt->ctx) hb_record_enter(rt->ctx, rt->ctx->pc);
     if (rt) hb_sync_guest32_base(rt->ctx);
-    if (rt && func) { rt->cur_func_addr = func->guest_addr; rt->cur_func_len = func->guest_len; }
+    if (rt && func) {
+        rt->cur_func_addr = func->guest_addr;
+        rt->cur_func_len = func->decoded_source && func->decoded_source_len
+            ? func->decoded_source_len : func->guest_len;
+    }
     /* ★ 14.09.2026 — чужие объявления инвалидации применяются ЗДЕСЬ, до ветки на legacy: это
      * общий узел обоих диспетчеров. Одна acquire-загрузка и сравнение на вход. */
     if (rt) runtime_apply_pending_inval(rt);
+    /* Claude 27.09.2026 — вход снаружи ровно в адрес с вершины теневого стека (возврат из родного кода
+     * ARM64EC, куда ушёл CALL гостя): снять пару, иначе она останется лишней (так же делает FEX на входе EC). */
+    if (rt && rt->ctx && rt->ctx->callret_sp) {
+        const uint64_t* top = (const uint64_t*)(uintptr_t)rt->ctx->callret_sp;
+        if (top[0] == rt->ctx->pc) {
+            uint64_t sp = rt->ctx->callret_sp, mask = ((uint64_t)1u << HB_CALLRET_BITS) - 1u;
+            rt->ctx->callret_sp = (sp & ~mask) | ((sp + 16u) & mask);
+        }
+    }
     /* Порог разогрева считается здесь: через эту точку проходит КАЖДЫЙ вход в диспетчер,
      * в отличие от зондов, один из которых лежит на редкой ветви. */
     /* Claude 27.09.2026: счётчик читает ТОЛЬКО разогрев сцепления (chain_warmup_passed), а при
@@ -14194,6 +14564,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                                                                   : HB_ARCH_X64);
     int single_lookup_gate = runtime_single_lookup_enabled();
     int indirect_ic_gate = runtime_indirect_ic_enabled();
+    const int disp_census_on = disp_census_enabled();
+    if (disp_census_on) t_dcs_runs++;
     int dispatch_stats_gate = trace_dispatch_stats_enabled();
     static int dispatch_gate_trace_count;
     if (dispatch_gate_trace_count < 16 && trace_dispatch_gate_enabled()) {
@@ -14364,7 +14736,9 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             out->steps_executed = steps;
             out->blocks_executed = blocks_executed;
             tls_runexit[RUNEXIT_NO_BLOCK]++;
-            hb_xborder_note(rt, ctx->pc, 0);   /* к ХОСТУ или в гостевой код — см. hb_xborder_note */
+            if (disp_census_on) disp_census_exit_pc(ctx->pc);
+            if (hb_xborder_stats_enabled())
+                hb_xborder_note(rt, ctx->pc, 0);   /* optional boundary telemetry */
             hb_record_exit(ctx, ctx->pc, 0);   /* ★ ПОВТОР-3 — запись выхода наружу */
             /* ★ 04.09.2026 — ВЫХОД НА ПЕРЕХОДНИК ИМПОРТА: по цепочке или нет.
              * Это ровно тот выход, через который прогон со сцеплением x64 уходит
@@ -14499,11 +14873,14 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             const hb_ir_block_t* guard_stable = (cached && cached->block)
                                                 ? cached->block
                                                 : (func && func->cfg ? find_block(func->cfg, ctx->pc) : NULL);
+            if (ctx->callret_fill) callret_fill_slot(ctx, cached);
+            if (rt->l1_table) l1_fill(rt, cached);
             hb_result_t run_result = run_jit_block_with_signal_guard(rt, func, cached, guard_stable, out,
                                                                       steps, blocks_executed);
             mr_dc_after(mr_dc_t0);
             if (run_result != HB_OK || out->faulted) return run_result;
             trace_jit_hot_block_tick(rt, cached);
+            if (disp_census_on) disp_census_note(rt, ctx);
             if (native_accounting) {
                 uint64_t block_delta = ctx->block_count - before_blocks;
                 uint64_t step_delta = ctx->step_count - before_steps;
@@ -14854,11 +15231,14 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
             const hb_ir_block_t* guard_stable = (cached && cached->block)
                                                 ? cached->block
                                                 : (func && func->cfg ? find_block(func->cfg, ctx->pc) : NULL);
+            if (ctx->callret_fill) callret_fill_slot(ctx, cached);
+            if (rt->l1_table) l1_fill(rt, cached);
             hb_result_t run_result = run_jit_block_with_signal_guard(rt, func, cached, guard_stable, out,
                                                                       steps, blocks_executed);
             mr_dc_after(mr_dc_t0);
             if (run_result != HB_OK || out->faulted) return run_result;
             trace_jit_hot_block_tick(rt, cached);
+            if (disp_census_on) disp_census_note(rt, ctx);
             if (native_accounting) {
                 uint64_t block_delta = ctx->block_count - before_blocks;
                 uint64_t step_delta = ctx->step_count - before_steps;
@@ -14983,18 +15363,23 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
              * отбрасывает несшиваемое (RET, косвенные, чужой кадр). */
             if (runtime_chain_after_run_enabled() && chain_patch_enabled && ctx->chain_exit_src &&
                 chain_src_link_enabled()) {
-                hb_block_cache_entry_t* src_e = block_cache_find_exit_src(rt->block_cache,
-                                                                          ctx->chain_exit_src);
-                /* Claude 27.09.2026: источник на RET и прочих несшиваемых завершителях — отказ заведомый
-                 * (terminal=65,9 млн у главного потока HK на экране языка); второй поиск и вызов не делаем. */
-                if (src_e && !block_terminal_is_chainable(src_e->block)) {
-                    tls_chain_decline[CHAIN_DECL_TERMINAL]++;
-                    src_e = NULL;
-                }
-                hb_block_cache_entry_t* nx_e = src_e ? block_cache_find(rt->block_cache, ctx->pc) : NULL;
-                if (src_e && nx_e && nx_e->valid && nx_e->native_code) {
-                    if (chain_accounting) tls_chain_decline[CHAIN_SITE_AFTER_RUN]++;
-                    (void)patch_block_tail(rt, src_e, nx_e, func);
+                bool target_first = chain_prune_denied_enabled();
+                hb_block_cache_entry_t* nx_e = target_first ?
+                    block_cache_find(rt->block_cache, ctx->pc) : NULL;
+                if (!target_first || !chain_patch_work_refused(nx_e)) {
+                    hb_block_cache_entry_t* src_e = block_cache_find_exit_src(rt->block_cache,
+                                                                              ctx->chain_exit_src);
+                    /* Preserve the source-first path when pruning is disabled. */
+                    if (src_e && !block_terminal_is_chainable(src_e->block)) {
+                        tls_chain_decline[CHAIN_DECL_TERMINAL]++;
+                        src_e = NULL;
+                    }
+                    if (!target_first)
+                        nx_e = src_e ? block_cache_find(rt->block_cache, ctx->pc) : NULL;
+                    if (src_e && nx_e && nx_e->valid && nx_e->native_code) {
+                        if (chain_accounting) tls_chain_decline[CHAIN_SITE_AFTER_RUN]++;
+                        (void)patch_block_tail(rt, src_e, nx_e, func);
+                    }
                 }
             }
             ctx->chain_exit_src = 0;
@@ -15083,7 +15468,8 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                 out->steps_executed = steps;
                 out->blocks_executed = blocks_executed;
                 tls_runexit[RUNEXIT_EXT_XFER]++;
-                hb_xborder_note(rt, ctx->pc, 1);   /* к ХОСТУ или в гостевой код */
+                if (hb_xborder_stats_enabled())
+                    hb_xborder_note(rt, ctx->pc, 1);   /* optional boundary telemetry */
                 hb_record_exit(ctx, ctx->pc, 1);   /* ★ ПОВТОР-3 — запись выхода наружу */
                 return HB_OK; /* External branch/call/return boundary */
             }
@@ -15119,13 +15505,14 @@ static hb_result_t hb_jit_runtime_run_body(hb_jit_runtime_t* rt, const hb_ir_fun
                  * (несшитая щель — ADR+STR, промах стража — X30 после BL). Прежде сшивка шла к `cached`:
                  * перепись HK — 352 млн «already» из 352 млн попыток, столько же промахов стража. */
                 hb_block_cache_entry_t* chain_src = cached;
-                if (ctx->chain_exit_src && chain_src_link_enabled()) {
+                bool target_refused = chain_patch_work_refused(next_cached);
+                if (!target_refused && ctx->chain_exit_src && chain_src_link_enabled()) {
                     hb_block_cache_entry_t* s_ = block_cache_find_exit_src(rt->block_cache,
                                                                            ctx->chain_exit_src);
                     if (s_) chain_src = s_;
                 }
                 ctx->chain_exit_src = 0;
-                if (chain_patch_enabled && chain_src && next_cached)
+                if (!target_refused && chain_patch_enabled && chain_src && next_cached)
                     (void)patch_block_tail(rt, chain_src, next_cached, func);
             }
             if (indirect_ic_enabled &&

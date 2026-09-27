@@ -922,6 +922,10 @@ typedef struct {
     const char* truncation_reason;
     /* ★ Граф анализа. NULL, пока гейт MACRUNNER_HB_ANALYSIS_CFG не открыт. */
     hb_cfg_analysis_t* acfg;
+    /* Owned immutable decoder input prefix, rooted at guest_addr. NULL means
+     * no source witness. guest_len retains its decoder-window semantics. */
+    uint8_t* decoded_source;
+    size_t decoded_source_len;
 } hb_ir_func_t;
 
 /* IR builder */

@@ -28,6 +28,7 @@ void hb_ir_func_destroy(hb_ir_func_t* func) {
         free(func->flat_instrs);
     }
     free((void*)func->unsupported_reason);
+    free(func->decoded_source);
     free(func);
 }
 

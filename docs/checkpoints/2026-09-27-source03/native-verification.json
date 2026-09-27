@@ -1,0 +1,38 @@
+[
+  {
+    "label": "build",
+    "rc": 0
+  },
+  {
+    "label": "compile-native_regressions",
+    "rc": 0
+  },
+  {
+    "label": "compile-source_provenance",
+    "rc": 0
+  },
+  {
+    "label": "native-source0",
+    "rc": 0
+  },
+  {
+    "label": "provenance-source0-merge0",
+    "rc": 0
+  },
+  {
+    "label": "provenance-source0-merge1",
+    "rc": 0
+  },
+  {
+    "label": "native-source1",
+    "rc": 0
+  },
+  {
+    "label": "provenance-source1-merge0",
+    "rc": 0
+  },
+  {
+    "label": "provenance-source1-merge1",
+    "rc": 0
+  }
+]
