@@ -4350,7 +4350,8 @@ static void emit_epilogue_ex(hb_codegen_buffer_t* buf, bool with_chain_slot) {
     emit_ret(buf);
 }
 
-static void emit_return_if_helper_failed(hb_codegen_buffer_t* buf) {
+static void emit_return_if_helper_failed_at_pc(hb_codegen_buffer_t* buf,
+                                              bool precise_pc, uint64_t guest_pc) {
     size_t ok_branch;
     int ok_is_cbz = cbz_fold_enabled() ? 1 : 0;
     emit_ldr_w(buf, HB_HOST_CALL_RESULT, 19,
@@ -4361,6 +4362,17 @@ static void emit_return_if_helper_failed(hb_codegen_buffer_t* buf) {
         emit_cmp_imm(buf, HB_HOST_CALL_RESULT, 0);
         ok_branch = emit_bcond_deferred(buf, 0);    /* EQ -> skip inline epilogue */
     }
+    /* A checked store helper can return an error without a native signal.
+     * Materialize its exact instruction only on that failure edge; successful
+     * helper calls and the aligned store path retain their previous behavior. */
+    if (precise_pc) {
+        emit_mov_imm64(buf, 16, buf->arch == HB_ARCH_X86 ? (uint32_t)guest_pc : guest_pc);
+        emit_str_x(buf, 16, 19, (uint32_t)offsetof(hb_context_t, pc));
+        if (buf->arch == HB_ARCH_X86)
+            emit_str_w(buf, 16, 19, (uint32_t)offsetof(hb_context_t, regs.x86.eip));
+        else
+            emit_str_x(buf, 16, 19, (uint32_t)offsetof(hb_context_t, regs.x64.rip));
+    }
     /* ★ ОБЩИЙ ЭПИЛОГ — ПО НАБОРУ ВЫГРУЗОК. Обоснование в hb_codegen.h: один эпилог на блок
      * либо затирал свежий `ctx` (полная выгрузка), либо недовыгружал (набор первого места).
      * Здесь место с набором M переходит на эпилог, выпущенный для M, а новый набор получает
@@ -4369,6 +4381,10 @@ static void emit_return_if_helper_failed(hb_codegen_buffer_t* buf) {
     else                           emit_epilogue_mid_block(buf);
     if (ok_is_cbz) patch_cbz_x(buf, ok_branch, HB_HOST_CALL_RESULT, buf->size);
     else           patch_bcond(buf, ok_branch, 0, buf->size);
+}
+
+static void emit_return_if_helper_failed(hb_codegen_buffer_t* buf) {
+    emit_return_if_helper_failed_at_pc(buf, false, 0);
 }
 
 /* x64 register file offsets in hb_context_t */
@@ -7817,7 +7833,8 @@ static bool emit_direct_mem_load_to_gpr_tso(hb_codegen_buffer_t* buf,
 }
 
 static bool emit_direct_mem_store_from_x20_tso(hb_codegen_buffer_t* buf,
-                                               const hb_ir_operand_t* dst) {
+                                               const hb_ir_operand_t* dst,
+                                               uint64_t guest_pc) {
     uint64_t mask;
     size_t aligned_branch = 0;
     int aligned_is_tbz = 0;
@@ -7846,7 +7863,7 @@ static bool emit_direct_mem_store_from_x20_tso(hb_codegen_buffer_t* buf,
             emit_mov_reg(buf, 2, 20);
             emit_mov_imm_compact(buf, 3, (uint64_t)dst->size);
             emit_call_helper(buf, (void*)hb_jit_helper_store_sized);
-            emit_return_if_helper_failed(buf);
+            emit_return_if_helper_failed_at_pc(buf, true, guest_pc);
             return true;
         }
     }
@@ -7894,7 +7911,7 @@ static bool emit_direct_mem_store_from_x20_tso(hb_codegen_buffer_t* buf,
             emit_mov_reg(buf, 2, 20);
             emit_mov_imm_compact(buf, 3, (uint64_t)dst->size);
             emit_call_helper(buf, (void*)hb_jit_helper_store_sized);
-            emit_return_if_helper_failed(buf);
+            emit_return_if_helper_failed_at_pc(buf, true, guest_pc);
             done_branch = emit_b_deferred(buf);
 
             patch_b(buf, to_direct, buf->size);   /* прямая запись идёт следом */
@@ -7910,7 +7927,7 @@ static bool emit_direct_mem_store_from_x20_tso(hb_codegen_buffer_t* buf,
         emit_mov_reg(buf, 2, 20);
         emit_mov_imm_compact(buf, 3, (uint64_t)dst->size);
         emit_call_helper(buf, (void*)hb_jit_helper_store_sized);
-        emit_return_if_helper_failed(buf);
+        emit_return_if_helper_failed_at_pc(buf, true, guest_pc);
         done_branch = emit_b_deferred(buf);
 
         patch_align_guard(buf, aligned_branch, aligned_is_tbz, buf->size);
@@ -8307,7 +8324,7 @@ static bool emit_native_scalar_mov(hb_codegen_buffer_t* buf, const hb_ir_instr_t
         /* Use the alignment-checked TSO store: STLR (and LDAR) require natural alignment, but x86
          * permits unaligned stores; the raw-STLR offset path SIGBUSes on an unaligned dest.  The
          * _tso path runtime-checks alignment and falls back to the lazy helper when unaligned. */
-        if (!emit_direct_mem_store_from_x20_tso(buf, &instr->dst)) return false;
+        if (!emit_direct_mem_store_from_x20_tso(buf, &instr->dst, instr->guest_addr)) return false;
         return true;
     }
 
@@ -11666,7 +11683,7 @@ static bool emit_scalar_load_store_pair(hb_codegen_buffer_t* buf, const hb_ir_in
      * the value lands in load->dst; reload x20 from it for the (also alignment-checked) store. */
     if (!emit_direct_mem_load_to_gpr_tso(buf, &load->src1, &load->dst, load->guest_addr)) return false;
     if (!emit_load_gpr_sized_to_x20(buf, &load->dst)) return false;
-    if (!emit_direct_mem_store_from_x20_tso(buf, &store->src1)) return false;
+    if (!emit_direct_mem_store_from_x20_tso(buf, &store->src1, store->guest_addr)) return false;
     return true;
 }
 
@@ -14144,6 +14161,11 @@ static void emit_fmov_s_to_w(hb_codegen_buffer_t* buf, int rd, int vn) {
     rd = hb_rm(buf, rd);
     emit_u32(buf, 0x1e260000u | ((uint32_t)vn << 5) | (uint32_t)rd);
 }
+static void emit_fmov_fp_to_gpr(hb_codegen_buffer_t* buf, bool dbl, int rd, int vn) {
+    rd = hb_rm(buf, rd);
+    emit_u32(buf, (dbl ? 0x9e660000u : 0x1e260000u) |
+                  ((uint32_t)vn << 5) | (uint32_t)rd);
+}
 static void emit_vec_rrr(hb_codegen_buffer_t* buf, uint32_t base, int vd, int vn, int vm) {
     emit_u32(buf, base | ((uint32_t)vm << 16) | ((uint32_t)vn << 5) | (uint32_t)vd);
 }
@@ -14193,7 +14215,8 @@ static void emit_sse_fp_src(hb_codegen_buffer_t* buf, const hb_ir_operand_t* op,
 
 static uint64_t g_native_sse_fp_emitted;
 
-static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+static bool emit_native_sse_fp_mode(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr,
+                                   bool forward, bool keep_result) {
     enum { K_ARITH, K_MINMAX, K_COMI, K_CVTT, K_CVT, K_SHUF } kind;
     int fop = HB_FPA_ADD, k2;
     bool dbl = false, scalar = true, is_max = false;
@@ -14242,8 +14265,9 @@ static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* in
         k2 = sse_fp_src_kind(buf, &instr->src2, bytes);
         if (!k2) return false;
         od = xmm_reg_off(buf, instr->dst.reg);
-        emit_sse_fp_src(buf, &instr->src2, k2, bytes, 1);   /* память первой: её адрес портит x20..x22 */
-        if (scalar) emit_fp_ldst(buf, true, dbl, 0, 19, od);
+        bool source2_forward = forward && k2 == 1 && instr->src2.reg == instr->dst.reg;
+        if (!source2_forward) emit_sse_fp_src(buf, &instr->src2, k2, bytes, 1);   /* память первой: её адрес портит x20..x22 */
+        if (scalar) { if (!forward) emit_fp_ldst(buf, true, dbl, 0, 19, od); }
         else emit_ldr_q(buf, 0, 19, od);
         if (kind == K_MINMAX) {
             /* ★ DAZ/FTZ (аппаратный эталон Астры, N02, 26.09): x86 MIN/MAX выбирает БИТЫ источника,
@@ -14320,7 +14344,8 @@ static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* in
             }
             patch_b(buf, done_fast, buf->size);
         } else {
-            emit_fp_arith(buf, fop, dbl, !scalar, 2, 0, 1);
+            emit_fp_arith(buf, fop, dbl, !scalar, 2, forward ? 2 : 0,
+                          source2_forward ? 2 : 1);
             if (hb_jit_gate_flag( HB_GATE_HB_TEST_SSE_FP_NO_SLOW, 0 )) {
                 /* ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ тестов: без медленного пути NaN-исходы берутся от ARM
                  * (другой выбор полезной нагрузки и знак «неопределённого») — тест обязан это видеть. */
@@ -14344,6 +14369,7 @@ static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* in
             if (scalar) patch_bcond(buf, slow, HB_AC_VS, buf->size);
             else patch_cbz_x(buf, slow, 20, buf->size);
             emit_interp_ir_helper(buf, instr);
+            if (keep_result) emit_fp_ldst(buf, true, dbl, 2, 19, od);
             patch_b(buf, done, buf->size);
         }
         __atomic_add_fetch(&g_native_sse_fp_emitted, 1, __ATOMIC_RELAXED);
@@ -14539,6 +14565,158 @@ static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* in
         __atomic_add_fetch(&g_native_sse_fp_emitted, 1, __ATOMIC_RELAXED);
         return true;
     }
+}
+
+static bool emit_native_sse_fp(hb_codegen_buffer_t* buf, const hb_ir_instr_t* instr) {
+    return emit_native_sse_fp_mode(buf, instr, false, false);
+}
+
+/* Default-off, write-through scalar SSE forwarding. No guest state lives only
+ * in host registers: every existing context commit remains in the emitter. */
+static unsigned scalar_fp_forward_bytes(const hb_ir_instr_t* in) {
+    if (!in || in->zero_ymm_upper || in->is_locked || !in->guest_len ||
+        !is_xmm_reg_operand(&in->dst) || !is_xmm_reg_operand(&in->src1) ||
+        in->dst.reg != in->src1.reg) return 0;
+    switch (in->op) {
+        case HB_IR_MULSS: case HB_IR_DIVSS: return 4;
+        case HB_IR_ADDSD: case HB_IR_SUBSD:
+        case HB_IR_MULSD: case HB_IR_DIVSD: return 8;
+        case HB_IR_FADD: case HB_IR_FSUB:
+        case HB_IR_FMUL: case HB_IR_FDIV:
+            return in->target == 0x104 ? 4 : in->target == 0x108 ? 8 : 0;
+        default: return 0;
+    }
+}
+
+static bool scalar_fp_midpoint_target(const hb_ir_cfg_t* cfg,
+                                     const hb_ir_block_t* block, uint64_t pc) {
+    /* Do not use predecessor lists: production CFGs may omit those edges. */
+    for (size_t i = 0; i < block->instr_count; ++i)
+        if (block->instrs[i].target == pc) return true;
+    if (cfg) for (size_t b = 0; b < cfg->block_count; ++b) {
+        const hb_ir_block_t* other = cfg->blocks[b];
+        if (other->guest_addr == pc) return true;
+        for (size_t i = 0; i < other->instr_count; ++i)
+            if (other->instrs[i].target == pc) return true;
+    }
+    return false;
+}
+
+static void scalar_fp_pair_begin(const hb_ir_instr_t* in) {
+    /* Match codegen_instr's per-instruction diagnostics/address bookkeeping. */
+    if (g_hb_emit_cur_op >= 0 && (unsigned)g_hb_emit_cur_op < 512u &&
+        g_hb_emit_cur_used_helper) g_hb_emit_n_helper[(unsigned)g_hb_emit_cur_op]++;
+    g_hb_emit_cur_op = (int)in->op;
+    g_hb_emit_cur_addr = in->guest_addr;
+    g_hb_emit_cur_used_helper = 0;
+    g_hb_emit_seen_op[(unsigned)in->op] = 1;
+    g_hb_emit_n[(unsigned)in->op]++;
+}
+
+static bool emit_scalar_fp_forward_pair(hb_codegen_buffer_t* out,
+                                       const hb_ir_cfg_t* cfg,
+                                       const hb_ir_block_t* block, size_t i) {
+    const hb_ir_instr_t* a = &block->instrs[i];
+    const hb_ir_instr_t* b = &block->instrs[i + 1];
+    unsigned bytes;
+    if (!hb_env_flag("MACRUNNER_HB_SCALAR_FP_FORWARD", 0) ||
+        !native_sse_fp_enabled() || out->arch != HB_ARCH_X64 || out->host_off_overflow ||
+        out->host_off_count >= HB_CODEGEN_MAX_HOST_OFF ||
+        !(bytes = scalar_fp_forward_bytes(a)) ||
+        scalar_fp_forward_bytes(b) != bytes || a->dst.reg != b->dst.reg ||
+        a->guest_addr > UINT64_MAX - a->guest_len ||
+        a->guest_addr + a->guest_len != b->guest_addr ||
+        !sse_fp_src_kind(out, &b->src2, bytes) ||
+        !sse_fp_src_kind(out, &a->src2, bytes) ||
+        scalar_fp_midpoint_target(cfg, block, b->guest_addr)) return false;
+
+    /* Both preflight predicates exactly match K_ARITH admission. The first
+     * success path has S2/D2; its NaN helper return explicitly reloads it.
+     * A scalar native-admitted second load emits only address GPR operations,
+     * LDR+DMB and FMOV V1; it neither calls C nor touches V2. The first context
+     * commit and the second host-PC map remain authoritative if that load faults. */
+    scalar_fp_pair_begin(a);
+    (void)emit_native_sse_fp_mode(out, a, false, true);
+    out->host_instr[out->host_off_count] = (uint16_t)(i + 1);
+    out->host_off[out->host_off_count++] = (uint32_t)out->size;
+    scalar_fp_pair_begin(b);
+    (void)emit_native_sse_fp_mode(out, b, true, false);
+    return true;
+}
+
+static bool scalar_fp_store_match(hb_codegen_buffer_t* out,
+                                  const hb_ir_cfg_t* cfg,
+                                  const hb_ir_block_t* block,
+                                  const hb_ir_instr_t* producer,
+                                  const hb_ir_instr_t* store, unsigned bytes) {
+    return store->op == HB_IR_STORE && !store->is_locked && !store->zero_ymm_upper &&
+           store->guest_len && store->src1.type == HB_OP_MEM &&
+           store->src2.type == HB_OP_REG && store->src2.reg == producer->dst.reg &&
+           store->src1.size == (bytes == 8 ? HB_SIZE_64 : HB_SIZE_32) &&
+           producer->guest_addr <= UINT64_MAX - producer->guest_len &&
+           producer->guest_addr + producer->guest_len == store->guest_addr &&
+           !scalar_fp_midpoint_target(cfg, block, store->guest_addr) &&
+           jit_direct_mem_codegen_enabled(out) &&
+           direct_user_mem_store_allowed(out, &store->src1);
+}
+
+/* Write-through FP -> narrow store. The canonical FP commit stays in place.
+ * Only the redundant XMM operand reload is replaced; address calculation,
+ * permission/alignment checks, helper errors and release stores are shared. */
+static unsigned emit_scalar_fp_store_forward(hb_codegen_buffer_t* out,
+                                             const hb_ir_cfg_t* cfg,
+                                             const hb_ir_block_t* block,
+                                             size_t i, size_t instr_limit) {
+    const hb_ir_instr_t* a = &block->instrs[i];
+    const hb_ir_instr_t* b = &block->instrs[i + 1];
+    const hb_ir_instr_t* store = b;
+    unsigned bytes, consumed = 2;
+    if (!hb_env_flag("MACRUNNER_HB_SCALAR_FP_STORE_FORWARD", 0) ||
+        !native_sse_fp_enabled() || out->arch != HB_ARCH_X64 ||
+        out->host_off_overflow || out->host_off_count >= HB_CODEGEN_MAX_HOST_OFF ||
+        !(bytes = scalar_fp_forward_bytes(a)) || !sse_fp_src_kind(out, &a->src2, bytes))
+        return 0;
+
+    if (b->op != HB_IR_STORE) {
+        /* Keep the independently enabled V2 pair, then carry its second result.
+         * Its original admission and both exact instruction maps are retained. */
+        if (!hb_env_flag("MACRUNNER_HB_SCALAR_FP_FORWARD", 0) ||
+            i + 2 >= instr_limit ||
+            out->host_off_count + 1 >= HB_CODEGEN_MAX_HOST_OFF ||
+            scalar_fp_forward_bytes(b) != bytes || a->dst.reg != b->dst.reg ||
+            a->guest_addr > UINT64_MAX - a->guest_len ||
+            a->guest_addr + a->guest_len != b->guest_addr ||
+            !sse_fp_src_kind(out, &b->src2, bytes) ||
+            scalar_fp_midpoint_target(cfg, block, b->guest_addr)) return 0;
+        store = &block->instrs[i + 2];
+        consumed = 3;
+    }
+    if (!scalar_fp_store_match(out, cfg, block, consumed == 3 ? b : a, store, bytes))
+        return 0;
+
+    scalar_fp_pair_begin(a);
+    (void)emit_native_sse_fp_mode(out, a, false, true);
+    if (consumed == 3) {
+        out->host_instr[out->host_off_count] = (uint16_t)(i + 1);
+        out->host_off[out->host_off_count++] = (uint32_t)out->size;
+        scalar_fp_pair_begin(b);
+        (void)emit_native_sse_fp_mode(out, b, true, true);
+    }
+    out->host_instr[out->host_off_count] = (uint16_t)(i + consumed - 1);
+    out->host_off[out->host_off_count++] = (uint32_t)out->size;
+    scalar_fp_pair_begin(store);
+    {
+        unsigned char prev_stack = hb_emit_mark_stack_access(&store->src1);
+        perepis_uchest(out, 1, store->src1.size, SH_NATIV_XMM);
+        /* No C call occurs between the producer's merged success point and
+         * this extraction. A successful NaN helper reloads S2/D2 at that join. */
+        emit_fmov_fp_to_gpr(out, bytes == 8, 20, 2);
+        (void)emit_direct_mem_store_from_x20_tso(out, &store->src1, store->guest_addr);
+        hb_emit_restore_stack_access(prev_stack);
+        jit_native_mem_count(1);
+        hb_emit_note_native_exit();
+    }
+    return consumed;
 }
 
 uint64_t hb_codegen_native_sse_fp_emitted(void) {
@@ -15978,7 +16156,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 unsigned char prev_stack = hb_emit_mark_stack_access(&instr->src1);
                 perepis_uchest(buf, 1, instr->src1.size, SH_NATIV_XMM);
                 emit_load_xmm_to_x20_x22(buf, instr->src2.reg);
-                if (!emit_direct_mem_store_from_x20_tso(buf, &instr->src1)) {
+                if (!emit_direct_mem_store_from_x20_tso(buf, &instr->src1, instr->guest_addr)) {
                     hb_emit_restore_stack_access(prev_stack);
                     return HB_ERR_INTERNAL;
                 }
@@ -16035,7 +16213,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                 } else {
                     emit_mov_imm_compact(buf, 20, (uint64_t)instr->src2.imm);
                 }
-                if (!emit_direct_mem_store_from_x20_tso(buf, &instr->src1)) {
+                if (!emit_direct_mem_store_from_x20_tso(buf, &instr->src1, instr->guest_addr)) {
                     hb_emit_restore_stack_access(prev_stack);
                     return HB_ERR_INTERNAL;
                 }
@@ -16521,7 +16699,7 @@ static hb_result_t codegen_instr(hb_codegen_buffer_t* buf, const hb_ir_instr_t* 
                     цель.size = instr->dst.size == HB_SIZE_64 ? HB_SIZE_64 : HB_SIZE_32;
                     unsigned char prev_stack = hb_emit_mark_stack_access(&цель);
                     emit_load_xmm_to_x20_x22(buf, instr->src1.reg);   /* x20 = низ */
-                    if (!emit_direct_mem_store_from_x20_tso(buf, &цель)) {
+                    if (!emit_direct_mem_store_from_x20_tso(buf, &цель, instr->guest_addr)) {
                         hb_emit_restore_stack_access(prev_stack);
                         return HB_ERR_INTERNAL;
                     }
@@ -25158,6 +25336,18 @@ static hb_result_t hb_arm64_codegen_block_with_cfg_inner(hb_arm64_codegen_t* cg,
         }
         if (i + 1 < instr_limit &&
             emit_mov_lea_same_base_pair(out, &block->instrs[i], &block->instrs[i + 1])) {
+            i++;
+            continue;
+        }
+        if (i + 1 < instr_limit) {
+            unsigned consumed = emit_scalar_fp_store_forward(out, cfg, block, i, instr_limit);
+            if (consumed) {
+                i += consumed - 1;
+                continue;
+            }
+        }
+        if (i + 1 < instr_limit &&
+            emit_scalar_fp_forward_pair(out, cfg, block, i)) {
             i++;
             continue;
         }
