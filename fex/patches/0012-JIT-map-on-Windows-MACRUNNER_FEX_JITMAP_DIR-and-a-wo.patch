@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 16:37:15 +1000
+Subject: [PATCH] JIT map on Windows: MACRUNNER_FEX_JITMAP_DIR and a working
+ flush interval
+
+FEX's perf-map writer (FEX_BLOCKJITNAMING, FEX_GLOBALJITNAMING, FEX_LIBRARYJITNAMING) opens
+/tmp/perf-<pid>.map. Under Wine that path resolves inside the prefix. With
+MACRUNNER_FEX_JITMAP_DIR=<Windows directory> (for example Z:\Volumes\Flash\jitmap) the map is
+written there as fex-jitmap-<Windows pid>.map, so a host profile (macOS sample) can be
+attributed to guest modules: block names carry "<guest module>+0x<offset>" through the ImageTracker.
+The flush check compared LastWrite - Now against the threshold, which is always negative, so
+buffers were written only when nearly full; it now uses the elapsed time.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Common/JitSymbols.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/FEXCore/Source/Common/JitSymbols.cpp b/FEXCore/Source/Common/JitSymbols.cpp
+index 8e9341914..6f531f281 100644
+--- a/FEXCore/Source/Common/JitSymbols.cpp
++++ b/FEXCore/Source/Common/JitSymbols.cpp
+@@ -1,8 +1,10 @@
+ // SPDX-License-Identifier: MIT
++// Modifications (c) 2026 MacRunner contributors, MIT
+ #include <FEXCore/fextl/fmt.h>
+ 
+ #include "Common/JitSymbols.h"
+ 
++#include <cstdlib>
+ #include <fcntl.h>
+ #include <unistd.h>
+ 
+@@ -17,6 +19,16 @@ JITSymbols::~JITSymbols() {
+ 
+ void JITSymbols::InitFile() {
+   // We can't use FILE here since we must be robust against forking processes closing our FD from under us.
++#ifdef _WIN32
++  // MacRunner: under Wine "/tmp" resolves inside the prefix (C:\tmp). MACRUNNER_FEX_JITMAP_DIR names a Windows
++  // directory, e.g. Z:\Volumes\Flash\jitmap, so the map lands on the host. The file name carries the Windows
++  // process id; the host pid is in the runner's pid map.
++  if (const char* Dir = getenv("MACRUNNER_FEX_JITMAP_DIR"); Dir && Dir[0]) {
++    const auto JitMap = fextl::fmt::format("{}\\fex-jitmap-{}.map", Dir, getpid());
++    fd = open(JitMap.c_str(), O_CREAT | O_TRUNC | O_WRONLY | O_APPEND, 0644);
++    return;
++  }
++#endif
+ #ifdef __ANDROID__
+   // Android simpleperf looks in /data/local/tmp instead of /tmp
+   const auto PerfMap = fextl::fmt::format("/data/local/tmp/perf-{}.map", getpid());
+@@ -131,7 +143,8 @@ void JITSymbols::RegisterNamedRegion(FEXCore::JITSymbolBuffer* Buffer, const voi
+ void JITSymbols::WriteBuffer(FEXCore::JITSymbolBuffer* Buffer, bool ForceWrite) {
+   auto Now = std::chrono::steady_clock::now();
+   if (!ForceWrite) {
+-    if (((Buffer->LastWrite - Now) < Buffer->MAXIMUM_THRESHOLD) && Buffer->Offset < Buffer->NEEDS_WRITE_DISTANCE) {
++    // MacRunner: elapsed time is Now - LastWrite; the upstream order made the time check always pass.
++    if (((Now - Buffer->LastWrite) < Buffer->MAXIMUM_THRESHOLD) && Buffer->Offset < Buffer->NEEDS_WRITE_DISTANCE) {
+       // Still buffering, no need to write.
+       return;
+     }

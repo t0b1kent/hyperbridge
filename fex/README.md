@@ -7,7 +7,7 @@ Together with the translator in `src/`, it forms HyperBridge.
 
 - Upstream: `https://github.com/FEX-Emu/FEX`, commit `fd141ed6d721d03062619e4702bca1a0c93b6dd9`
   (6 Aug 2026, right after the FEX-2608 release).
-- Series: `patches/0001-…` to `patches/0011-…`, applied in order with `git am`.
+- Series: `patches/0001-…` to `patches/0012-…`, applied in order with `git am`.
 - Build: `fex/build.sh <work-dir> [patch-count]` (llvm-mingw for the Windows halves, Xcode
   clang for the unix libraries). `MANIFEST.json` lists the expected output hashes.
 
@@ -26,6 +26,7 @@ Together with the translator in `src/`, it forms HyperBridge.
 | 0009 | Elden Ring work: JIT statistics, `MACRUNNER_FEX_WRITABLE_VALIDATION` modes, ARM64EC TLS changes | no |
 | 0010 | `MACRUNNER_FEX_PROT_KEEP`, `MACRUNNER_FEX_REVIVE`, `MACRUNNER_FEX_CODEBUF_MAX` (all default off) | no |
 | 0011 | x87: division by zero raises the exception; SF in the x87 status word | no |
+| 0012 | JIT map on Windows: `MACRUNNER_FEX_JITMAP_DIR` (with `FEX_BLOCKJITNAMING=1`) writes block names as `<guest module>+0x<offset>`; the flush interval works | no |
 
 ## Provenance of MacRunner 1.0.2
 
@@ -55,3 +56,16 @@ run.
   downstream changes, and they are not submitted to FEX-Emu.
 - FEX-Emu has not reviewed or endorsed this port. Please report issues with it to MacRunner,
   not to FEX-Emu.
+
+## Profiling with the JIT map
+
+Run the game with `FEX_BLOCKJITNAMING=1 FEX_GLOBALJITNAMING=1 MACRUNNER_FEX_JITMAP_DIR=<Windows directory>`.
+Take a macOS `sample` of the game process, and capture `WINEDEBUG=+loaddll` if you also want native
+PE modules named. Then run:
+
+    python3 tools/fex_jit_attr.py <sample.txt> <jitmap dir> --loaddll <wine stderr> --dlldirs <dirs with the DLLs>
+
+Every unnamed ("???") leaf is attributed to a JIT block of a guest module (`<module>+0x<offset>`), to
+guest code outside known images (for example Mono-generated code), or to a native PE module.
+Hollow Knight gameplay, main thread, 28 Sep 2026: 55 % UnityPlayer.dll, 41 % Mono-generated code,
+2 % mono-2.0-bdwgc.dll, 0.5 % DXMT d3d11.dll, about 1 % Wine DLLs.

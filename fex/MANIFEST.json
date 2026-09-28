@@ -42,18 +42,19 @@
     }
   },
   "series_head": {
-    "patches": "0001-0011",
+    "patches": "0001-0012",
     "sha256_local_build_original_paths": {
-      "xtajit64.dll": "345a0f7cbcd049da0ef224c1041b0895b7ddaa242f84557d7d734d6148a1bb2e",
-      "xtajit.dll": "e54288200da8024cf707670ffaa3fdc4a4c4a99c960cfcb3f4e547c386785260"
+      "xtajit64.dll": "802355a3e699b5d4",
+      "xtajit.dll": "a7313ad8b02cb687",
+      "note": "hash prefixes; local tree with the original path mapping"
     },
     "note": "fex/build.sh maps source paths to /hyperbridge/fex/src; two clean builds in different directories gave identical hashes (28 Sep 2026). The local build differs from it in embedded strings: source path prefix, install prefix and version hash (it used the original 1.0.2 values).",
     "sha256_build_sh": {
-      "xtajit64.dll": "0393b4f9bd57c1fdbfdcb401db7c559fe2d530977f55d93e7b3b1855141d919a",
-      "xtajit.dll": "21b6b1c173c3c9e5ed4d7222754ac943bec97d822e154167e5d4d27e25a3d57d",
+      "xtajit64.dll": "ed2156238b0dbde3bed52d336b85b42c7ef5324d892f1850ec0d326f081302ea",
+      "xtajit.dll": "c1ff8bc461950db3120ddd1b3ac9236fa81795f29be3fbaddd1d8217021fa548",
       "xtajit64.so": "373e34d2b1756cb712d5aa8356edd02e8ab5efc7386ac227d182d989d29b4089",
       "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
     },
-    "game_check": "Hollow Knight gameplay from a save, DXMT frame counter, 120 Hz display: series head 119.2 and 118.2 FPS, menu 41.7 and 39.5 s; MacRunner 1.0.2 FEX in the same series 117.9, 113.4 and 118.7 FPS, menu 41.7 and 41.2 s. All switches of patches 0009-0010 off."
+    "game_check": "Hollow Knight gameplay from a save, DXMT frame counter, 120 Hz display: series head 119.2 and 118.2 FPS, menu 41.7 and 39.5 s; MacRunner 1.0.2 FEX in the same series 117.9, 113.4 and 118.7 FPS, menu 41.7 and 41.2 s. All switches of patches 0009-0010 off. Patch 0012 (JIT map) in a Hollow Knight lab run: 8.1 million named blocks, profile attribution works (tools/fex_jit_attr.py)."
   }
 }
