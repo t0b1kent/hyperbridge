@@ -1,0 +1,952 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 7 Sep 2026 21:17:18 +1000
+Subject: [PATCH] Darwin: unixlib handler 7 (EnableJITExec) and W^X write scopes (MacRunner N2b)
+
+Original title: =?UTF-8?q?FEX=20N2b:=20=D0=BE=D0=B1=D1=80=D0=B0?= =?UTF-8?q?=D0=B1=D0=BE=D1=82=D1=87=D0=B8=D0=BA=207=20(EnableJITExec)=20?= =?UTF-8?q?=D0=B8=20=D1=81=D0=BA=D0=BE=D0=B1=D0=BA=D0=B0=20=D0=B7=D0=B0?= =?UTF-8?q?=D0=BF=D0=B8=D1=81=D0=B8=20W^X?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Что сделано:
+- ScopedJITWrite + крюки MarkJITMemory/EnableJITExec в AllocatorHooks;
+  состояние ПОТОКОВОЕ, на слоте Win32 TLS;
+- восемь мест записи из спецификации Астры §1 обёрнуты скобкой;
+- порядок init: UnixLib::Init -> SetupHooks -> EnableJITExec(1) -> CTX/InitCore;
+  на каждом потоке FEX свой JITWriteThreadInit; сброс режима перед NtContinue;
+- гейт сборки FEX_WINE_DARWIN: без него индексы 6/7 НЕ зовутся вовсе, потому что
+  у апстримового спутника таблица шестиместная, а диспетчер не проверяет границы.
+
+Три дефекта, найденные замером и исправленные:
+- fprintf из PE-половины = NtTerminateProcess + __fastfail (CRT/IO.cpp:388 +
+  Priv.h:59), stderr там нулевой. Заведён Logging::Raw через __wine_dbg_output;
+- thread_local в PE-модуле FEX — отказ доступа: каталог данных TLS пуст
+  (rva 0, size 0), своя CRT его не заводит. Перенесено на TlsAlloc;
+- зонд-конструктор в клее: показывает, ЧЕЙ спутник загружен на самом деле.
+
+Замер: BTCpuProcessInit и BTCpuThreadInit впервые ВЕРНУЛИСЬ, обработчики 6 и 7
+отработали (jitexec n=1..4, markjit n=1..2). Гость не побежал — стена
+переехала на отсутствие MAP_JIT у буфера диспетчера, разбор в
+reports/FEX-N2b-HANDLER7-07.09.2026.md.
+
+Код локальный, для MacRunner; наружу не отправлялся.
+---
+ CMakeLists.txt                                |   9 ++
+ FEXCore/Source/Interface/Core/CodeCache.cpp   |  14 +++
+ .../Interface/Core/Dispatcher/Dispatcher.cpp  |  10 ++
+ FEXCore/Source/Interface/Core/JIT/JIT.cpp     |  36 +++++-
+ FEXCore/Source/Utils/Allocator.cpp            |  49 ++++++++
+ FEXCore/Source/Utils/ArchHelpers/Arm64.cpp    |  10 ++
+ .../include/FEXCore/Utils/AllocatorHooks.h    |  68 ++++++++++-
+ Source/Windows/ARM64EC/Module.cpp             |  28 ++++-
+ Source/Windows/Common/Allocator.cpp           | 107 ++++++++++++++++++
+ Source/Windows/Common/FEXUnixLib.cpp          |  64 +++++++++++
+ Source/Windows/Common/FEXUnixLib.h            |  16 +++
+ Source/Windows/Common/Logging.cpp             |  16 +++
+ Source/Windows/Common/Logging.h               |  14 +++
+ Source/Windows/UnixLib/FEXUnixLib.cpp         |  18 +++
+ Source/Windows/WOW64/Module.cpp               |  80 ++++++++++++-
+ 15 files changed, 529 insertions(+), 10 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4f6ce4bb4..06ddb763f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -36,6 +36,15 @@ set_property(CACHE FEXCORE_PROFILER_BACKEND PROPERTY STRINGS gpuvis tracy)
+ option(ENABLE_GLIBC_ALLOCATOR_HOOK_FAULT "Enables glibc memory allocation hooking with fault for CI testing")
+ option(USE_PDB_DEBUGINFO "Build debug info in PDB format" FALSE)
+ option(BUILD_STEAM_SUPPORT "Enable Steam integration" FALSE)
++# ★★★ MacRunner N2b 2026-09-07 — PE-половина собирается ДЛЯ ДАРВИНОВСКОГО КЛЕЯ.
++# Включает вызовы обработчиков 6 и 7 UnixLib (MarkJITMemory / EnableJITExec) и делает
++# клей ОБЯЗАТЕЛЬНЫМ. Без этого гейта вызывать индексы 6/7 НЕЛЬЗЯ: у апстримового
++# спутника таблица шестиместная, а __wine_unix_call_dispatcher индексирует её БЕЗ
++# проверки границ — то есть был бы дикий вызов, а не отказ.
++option(FEX_WINE_DARWIN "MacRunner: PE-половина для дарвиновского клея с восьмиместной таблицей UnixLib" FALSE)
++if (FEX_WINE_DARWIN)
++  add_compile_definitions(FEX_WINE_DARWIN=1)
++endif()
+ 
+ set(X86_32_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Data/CMake/toolchain_x86_32.cmake" CACHE FILEPATH "Toolchain file for the (cross-)compiler targeting i686")
+ set(X86_64_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/Data/CMake/toolchain_x86_64.cmake" CACHE FILEPATH "Toolchain file for the (cross-)compiler targeting x86_64")
+diff --git a/FEXCore/Source/Interface/Core/CodeCache.cpp b/FEXCore/Source/Interface/Core/CodeCache.cpp
+index 910f5b047..5629eee7f 100644
+--- a/FEXCore/Source/Interface/Core/CodeCache.cpp
++++ b/FEXCore/Source/Interface/Core/CodeCache.cpp
+@@ -507,6 +507,13 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
+ 
+ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> Code,
+                                      std::span<const FEXCore::CPU::Relocation> EntryRelocations, uint32_t RelocationOffset, bool ForStorage) {
++  // ★★★ MacRunner N2b — ПИСАТЕЛЬ БЕЗ СОСЕДНЕГО ClearICache, и именно поэтому он
++  // НЕ НАХОДИТСЯ поиском по ClearICache. Здесь эмиттер пишет слова прямо в Code, а Code
++  // бывает и боевым исполняемым буфером (ветвь Windows/EC ниже), и промежуточным.
++  // Скобка вложенно-корректна: внешняя скобка финализации от этого не закроется (глубина
++  // потоковая), и режим восстанавливается на ЛЮБОМ выходе из функции.
++  FEXCore::Allocator::ScopedJITWrite JITWrite;
++
+   CPU::Arm64Emitter Emitter(&CTX, Code.data(), Code.size_bytes());
+   for (size_t j = 0; j < EntryRelocations.size(); ++j) {
+     const FEXCore::CPU::Relocation& Reloc = EntryRelocations[j];
+@@ -844,6 +851,13 @@ void CodeCache::FinalizeCodePages(MappedCodeCacheFile& Code, std::span<std::byte
+ 
+   FEXCORE_PROFILE_SCOPED("FinalizeCodePages");
+ 
++  // ★ MacRunner N2b — внешняя скобка финализации тёплого кеша.
++  // На ветви Windows/EC ниже memcpy пишет в ИСПОЛНЯЕМЫЙ буфер до всяких
++  // исправлений, а ClearICache идёт после них — значит скобка обязана накрыть обоих.
++  // Вложенная скобка в ApplyCodeRelocations эту НЕ закроет: глубина потоковая.
++  // На Linux скобка — пустое место (см. Allocator.cpp), поэтому разбиение на #ifndef не трогаем.
++  FEXCore::Allocator::ScopedJITWrite JITWrite;
++
+ #ifndef _WIN32
+   // Atomicity is critical when making the finalized code data visible.
+   // We ensure this by remapping a temporary buffer onto the PROT_NONE
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+index b174dab3c..99d642e86 100644
+--- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -13,6 +13,7 @@
+ #include <FEXCore/Core/X86Enums.h>
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include <FEXCore/HLE/SyscallHandler.h>
++#include <FEXCore/Utils/AllocatorHooks.h>
+ #include <FEXCore/Utils/Event.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/MathUtils.h>
+@@ -52,6 +53,15 @@ Dispatcher::~Dispatcher() {
+ }
+ 
+ void Dispatcher::EmitDispatcher() {
++  // ★★★ MacRunner N2b — ПЕРВАЯ запись в исполняемую память за всю жизнь процесса.
++  // Диспетчер выделен отдельным исполняемым выделением (конструктор выше), MarkJITMemory
++  // на нём уже отработал при VirtualAlloc. Здесь нужна скобка записи: одна на ВЕСЬ
++  // EmitDispatcher, а не на каждую выпущенную команду — переключение потокового режима
++  // это вызов ядра, и по команде на вызов было бы бессмысленно дорого.
++  // Закрывается по выходу из функции, то есть ПОСЛЕ ClearICache в конце и до того, как
++  // кто-либо прыгнет на DispatchPtr.
++  FEXCore::Allocator::ScopedJITWrite JITWrite;
++
+   // Don't modify TMP3 since it contains our RIP once the block doesn't exist
+   auto RipReg = TMP3;
+ #ifdef VIXL_DISASSEMBLER
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index 1e21d5b4a..0052ef5ea 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -511,8 +511,13 @@ static void DirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record,
+     BranchEmit.b(BranchOffset);
+   }
+ 
+-  std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(CallerAddress)).store(BranchInst, std::memory_order::relaxed);
+-  ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(CallerAddress), 4);
++  // ★ MacRunner N2b: пишем ОДНО слово прямо в выпущенный код. Временный BranchInst лежит
++  // на обычном стеке и скобки не требует — она нужна ровно вокруг store и sync.
++  {
++    FEXCore::Allocator::ScopedJITWrite JITWrite;
++    std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(CallerAddress)).store(BranchInst, std::memory_order::relaxed);
++    ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(CallerAddress), 4);
++  }
+ }
+ 
+ static void IndirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record) {
+@@ -522,6 +527,8 @@ static void IndirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record
+   // Restore branch +2 instructions to jump to the linker block
+   BranchEmit.b(0x2);
+ 
++  // ★ MacRunner N2b — то же самое для косвенного расцепления.
++  FEXCore::Allocator::ScopedJITWrite JITWrite;
+   std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(JumpThunkStartAddress)).store(BranchInst, std::memory_order::relaxed);
+   ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(JumpThunkStartAddress), 4);
+ 
+@@ -570,6 +577,15 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+   // Lock here is necessary to prevent simultaneous linking and delinking
+   auto lk = Thread->LookupCache->AcquireWriteLock();
+ 
++  // ★★★ MacRunner N2b — ОДНА скобка на обе ветви сцепления, а не по одной на ветвь.
++  // Открыта ПОСЛЕ AcquireWriteLock (порядок замков не меняем) и живёт до возврата.
++  // Покрывает: store команды ветвления в прямой ветви, Record->HostCode и store ldr в
++  // косвенной, обе синхронизации кеша. ★ Record и его inline-данные лежат В ТОМ ЖЕ
++  // отображении JIT, что и код, — писать их в режиме «исполнять» нельзя так же, как код.
++  // ★ Открыть ДО CompileBlock выше нельзя: там своя, вложенная запись, и внешняя скобка
++  // растянулась бы на всю компиляцию блока.
++  FEXCore::Allocator::ScopedJITWrite JITWrite;
++
+   // For non-calls, this would extend into the block's code, however that's fine as an out-of-range adr would never
+   // be generated avoiding any false positives.
+   uintptr_t KnownCallMarkerAddr = CallerAddress - 0x8;
+@@ -1074,6 +1090,13 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+   {
+     auto CodeBufferLock = std::unique_lock {SharedCodeBuffers.CodeBufferWriteMutex};
+ 
++    // ★ MacRunner N2b — скобка записи открывается ЗДЕСЬ, а не перед memcpy ниже.
++    // Причина: Align16B() тоже ПИШЕТ (выравнивающие слова) прямо в боевой CodeBuffer,
++    // и SetCursorOffset/SetBuffer работают уже по нему. Открыть перед memcpy — значит
++    // отдать записи выравнивания в режим «исполнять», то есть в W^X-отказ.
++    // Держится через memcpy и закрывается ПОСЛЕ ClearICache ниже, до публикации.
++    FEXCore::Allocator::ScopedJITWrite JITWrite;
++
+     // Query size of generated code
+     const auto TempSize = GetCursorOffset();
+ 
+@@ -1115,12 +1138,17 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+     SetCursorOffset(SharedCodeBuffers.LatestOffset + TempSize);
+ 
+     SharedCodeBuffers.LatestOffset = GetCursorOffset();
++
++    // ★ MacRunner N2b — синхронизация кеша команд ПЕРЕНЕСЕНА СЮДА, внутрь скобки записи.
++    // Спецификация Астры §1 требует именно этого: публикация кода допустима только после
++    // sync И возврата в режим исполнения, то есть sync обязан лежать во владении скобки.
++    // Прежнее место — сразу после DelayedDisownBuffer ниже; перенос его ни с чем не
++    // ссорит: DelayedDisownBuffer отпускает ВРЕМЕННЫЙ буфер, а не тот, что мы издали.
++    ClearICache(CodeBegin, CodeOnlySize);
+   }
+ 
+   TempCodeBufferAllocator.DelayedDisownBuffer();
+ 
+-  ClearICache(CodeBegin, CodeOnlySize);
+-
+ #ifdef VIXL_DISASSEMBLER
+   if (Disassemble() & FEXCore::Config::Disassemble::STATS) {
+     auto HeaderOp = IR->GetHeader();
+diff --git a/FEXCore/Source/Utils/Allocator.cpp b/FEXCore/Source/Utils/Allocator.cpp
+index 2060f269c..cabe127bb 100644
+--- a/FEXCore/Source/Utils/Allocator.cpp
++++ b/FEXCore/Source/Utils/Allocator.cpp
+@@ -314,10 +314,59 @@ void VirtualTHPNOP(const void* Ptr, size_t Size, THPControl Control) {}
+ VirtualNamePtr VirtualName {VirtualNameNOP};
+ VirtualTHPPtr VirtualTHPControl {VirtualTHPNOP};
+ 
++// ★ MacRunner N2b: НЕ пустышки, а нулевые указатели. Разница смысловая: пустышка
++// «успешно ничего не сделала» и её невозможно отличить от работающего клея, а nullptr
++// прямо говорит «клей не подключён» — и тогда скобка записи обязана быть НИЧЕМ, потому
++// что на Linux/Proton кодовый буфер и так RWX. Тот самый случай «гейт, активность
++// которого не доказана, считается выключенным».
++MarkJITMemoryPtr MarkJITMemory {};
++EnableJITExecPtr EnableJITExec {};
++
+ void SetupHooks(size_t PageSize, HookPtrs Ptrs) {
+   VirtualName = Ptrs.VirtualName;
+   VirtualTHPControl = Ptrs.VirtualTHPControl;
++  MarkJITMemory = Ptrs.MarkJITMemory;
++  EnableJITExec = Ptrs.EnableJITExec;
+ }
+ 
++#endif
++
++// ★★★ MacRunner N2b 2026-09-07 — состояние скобки записи. ПОТОКОВОЕ.
++//
++// ★★★ ЗДЕСЬ БЫЛ `thread_local`, И ЭТО СТОИЛО ПРОГОНА. РАЗБОР, ДОКАЗАННЫЙ АРТЕФАКТОМ:
++//
++//   Собранный xtajit.dll:  каталог данных TLS (индекс 9) = rva 0, size 0.
++//   То же у чистого upstream libwow64fex.dll — то есть каталога нет НИ У КОГО.
++//
++// PE-модули FEX собираются со СВОЕЙ минимальной CRT (Source/Windows/Common/CRT), которая
++// объявляет `uint64_t _tls_index;` руками и НЕ заводит ни секции `.tls`, ни каталога TLS.
++// Значит загрузчик не выделяет модулю слот, `TEB->ThreadLocalStoragePointer` его не
++// содержит, и ПЕРВОЕ ЖЕ обращение к `thread_local` — отказ доступа.
++//
++// Проверено, что это первое такое обращение вообще: `thread_local` во всём FEXCore есть
++// ровно в трёх файлах, и два из них (AllocatorOverride.cpp, 64BitAllocator.cpp) в PE НЕ
++// компилируются — в каталоге сборки их объектов нет.
++//
++// Замер, показавший это: зонд по шагам BTCpuProcessInit печатал шаги 0..8 и обрывался,
++// а зонд ВНУТРИ обёртки EnableJITExec (`macrunner-fex-call7`) не печатался ни разу —
++// то есть отказ случался ДО вызова, на самом первом операторе JITWriteThreadInit,
++// а он как раз и был обращением к `thread_local`.
++//
++// ПОЭТОМУ состояние живёт в слоте Win32 TLS (`TlsAlloc`), и реализация вынесена в
++// Source/Windows/Common/Allocator.cpp — туда, где Win32 доступен законно. Здесь остаются
++// только линуксовые пустышки.
++//
++// Почему счётчик, а не bool: ExitFunctionLink открывает скобку и внутри неё может позвать
++// CompileBlock, который откроет свою. Bool закрыл бы внешнюю на выходе из внутренней и
++// включил исполнение посреди чужой записи.
++#ifndef _WIN32
++// Linux: кодовый буфер RWX по устройству платформы, переключать нечего.
++void JITWriteThreadInit() {}
++void JITWriteEnter() {}
++void JITWriteLeave() {}
++void JITWriteResetForResume(bool) {}
++uint32_t JITWriteCurrentDepth() {
++  return 0;
++}
+ #endif
+ } // namespace FEXCore::Allocator
+diff --git a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+index 01e5bb22e..3ffd2ffee 100644
+--- a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
++++ b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+@@ -5,6 +5,7 @@
+ #include <FEXCore/Utils/SpinWaitLock.h>
+ 
+ #include <FEXCore/Debug/InternalThreadState.h>
++#include <FEXCore/Utils/AllocatorHooks.h>
+ #include <FEXCore/Utils/EnumUtils.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/Telemetry.h>
+@@ -2100,6 +2101,15 @@ std::optional<int32_t> HandleUnalignedAccess(FEXCore::Core::InternalThreadState*
+     }
+   }
+ 
++  // ★★★ MacRunner N2b — скобка записи открывается ДО захвата SpinLockFutex, не только
++  // перед PC[0]. Причина конкретная: InlineTail (в нём и лежит SpinLockFutex) размещён
++  // ВМЕСТЕ с выпущенным кодом, в том же отображении JIT. Захват замка — это запись в
++  // него, и в режиме «исполнять» она упрётся в W^X раньше, чем дело дойдёт до правки
++  // команды. Объявлена ДО lk, значит разрушается ПОСЛЕ него — режим исполнения
++  // восстанавливается после снятия замка, на ЛЮБОМ выходе из функции, включая все
++  // ветви return ниже (LDAR/LDAPR, STLR, LDAPUR, STLUR и их половинные барьеры).
++  FEXCore::Allocator::ScopedJITWrite JITWrite;
++
+   // Lock code mutex during any SIGBUS handling that potentially changes code.
+   // Due to code buffer sharing between threads, code must be carefully backpatched from last to first.
+   // Multiple threads can be attempting to handle the SIGBUS or even be executing the code being backpatched.
+diff --git a/FEXCore/include/FEXCore/Utils/AllocatorHooks.h b/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
+index cccce4d56..49c6451b8 100644
+--- a/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
++++ b/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
+@@ -37,29 +37,91 @@ FEX_DEFAULT_VISIBILITY void SetupHooks(size_t PageSize);
+ #else
+ using VirtualNamePtr = void (*)(const char*, const void*, size_t);
+ using VirtualTHPPtr = void (*)(const void*, size_t, THPControl);
++// MacRunner N2b 2026-09-07 — обработчики 6 и 7 дарвиновского клея.
++// MarkJITMemory  проверяет, что выделение действительно легло в область MAP_JIT.
++// EnableJITExec  переключает режим ВЫЗЫВАЮЩЕГО ПОТОКА: 0 = писать (исполнять нельзя),
++//                1 = исполнять (писать нельзя). Состояние потоковое, не процессное.
++using MarkJITMemoryPtr = bool (*)(void*, size_t);
++using EnableJITExecPtr = bool (*)(int32_t);
+ struct HookPtrs {
+   VirtualNamePtr VirtualName;
+   VirtualTHPPtr VirtualTHPControl;
++  MarkJITMemoryPtr MarkJITMemory;
++  EnableJITExecPtr EnableJITExec;
+ };
+ FEX_DEFAULT_VISIBILITY void SetupHooks(size_t PageSize, HookPtrs Ptrs);
+ #endif
+ FEX_DEFAULT_VISIBILITY void ClearHooks();
+ 
++// ★★★ MacRunner N2b 2026-09-07 — W^X ПОТОКА (обработчик 7).
++//
++// ЗАЧЕМ. Область MAP_JIT на Apple Silicon НЕ бывает одновременно записываемой и
++// исполняемой ДЛЯ ОДНОГО ПОТОКА. Переключает это не mprotect (лейн N2 замерил: область
++// MAP_JIT принимает mprotect ровно один раз, дальше 2000 отказов из 2000), а потоковый
++// pthread_jit_write_protect_np — он и стоит за обработчиком 7.
++//
++// ОТСЮДА КОНСТРУКЦИЯ. Поток FEX живёт в режиме «исполнять» и на время КАЖДОЙ записи в
++// свою кодовую память опускается в режим «писать». Скобка ниже — единственный способ это
++// сделать; ставится она вокруг фактических записей, перечисленных в спецификации Астры
++// (reports/research/20260907-ASTRA-N2-IMPLEMENTATION-SPEC.md §1).
++//
++// ГЛУБИНА ПОТОКОВАЯ, НЕ ОБЩИЙ bool: вложенная запись (например, ExitFunctionLink ->
++// CompileBlock -> окончательное копирование) не должна закрывать внешнюю скобку. Отсюда
++// счётчик, а не флаг.
++//
++// ★ Нарушение договора (Leave при глубине 0) — ЯВНЫЙ отказ с адресом места, а не
++// молчаливое обнуление: молчаливое обнуление открыло бы исполнение посреди чужой записи.
++FEX_DEFAULT_VISIBILITY void JITWriteEnter();
++FEX_DEFAULT_VISIBILITY void JITWriteLeave();
++// Первичная установка режима на КАЖДОМ потоке FEX, сразу после InitCRTThread.
++FEX_DEFAULT_VISIBILITY void JITWriteThreadInit();
++// Принудительный сброс перед NtContinue/нелокальным переходом: одной C++ RAII там мало.
++// WantExec=true — возобновляем выпущенный код; false — возобновляем нативного писателя.
++FEX_DEFAULT_VISIBILITY void JITWriteResetForResume(bool WantExec);
++FEX_DEFAULT_VISIBILITY uint32_t JITWriteCurrentDepth();
++
++class ScopedJITWrite final {
++public:
++  ScopedJITWrite() {
++    JITWriteEnter();
++  }
++  ~ScopedJITWrite() {
++    JITWriteLeave();
++  }
++  ScopedJITWrite(const ScopedJITWrite&) = delete;
++  ScopedJITWrite& operator=(const ScopedJITWrite&) = delete;
++  ScopedJITWrite(ScopedJITWrite&&) = delete;
++  ScopedJITWrite& operator=(ScopedJITWrite&&) = delete;
++};
++
+ #ifdef _WIN32
++FEX_DEFAULT_VISIBILITY extern MarkJITMemoryPtr MarkJITMemory;
++FEX_DEFAULT_VISIBILITY extern EnableJITExecPtr EnableJITExec;
++
+ inline void* VirtualAlloc(void* Base, size_t Size, bool Execute = false, bool Commit = true) {
+   // Allocate top-down to avoid polluting the lower VA space, as even on 64-bit some programs (i.e. LuaJIT) require allocations below 4GB.
+   DWORD Flags = (Commit ? MEM_COMMIT : 0) | MEM_RESERVE | MEM_TOP_DOWN;
++  void* Result;
+ #ifdef ARCHITECTURE_arm64ec
+   MEM_EXTENDED_PARAMETER Parameter {};
+   if (Execute) {
+     Parameter.Type = MemExtendedParameterAttributeFlags;
+     Parameter.ULong64 = MEM_EXTENDED_PARAMETER_EC_CODE;
+   };
+-  return ::VirtualAlloc2(nullptr, Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE, Execute ? &Parameter : nullptr,
+-                         Execute ? 1 : 0);
++  Result = ::VirtualAlloc2(nullptr, Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE, Execute ? &Parameter : nullptr,
++                           Execute ? 1 : 0);
+ #else
+-  return ::VirtualAlloc(Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE);
++  Result = ::VirtualAlloc(Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE);
+ #endif
++
++  // Обработчик 6 — РОВНО ОДИН раз на удачное исполняемое выделение с коммитом, до того
++  // как указатель уйдёт наружу. Это ПРОВЕРКА (лейн N2 переписал его с разметки на
++  // проверку: MAP_JIT|MAP_FIXED закрыт ядром при странице 16 КБ), поэтому её отказ
++  // означает «выделение не легло в MAP_JIT» — то есть первая же запись кода упрётся в W^X.
++  if (Result && Execute && Commit && MarkJITMemory) {
++    MarkJITMemory(Result, Size);
++  }
++  return Result;
+ }
+ 
+ inline void* VirtualAlloc(size_t Size, bool Execute = false, bool Commit = true) {
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index 2be579233..b22edc839 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -7,6 +7,7 @@ $end_info$
+ */
+ 
+ #include <FEXCore/fextl/fmt.h>
++#include <FEXCore/Utils/AllocatorHooks.h>
+ #include <FEXCore/Core/X86Enums.h>
+ #include <FEXCore/Core/SignalDelegator.h>
+ #include <FEXCore/Core/Context.h>
+@@ -602,8 +603,23 @@ NTSTATUS ProcessInit() {
+ 
+   FEX::Windows::SetupEnvironmentVariableValues(NtDll);
+ 
++  // ★★★ MacRunner N2b — тот же несущий порядок, что и в WOW64 (разбор там же).
++  // Отличие ровно одно: ProcessInit здесь возвращает NTSTATUS, значит отказ можно
++  // вернуть по-человечески, до создания CTX, — снимать процесс не требуется.
++  const bool UnixLibReady = FEX::Windows::UnixLib::Init(NtDll);
+   FEX::Windows::Allocator::SetupHooks(NtDll);
+-  FEX::Windows::UnixLib::Init(NtDll);
++
++#ifdef FEX_WINE_DARWIN
++  if (!UnixLibReady || !FEXCore::Allocator::EnableJITExec) {
++    FEX::Windows::Logging::Raw(UnixLibReady ?
++                                 "macrunner-fex-НЕТ-КЛЕЯ: ARM64EC — UnixLib ДА, крюк 7 НЕТ\n" :
++                                 "macrunner-fex-НЕТ-КЛЕЯ: ARM64EC — UnixLib НЕТ\n");
++    return STATUS_NOT_SUPPORTED;
++  }
++  FEXCore::Allocator::JITWriteThreadInit();
++#else
++  (void)UnixLibReady;
++#endif
+ 
+   {
+     auto HostFeatures = FEX::Windows::CPUFeatures::FetchHostFeatures(IsWine, FEXCore::HostFeatures::HostTypeEnum::Arm64ec);
+@@ -757,6 +773,9 @@ NTSTATUS ResetToConsistentState(EXCEPTION_RECORD* Exception, CONTEXT* GuestConte
+         Cont = OvercommitTracker->HandleAccessViolation(FaultAddress);
+       }
+       if (Cont) {
++        // ★ MacRunner N2b — см. разбор в WOW64/Module.cpp: NtContinue не возвращается,
++        // деструкторы скобки записи не отработают, режим восстанавливаем руками.
++        FEXCore::Allocator::JITWriteResetForResume(true);
+         NtContinueNative(NativeContext, false);
+       }
+     }
+@@ -773,6 +792,8 @@ NTSTATUS ResetToConsistentState(EXCEPTION_RECORD* Exception, CONTEXT* GuestConte
+   }
+ 
+   if (Cont) {
++    // ★ MacRunner N2b — тот же договор на втором выходе через NtContinue.
++    FEXCore::Allocator::JITWriteResetForResume(true);
+     NtContinueNative(NativeContext, false);
+   }
+ 
+@@ -912,6 +933,11 @@ void BTCpu64NotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After
+ NTSTATUS ThreadInit() {
+   std::scoped_lock Lock(ThreadCreationMutex);
+   FEX::Windows::InitCRTThread();
++  // ★ MacRunner N2b — режим MAP_JIT потоковый, назначаем на каждом потоке FEX.
++  // ★ ГРАНИЦА, названная вслух: у ARM64EC есть вход в JIT ПРЯМО из Module.S:39,52,
++  // минуя ProcessInit/ThreadInit. Для таких потоков страховкой служит печать
++  // `macrunner-fex-jitwrite-МИМО-INIT` в JITWriteEnter — она поймает их по факту.
++  FEXCore::Allocator::JITWriteThreadInit();
+   const auto CPUArea = GetCPUArea();
+ 
+   static constexpr size_t EmulatorStackSize = 0x40000;
+diff --git a/Source/Windows/Common/Allocator.cpp b/Source/Windows/Common/Allocator.cpp
+index d535bdef7..fc955fd37 100644
+--- a/Source/Windows/Common/Allocator.cpp
++++ b/Source/Windows/Common/Allocator.cpp
+@@ -2,6 +2,7 @@
+ #include <FEXCore/Utils/AllocatorHooks.h>
+ #include <FEXCore/Utils/TypeDefines.h>
+ #include "Windows/Common/FEXUnixLib.h"
++#include "Windows/Common/Logging.h"
+ 
+ #include <array>
+ #include <chrono>
+@@ -9,17 +10,58 @@
+ #include <sysinfoapi.h>
+ #include <synchapi.h>
+ #include <windef.h>
++#include <winbase.h>
++#include <processthreadsapi.h>
+ #include <winternl.h>
+ #include <winnt.h>
+ #include <wine/debug.h>
+ 
++// ★★★ MacRunner N2b 2026-09-07 — СОСТОЯНИЕ СКОБКИ ЗАПИСИ ЖИВЁТ ЗДЕСЬ, А НЕ В FEXCore.
++//
++// Причина названа числом в FEXCore/Source/Utils/Allocator.cpp: у PE-модулей FEX каталог
++// данных TLS пуст (rva 0, size 0), потому что своя минимальная CRT не заводит ни секции
++// `.tls`, ни каталога. `thread_local` там — гарантированный отказ доступа на первом же
++// обращении. Слот Win32 TLS этой беды не имеет: его выдаёт ntdll, а не CRT модуля.
++//
++// Кодирование значения слота выбрано так, чтобы НОЛЬ (что видит новый поток по умолчанию)
++// означал «поток скобку ещё не проходил»: бит 0 — признак пройденного ThreadInit,
++// остальные биты — глубина вложенности.
++namespace {
++constexpr uintptr_t JITWriteReadyBit = 1;
++DWORD JITWriteTlsIndex = TLS_OUT_OF_INDEXES;
++
++uintptr_t JITWriteSlotGet() {
++  if (JITWriteTlsIndex == TLS_OUT_OF_INDEXES) {
++    return 0;
++  }
++  return reinterpret_cast<uintptr_t>(TlsGetValue(JITWriteTlsIndex));
++}
++
++void JITWriteSlotSet(uintptr_t Value) {
++  if (JITWriteTlsIndex != TLS_OUT_OF_INDEXES) {
++    TlsSetValue(JITWriteTlsIndex, reinterpret_cast<LPVOID>(Value));
++  }
++}
++} // namespace
++
+ namespace FEX::Windows::Allocator {
+ void SetupHooks(HMODULE ntdll) {
++  if (JITWriteTlsIndex == TLS_OUT_OF_INDEXES) {
++    JITWriteTlsIndex = TlsAlloc();
++  }
+   FEXCore::Allocator::HookPtrs Ptrs {};
+ 
+   Ptrs = {
+     .VirtualName = UnixLib::VirtualName,
+     .VirtualTHPControl = UnixLib::VirtualTHPControl,
++// MacRunner N2b: обработчики 6 и 7 подключаются ТОЛЬКО в дарвиновской сборке.
++// В апстримовой указатели остаются НУЛЕВЫМИ — и скобка записи становится буквально
++// ничем, без единого лишнего вызова. Это и есть разница между «выключено» и
++// «включено, но всегда врёт false»: первое ничего не стоит и ни с чем не путается.
++#ifdef FEX_WINE_DARWIN
++    .MarkJITMemory = UnixLib::MarkJITMemory,
++    .EnableJITExec = UnixLib::EnableJITExec,
++#endif
+   };
+ 
+   SYSTEM_INFO system_info {};
+@@ -27,3 +69,68 @@ void SetupHooks(HMODULE ntdll) {
+   FEXCore::Allocator::SetupHooks(system_info.dwPageSize, Ptrs);
+ }
+ } // namespace FEX::Windows::Allocator
++
++// Реализация объявлений из FEXCore/Utils/AllocatorHooks.h для ветви _WIN32.
++namespace FEXCore::Allocator {
++void JITWriteThreadInit() {
++  JITWriteSlotSet(JITWriteReadyBit);
++  if (EnableJITExec) {
++    // Режим «исполнять» назначается ЯВНО на каждом потоке: умолчание ядра для нового
++    // потока мы не мерили, а гейт, активность которого не доказана, считается выключенным.
++    EnableJITExec(1);
++  }
++}
++
++void JITWriteEnter() {
++  if (!EnableJITExec) {
++    return;
++  }
++  uintptr_t Slot = JITWriteSlotGet();
++  if (!(Slot & JITWriteReadyBit)) {
++    // Поток пишет код, ни разу не пройдя JITWriteThreadInit. Это НЕ безобидно: значит есть
++    // вход в JIT мимо ProcessInit/ThreadInit (у ARM64EC такой вход есть прямо в
++    // Module.S:39,52). Сообщаем один раз на поток и лечим здесь же.
++    Slot |= JITWriteReadyBit;
++    FEX::Windows::Logging::Raw("macrunner-fex-jitwrite-МИМО-INIT: первая запись без ThreadInit\n");
++  }
++  const uintptr_t Depth = Slot >> 1;
++  JITWriteSlotSet(((Depth + 1) << 1) | JITWriteReadyBit);
++  if (Depth == 0) {
++    EnableJITExec(0);
++  }
++}
++
++void JITWriteLeave() {
++  if (!EnableJITExec) {
++    return;
++  }
++  const uintptr_t Slot = JITWriteSlotGet();
++  const uintptr_t Depth = Slot >> 1;
++  if (Depth == 0) {
++    // Договор нарушен — ЯВНЫЙ отказ, а не молчаливое обнуление: молчаливое обнуление
++    // включило бы исполнение посреди чужой записи, и отказ вылез бы далеко от причины.
++    FEX::Windows::Logging::Raw("macrunner-fex-jitwrite-ДОГОВОР: Leave при глубине 0\n");
++    return;
++  }
++  JITWriteSlotSet(((Depth - 1) << 1) | (Slot & JITWriteReadyBit));
++  if (Depth == 1) {
++    EnableJITExec(1);
++  }
++}
++
++void JITWriteResetForResume(bool WantExec) {
++  if (!EnableJITExec) {
++    return;
++  }
++  const uintptr_t Slot = JITWriteSlotGet();
++  if ((Slot >> 1) != 0) {
++    FEX::Windows::Logging::Raw("macrunner-fex-jitwrite-РАЗРЫВ: возобновление при ненулевой глубине\n");
++  }
++  JITWriteSlotSet(JITWriteReadyBit);
++  EnableJITExec(WantExec ? 1 : 0);
++}
++
++uint32_t JITWriteCurrentDepth() {
++  return static_cast<uint32_t>(JITWriteSlotGet() >> 1);
++}
++} // namespace FEXCore::Allocator
+diff --git a/Source/Windows/Common/FEXUnixLib.cpp b/Source/Windows/Common/FEXUnixLib.cpp
+index 979782395..1e1b870f5 100644
+--- a/Source/Windows/Common/FEXUnixLib.cpp
++++ b/Source/Windows/Common/FEXUnixLib.cpp
+@@ -9,6 +9,7 @@
+ #include <winternl.h>
+ #include <libloaderapi.h>
+ #include "FEXUnixLib.h"
++#include "Logging.h"
+ #include "Priv.h"
+ 
+ #define PR_SET_VMA 0x53564d41
+@@ -208,6 +209,69 @@ void VirtualName(const char* Name, const void* Ptr, size_t Size) {
+   Illegal::VirtualName(Name, Ptr, Size);
+ }
+ 
++// ★★★ MacRunner N2b 2026-09-07 — PE-половина обработчиков 6 и 7.
++//
++// Прямых Darwin-вызовов в PE НЕТ и быть не может: PE-модуль это Windows-мир, а
++// pthread_jit_write_protect_np живёт в Mach-O спутнике. Дорога ровно одна — существующий
++// UnixCall, тот же, которым уже ходят TSO и Madvise. На ARM64EC он идёт через
++// TrampolineCall выше в этом файле, минуя __os_arm64x_dispatch_icall.
++//
++// Отсутствие клея (UnixLibAvailable()==false) — НЕ отказ этих двух функций: на Linux и
++// в обычном Proton кодовый буфер и так RWX. Но для нашей дарвиновской сборки клей
++// обязателен, и обязательность проверяется в Module.cpp, а не тихо здесь.
++//
++// ★★★ ГЕЙТ СБОРКИ FEX_WINE_DARWIN — НЕ УДОБСТВО, А БЕЗОПАСНОСТЬ.
++// У апстримового спутника таблица ШЕСТИМЕСТНАЯ, а `__wine_unix_call_dispatcher`
++// индексирует её без проверки границ. Вызов индекса 6 или 7 на такой таблице — это
++// не «отказ», а прыжок по чужому указателю. Поэтому обе функции ниже вызывают клей
++// ТОЛЬКО в сборке, собранной парой к нашему восьмиместному спутнику.
++bool MarkJITMemory(void* Base, size_t Size) {
++#ifdef FEX_WINE_DARWIN
++  if (!UnixLibAvailable()) {
++    return false;
++  }
++
++  FEXUnixLib_MarkJITMemory Args {
++    .Addr = Base,
++    .Size = Size,
++  };
++
++  return Call(FEXUnixLibFunctions::MarkJITMemory, &Args) == STATUS_SUCCESS;
++#else
++  return false;
++#endif
++}
++
++bool EnableJITExec(int32_t Enable) {
++#ifdef FEX_WINE_DARWIN
++  if (!UnixLibAvailable()) {
++    return false;
++  }
++
++  FEXUnixLib_EnableJITExec Args {
++    .Enable = Enable,
++  };
++
++  // ★ MacRunner N2b — зонд ПЕРВОГО В ЖИЗНИ ПРОЦЕССА UnixCall. Печатается только для
++  // первых двух вызовов: дальше это горячий путь, а построчная трасса горячего пути в
++  // этом проекте уже однажды подавила ступень.
++  static int Announced = 0;
++  const bool Loud = Announced < 2;
++  if (Loud) {
++    ++Announced;
++    FEX::Windows::Logging::Raw("macrunner-fex-call7: перед UnixCall\n");
++  }
++  const NTSTATUS Status = Call(FEXUnixLibFunctions::EnableJITExec, &Args);
++  if (Loud) {
++    FEX::Windows::Logging::Raw(Status == STATUS_SUCCESS ? "macrunner-fex-call7: вернулся УСПЕХ\n" :
++                                                          "macrunner-fex-call7: вернулся ОТКАЗ\n");
++  }
++  return Status == STATUS_SUCCESS;
++#else
++  return false;
++#endif
++}
++
+ SHMSlotResult AllocateSHMSlots(void* SHMBase, uint32_t MapSize, uint32_t MaxSize) {
+   if (UnixLibAvailable()) {
+     // UnixLib path.
+diff --git a/Source/Windows/Common/FEXUnixLib.h b/Source/Windows/Common/FEXUnixLib.h
+index 36da52c54..9f9d02c69 100644
+--- a/Source/Windows/Common/FEXUnixLib.h
++++ b/Source/Windows/Common/FEXUnixLib.h
+@@ -39,6 +39,22 @@ bool SetKernelUnalignedAtomicControl(uint64_t Flags);
+ void VirtualTHPControl(const void* Ptr, size_t Size, FEXCore::Allocator::THPControl Control);
+ void VirtualName(const char* Name, const void* Ptr, size_t Size);
+ 
++/**
++ * @brief MacRunner N2b, обработчик 6: проверить, что выделение легло в область MAP_JIT.
++ *
++ * Возврат true = проверено и годно. false = либо клея нет, либо область НЕ MAP_JIT,
++ * и тогда первая же запись кода упрётся в W^X.
++ */
++bool MarkJITMemory(void* Base, size_t Size);
++
++/**
++ * @brief MacRunner N2b, обработчик 7: режим ВЫЗЫВАЮЩЕГО ПОТОКА.
++ *
++ * @param Enable 0 = можно писать, нельзя исполнять; 1 = исполнять, запись закрыта.
++ * @return true при STATUS_SUCCESS.
++ */
++bool EnableJITExec(int32_t Enable);
++
+ struct SHMSlotResult {
+   void* SHMBase;
+   uint32_t MappedSize;
+diff --git a/Source/Windows/Common/Logging.cpp b/Source/Windows/Common/Logging.cpp
+index 8980bda8d..8974a8991 100644
+--- a/Source/Windows/Common/Logging.cpp
++++ b/Source/Windows/Common/Logging.cpp
+@@ -8,6 +8,7 @@
+ #include <windef.h>
+ #include <winternl.h>
+ #include <winnt.h>
++#include <libloaderapi.h>
+ 
+ namespace {
+ void (*WineDbgOut)(const char* Message);
+@@ -33,6 +34,21 @@ static void AssertHandler(const char* Message) {
+ } // namespace
+ 
+ namespace FEX::Windows::Logging {
++// ★ MacRunner N2b: разбор — в Logging.h. Отдельный указатель, а не общий WineDbgOut:
++// тот заводится только в Init() и молчит при SilentLog, а этот обязан работать всегда,
++// в том числе до Init() и в самом раннем отказе.
++void Raw(const char* Message) {
++  static void (*RawOut)(const char*) = nullptr;
++  static bool Resolved = false;
++  if (!Resolved) {
++    Resolved = true;
++    RawOut = reinterpret_cast<decltype(RawOut)>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "__wine_dbg_output"));
++  }
++  if (RawOut) {
++    RawOut(Message);
++  }
++}
++
+ void Init() {
+   FEX_CONFIG_OPT(SilentLog, SILENTLOG);
+   if (SilentLog()) {
+diff --git a/Source/Windows/Common/Logging.h b/Source/Windows/Common/Logging.h
+index bb5f19849..26b7d5645 100644
+--- a/Source/Windows/Common/Logging.h
++++ b/Source/Windows/Common/Logging.h
+@@ -3,4 +3,18 @@
+ 
+ namespace FEX::Windows::Logging {
+ void Init();
++
++// ★★★ MacRunner N2b 2026-09-07 — ЕДИНСТВЕННЫЙ ГОДНЫЙ КАНАЛ ДИАГНОСТИКИ ИЗ PE-ПОЛОВИНЫ.
++//
++// ЗАЧЕМ ОН ЕСТЬ. В PE-сборке FEX `fprintf` — это НЕ печать. Common/CRT/IO.cpp:388
++// объявляет его UNIMPLEMENTED(), а Common/Priv.h:59 раскрывает UNIMPLEMENTED в
++//     NtTerminateProcess(NtCurrentProcess(), 0); __fastfail(0);
++// то есть любой fprintf из PE УБИВАЕТ ПРОЦЕСС. `stderr` там же — нулевой указатель
++// (__acrt_iob_func возвращает nullptr, IO.cpp:432). Замерено: прогон с fprintf'ом
++// первой строкой BTCpuProcessInit дал exit=0 и НИ ОДНОЙ строки в журнале.
++//
++// Raw() пишет через `__wine_dbg_output` — тот самый путь, которым в наш журнал попадают
++// все строки `macrunner-wow64:` (макрос MESSAGE). Работает ДО Init(), потому что
++// разрешает символ сам и ничего от конфигурации не ждёт.
++void Raw(const char* Message);
+ } // namespace FEX::Windows::Logging
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
+index 4779c8dd7..9ac66e0b1 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.cpp
++++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
+@@ -62,6 +62,24 @@ constexpr NTSTATUS STATUS_INTERNAL_ERROR = 0xC00000E5;
+ // у клея должна быть опознавательная строка, переживающая линковку.
+ __attribute__((used)) static const char MacRunnerGlueMarker[] = "macrunner-fex-glue-darwin-v1";
+ 
++// ★★★ MacRunner N2b — ЗОНД ЗАГРУЗКИ. Печатает В МОМЕНТ dlopen, безусловно.
++//
++// ЗАЧЕМ ЗАВЕДЁН. Обработчики 6 и 7 молчали, и «молчит» было неотличимо от двух разных
++// вещей: (а) до них не доходит управление, (б) загружен ЧУЖОЙ спутник. Разобрало
++// сличение UUID: `sample` показал в процессе xtajit.so с UUID 67AE71B2…, а это
++// engine/wine/dist/lib/wine/aarch64-unix/xtajit.so — спутник HYPERBRIDGE, тогда как наш
++// клей имеет UUID 3454B40B…. Печать `macrunner-cpu-backend-load: unix=<overlay>/…` при
++// этом сообщала НАМЕРЕНИЕ загрузчика, а не факт: virtual.c:1203 записывает unix_path
++// модулю ТОЛЬКО ОДИН РАЗ (`if (!builtin->unix_path)`), а `dlsym` затем спокойно находит
++// `__wine_unix_call_funcs` и у чужого спутника — то есть подмена даёт ЛОЖНЫЙ УСПЕХ.
++//
++// Конструктор — единственный способ ответить «загрузили ли ИМЕННО МЕНЯ», не полагаясь
++// на то, что до какого-либо обработчика дошли.
++__attribute__((constructor)) static void MacRunnerGlueAnnounce(void) {
++  fprintf(stderr, "macrunner-fex-glue: загружен клей FEX, таблица на 8 мест, pid=%d\n", (int)getpid());
++  fflush(stderr);
++}
++
+ // Печать безусловная, в stderr: каналы wine (ERR/MESSAGE) до наших журналов не доходят,
+ // проверено — строк `err:` нет НИ В ОДНОМ прогоне за всю историю проекта.
+ static uint64_t MarkJITCount {};
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+index 75503c82d..7d19917d2 100644
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -17,6 +17,7 @@ $end_info$
+ #include <FEXCore/HLE/SyscallHandler.h>
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Utils/Allocator.h>
++#include <FEXCore/Utils/AllocatorHooks.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/Threads.h>
+ #include <FEXCore/Utils/Profiler.h>
+@@ -50,6 +51,7 @@ $end_info$
+ #include "Windows/Common/SHMStats.h"
+ 
+ #include <cstdint>
++#include <cstdio>
+ #include <type_traits>
+ #include <atomic>
+ #include <mutex>
+@@ -513,13 +515,45 @@ public:
+   }
+ };
+ 
++// ★★★ MacRunner N2b — БЕЗУСЛОВНЫЙ ЗОНД ПО ШАГАМ BTCpuProcessInit.
++// Заведён потому, что прогон встаёт МЕЖДУ `macrunner-wow64: before BTCpuProcessInit`
++// нашей wow64.dll и первой строкой FEX, а «after BTCpuProcessInit» не печатается вовсе.
++// Средство диагностики строкой из stderr: каналы Wine (ERR/MESSAGE) до наших журналов
++// не доходят — проверено, строк `err:` нет ни в одном прогоне за историю проекта.
++// Печать безусловная и без гейта: гейт сделал бы зонд лотереей.
++// ★ Печать ТОЛЬКО через Logging::Raw. fprintf из PE = NtTerminateProcess + __fastfail
++// (Common/CRT/IO.cpp:388 + Common/Priv.h:59). Замерено: прогон умер с exit=0 и пустым
++// журналом ровно на первом таком «зонде».
++#define MACRUNNER_FEX_STEP(n, what)                                              \
++  do {                                                                            \
++    char MacRunnerStepBuf[128];                                                    \
++    const char* MacRunnerStepWhat = (what);                                        \
++    int MacRunnerStepPos = 0;                                                      \
++    const char Prefix[] = "macrunner-fex-init: шаг=";                              \
++    for (const char* S = Prefix; *S && MacRunnerStepPos < 100; ++S)                \
++      MacRunnerStepBuf[MacRunnerStepPos++] = *S;                                   \
++    if ((n) >= 10) MacRunnerStepBuf[MacRunnerStepPos++] = '0' + ((n) / 10);        \
++    MacRunnerStepBuf[MacRunnerStepPos++] = '0' + ((n) % 10);                       \
++    MacRunnerStepBuf[MacRunnerStepPos++] = ' ';                                    \
++    for (const char* S = MacRunnerStepWhat; *S && MacRunnerStepPos < 120; ++S)     \
++      MacRunnerStepBuf[MacRunnerStepPos++] = *S;                                   \
++    MacRunnerStepBuf[MacRunnerStepPos++] = '\n';                                   \
++    MacRunnerStepBuf[MacRunnerStepPos] = '\0';                                     \
++    FEX::Windows::Logging::Raw(MacRunnerStepBuf);                                  \
++  } while (0)
++
+ void BTCpuProcessInit() {
++  MACRUNNER_FEX_STEP(0, "вход");
+   FEX::Windows::InitCRTProcess();
++  MACRUNNER_FEX_STEP(1, "InitCRTProcess");
+   const auto ExecutablePath = FEX::Windows::GetExecutableFilePath();
+   const auto ExecutableName = FEX::Windows::BaseName(ExecutablePath);
++  MACRUNNER_FEX_STEP(2, "GetExecutableFilePath");
+   FEX::Config::LoadConfig(fextl::string {ExecutableName}, _environ, FEX::ReadPortabilityInformation());
++  MACRUNNER_FEX_STEP(3, "LoadConfig");
+   FEXCore::Config::ReloadMetaLayer();
+   FEX::Windows::Logging::Init();
++  MACRUNNER_FEX_STEP(4, "Logging::Init");
+ 
+   FEXCore::Config::Set(FEXCore::Config::CONFIG_INTERPRETER_INSTALLED, "0");
+   FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, "0");
+@@ -527,24 +561,55 @@ void BTCpuProcessInit() {
+   FEXCore::Config::Set(FEXCore::Config::CONFIG_APP_CONFIG_NAME, ExecutableName);
+ 
+   FEXCore::Profiler::Init("", "");
++  MACRUNNER_FEX_STEP(5, "Profiler::Init");
+ 
+   SignalDelegator = fextl::make_unique<FEX::DummyHandlers::DummySignalDelegator>();
+   SyscallHandler = fextl::make_unique<WowSyscallHandler>();
+   const auto NtDll = GetModuleHandleW(L"ntdll.dll");
+   const bool IsWine = !!GetProcAddress(NtDll, "wine_get_version");
+   OvercommitTracker.emplace(IsWine);
+-
++  MACRUNNER_FEX_STEP(6, "OvercommitTracker");
++
++  // ★★★ MacRunner N2b — ПОРЯДОК ЗДЕСЬ НЕСУЩИЙ, И ОН ИЗМЕНЁН НАМЕРЕННО.
++  //   1. UnixLib::Init  — клей должен быть жив ДО того, как кто-то позовёт обработчик;
++  //   2. SetupHooks     — крюки 6/7 попадают в FEXCore;
++  //   3. проверка       — на дарвиновской сборке отсутствие клея ФАТАЛЬНО;
++  //   4. EnableJITExec(1) для ЭТОГО потока — до первого исполняемого выделения;
++  //   5. CreateNewContext/InitCore — вот здесь и создаётся диспетчер, первая запись кода.
++  // Апстрим звал Init ПОСЛЕ SetupHooks и ИГНОРИРОВАЛ его bool. Для нас игнорировать
++  // нельзя: без клея запись в MAP_JIT упрётся в W^X, и отказ вылезет далеко от причины.
++  const bool UnixLibReady = FEX::Windows::UnixLib::Init(NtDll);
++  MACRUNNER_FEX_STEP(7, UnixLibReady ? "UnixLib::Init ДА" : "UnixLib::Init НЕТ");
+   FEX::Windows::Allocator::SetupHooks(NtDll);
+-  FEX::Windows::UnixLib::Init(NtDll);
++  MACRUNNER_FEX_STEP(8, "SetupHooks");
++
++#ifdef FEX_WINE_DARWIN
++  if (!UnixLibReady || !FEXCore::Allocator::EnableJITExec) {
++    // ★ BTCpuProcessInit объявлен void — вернуть STATUS_ здесь НЕЛЬЗЯ. Поэтому именованный
++    // отказ в stderr (каналы wine до наших журналов не доходят) и снятие процесса.
++    FEX::Windows::Logging::Raw(UnixLibReady ?
++                                 "macrunner-fex-НЕТ-КЛЕЯ: WOW64 — UnixLib ДА, крюк 7 НЕТ\n" :
++                                 "macrunner-fex-НЕТ-КЛЕЯ: WOW64 — UnixLib НЕТ\n");
++    NtTerminateProcess(NtCurrentProcess(), STATUS_NOT_SUPPORTED);
++  }
++  FEXCore::Allocator::JITWriteThreadInit();
++  MACRUNNER_FEX_STEP(9, "JITWriteThreadInit");
++#else
++  (void)UnixLibReady;
++#endif
+ 
+   {
+     auto HostFeatures = FEX::Windows::CPUFeatures::FetchHostFeatures(IsWine, FEXCore::HostFeatures::HostTypeEnum::Wow64);
++    MACRUNNER_FEX_STEP(10, "FetchHostFeatures");
+     CTX = FEXCore::Context::Context::CreateNewContext(HostFeatures);
++    MACRUNNER_FEX_STEP(11, "CreateNewContext");
+   }
+ 
+   CTX->SetSignalDelegator(SignalDelegator.get());
+   CTX->SetSyscallHandler(SyscallHandler.get());
++  MACRUNNER_FEX_STEP(12, "перед InitCore");
+   CTX->InitCore();
++  MACRUNNER_FEX_STEP(13, "InitCore");
+   Context::HandlerConfig.emplace(*CTX);
+   InvalidationTracker.emplace(*CTX, Threads);
+   ImageTracker.emplace(*CTX, false);
+@@ -596,6 +661,10 @@ void BTCpuThreadInit() {
+   static constexpr size_t DefaultWow64CS {4};
+   std::scoped_lock Lock(ThreadCreationMutex);
+   FEX::Windows::InitCRTThread();
++  // ★ MacRunner N2b — режим MAP_JIT ПОТОКОВЫЙ. Каждый новый поток FEX обязан назначить
++  // себе «исполнять» сам: чужой поток за него этого не сделает. Ставится сразу после
++  // InitCRTThread и ДО CreateThread, где пойдут первые записи кода.
++  FEXCore::Allocator::JITWriteThreadInit();
+   auto* Thread = CTX->CreateThread(0, 0);
+ 
+   // Default segment setup.
+@@ -946,6 +1015,13 @@ bool BTCpuResetToConsistentStateImpl(EXCEPTION_POINTERS* Ptrs) {
+ 
+ NTSTATUS BTCpuResetToConsistentState(EXCEPTION_POINTERS* Ptrs) {
+   if (BTCpuResetToConsistentStateImpl(Ptrs)) {
++    // ★★★ MacRunner N2b — ДОГОВОР ПРИ ИСКЛЮЧЕНИИ. NtContinue НЕ ВОЗВРАЩАЕТСЯ, значит
++    // ни один деструктор C++ на этом пути не отработает. Если исключение застало поток
++    // внутри скобки записи, глубина осталась бы ненулевой, а поток — в режиме «писать»,
++    // и первый же прыжок в выпущенный код умер бы на W^X — далеко от причины.
++    // Возобновляемся В ГОСТЕВОЙ КОД, значит режим exec. Ненулевая глубина здесь — это
++    // улика, и она печатается (macrunner-fex-jitwrite-РАЗРЫВ), а не глотается.
++    FEXCore::Allocator::JITWriteResetForResume(true);
+     NtContinue(Ptrs->ContextRecord, FALSE);
+   }
+ 

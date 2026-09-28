@@ -1,0 +1,472 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 15:05:02 +1000
+Subject: [PATCH 09/11] Elden Ring lane: JIT statistics, writable-code
+ validation modes, ARM64EC TLS fixes
+
+Source of the diagnostic FEX used for the Elden Ring runs 098-102 (xtajit64.dll a51dc80f,
+artifacts/elden-ring-20260915/fex-jitstats): the "macrunner-fex-jit" statistics line
+(compilations, repeats, IR/codegen time, buffer flushes, invalidations),
+MACRUNNER_FEX_WRITABLE_VALIDATION modes 1-3 (mode 3 also validates control-transfer
+instructions in writable code), the "macrunner-fex-codechanged" log, and the ARM64EC
+Module.cpp changes of candidates 087-tls..092.
+All new behaviour is behind MACRUNNER_FEX_* environment switches; not in MacRunner 1.0.2.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Core/Core.cpp    | 182 +++++++++++++++++++++-
+ FEXCore/Source/Interface/IR/IREmitter.cpp |  71 ++++++++-
+ Source/Windows/ARM64EC/Module.cpp         |  58 +++++++
+ 3 files changed, 308 insertions(+), 3 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 5ef1a2e61..4251c7875 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -77,6 +77,132 @@ $end_info$
+ #include <utility>
+ #include <xxhash.h>
+ 
++// ★ MacRunner Opus 19.09.2026 — счётчики JIT (только диагностика, поведение не меняют).
++// Вопрос: почему главный поток при загрузке Elden Ring до 80 % занятости компилирует в FEX —
++// новый код или повторная трансляция того же (после инвалидации). Печать через
++// FEX::Windows::Logging::Raw (__wine_dbg_output): fprintf в PE-части FEX убивает процесс.
++namespace FEX::Windows::Logging {
++void Raw(const char* Message);
++}
++extern std::atomic<uint64_t> MacRunnerJitWalkSteps;
++extern std::atomic<uint64_t> MacRunnerJitWalkCalls;
++extern std::atomic<uint64_t> MacRunnerJitWalkMismatch;
++int MacRunnerBlockWalkMode();
++std::atomic<uint64_t> MacRunnerJitSMC {0}; // Module.cpp: HandleRWXAccessViolation == true
++namespace {
++std::atomic<uint64_t> MRCompiles {0}, MRInsts {0}, MRRepeats {0}, MRRaced {0}, MRIrTicks {0}, MRCgTicks {0}, MRMaxInsts {0};
++// Откуда повторы: полная очистка кэша (буфер кода заполнен), частичная, одиночные компиляции,
++// инвалидация диапазонов (VirtualProtect/Free/FlushInstructionCache), точечное удаление блока.
++std::atomic<uint64_t> MRFlushNew {0}, MRFlushL12 {0}, MRSingle {0}, MRCodeBytes {0}, MRInvCalls {0}, MRInvBytes {0}, MRRemove {0};
++std::atomic<uint64_t> MRValidated {0}, MRWritableSkipped {0};
++// ★ MacRunner Opus 19.09 — побайтная проверка кода в записываемых диапазонах (writable-validation-clear, Astra 11.09):
++// 0 = выключена; 1 = на ВСЕХ инструкциях из записываемого кода (как было, по умолчанию);
++// 2 = только если 16-КБ страница хоста не целиком внутри RWX-интервала (смешанная страница, где mtrack слеп);
++// 3 = как 2, плюс все инструкции переходов/вызовов (SETS_RIP/CALL/BLOCK_END): в 092 режим 2 выполнил устаревший
++//     перевод `call` на 0x1405554E8, который Arxan переписывает (смещение 0x193 -> 0x40000193).
++// У Elden Ring почти весь код записываемый (Arxan): режим 1 даёт ~300 байт ARM-кода на x86-инструкцию и
++// сотни полных очисток 128-МБ буфера кода за прогон.
++int MRWritableValidationMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_WRITABLE_VALIDATION");
++    return (Value && Value[0] >= '0' && Value[0] <= '3' && !Value[1]) ? Value[0] - '0' : 1;
++  }();
++  return Mode;
++}
++constexpr unsigned MRTableBits = 21;
++std::atomic<uint64_t> MRTable[size_t {1} << MRTableBits];
++inline uint64_t MRTicks() {
++  uint64_t Value;
++  asm volatile("mrs %0, cntvct_el0" : "=r"(Value));
++  return Value;
++}
++inline uint64_t MRFrequency() {
++  uint64_t Value;
++  asm volatile("mrs %0, cntfrq_el0" : "=r"(Value));
++  return Value ? Value : 1;
++}
++// true, если этот GuestRIP уже компилировался. Таблица на 2М адресов, открытая адресация.
++bool MRSeen(uint64_t Rip) {
++  const uint64_t Key = Rip ? Rip : 1;
++  const size_t Mask = (size_t {1} << MRTableBits) - 1;
++  size_t Index = size_t((Key * 0x9E3779B97F4A7C15ull) >> (64 - MRTableBits));
++  for (unsigned Probe = 0; Probe < 64; ++Probe) {
++    auto& Slot = MRTable[(Index + Probe) & Mask];
++    uint64_t Current = Slot.load(std::memory_order_relaxed);
++    if (Current == Key) {
++      return true;
++    }
++    if (Current == 0) {
++      if (Slot.compare_exchange_strong(Current, Key, std::memory_order_relaxed)) {
++        return false;
++      }
++      if (Current == Key) {
++        return true;
++      }
++    }
++  }
++  return false;
++}
++// Дамп раздутых блоков: адрес гостя, число x86-инструкций, размер ARM-кода, байты x86 и до 4 КБ ARM-кода.
++std::atomic<uint32_t> MRDumps {0};
++void MRHexLines(const char* Tag, uint64_t Rip, const uint8_t* Data, size_t Size) {
++  static constexpr char Digits[] = "0123456789abcdef";
++  for (size_t Offset = 0; Offset < Size; Offset += 64) {
++    char Line[256];
++    auto Result = fmt::format_to_n(Line, 96, "macrunner-fex-dump-{}: rip={:x} +{:04x} ", Tag, Rip, Offset);
++    size_t Length = std::min<size_t>(Result.size, 95);
++    for (size_t I = Offset; I < Size && I < Offset + 64 && Length + 3 < sizeof(Line); ++I) {
++      Line[Length++] = Digits[Data[I] >> 4];
++      Line[Length++] = Digits[Data[I] & 15];
++    }
++    Line[Length++] = '\n';
++    Line[Length] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  }
++}
++void MRMaybeDump(uint64_t Rip, uint64_t Insts, const uint8_t* Code, uint64_t CodeSize, uint64_t CompileIndex) {
++  const bool Bloated = Insts && CodeSize / Insts > 200 && Insts >= 4;
++  const bool Typical = CompileIndex == 5000;
++  if (!Bloated && !Typical) {
++    return;
++  }
++  if (MRDumps.fetch_add(1, std::memory_order_relaxed) >= 6) {
++    return;
++  }
++  char Line[256];
++  auto Result = fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-dump: rip={:x} insts={} code_bytes={} per_inst={} kind={}\n", Rip,
++                                 Insts, CodeSize, Insts ? CodeSize / Insts : 0, Bloated ? "bloated" : "typical");
++  Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++  FEX::Windows::Logging::Raw(Line);
++  if (Rip >= 0x140001000 && Rip + 96 < 0x145e00000) { // только образ eldenring.exe: чтение за пределами региона уронило бы FEX
++    MRHexLines("x86", Rip, reinterpret_cast<const uint8_t*>(Rip), 96);
++  }
++  MRHexLines("arm", Rip, Code, std::min<uint64_t>(CodeSize, 4096));
++}
++void MRReport(uint64_t Compiles) {
++  if (Compiles % 4096) {
++    return;
++  }
++  const uint64_t Frequency = MRFrequency();
++  char Line[512];
++  const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
++    "macrunner-fex-jit: compiles={} repeats={} raced={} guest_insts={} max_insts={} ir_ms={} codegen_ms={} "
++    "walk_calls={} walk_steps={} walk_mismatch={} walk_mode={} smc={} flush_new={} flush_l12={} single={} code_mb={} "
++    "inv_calls={} inv_mb={} remove={} validated={} writable_skipped={} wv_mode={}\n",
++    Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
++    MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
++    MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
++    MacRunnerJitWalkCalls.load(std::memory_order_relaxed), MacRunnerJitWalkSteps.load(std::memory_order_relaxed),
++    MacRunnerJitWalkMismatch.load(std::memory_order_relaxed), MacRunnerBlockWalkMode(), MacRunnerJitSMC.load(std::memory_order_relaxed),
++    MRFlushNew.load(std::memory_order_relaxed), MRFlushL12.load(std::memory_order_relaxed), MRSingle.load(std::memory_order_relaxed),
++    MRCodeBytes.load(std::memory_order_relaxed) >> 20, MRInvCalls.load(std::memory_order_relaxed), MRInvBytes.load(std::memory_order_relaxed) >> 20,
++    MRRemove.load(std::memory_order_relaxed), MRValidated.load(std::memory_order_relaxed),
++    MRWritableSkipped.load(std::memory_order_relaxed), MRWritableValidationMode());
++  Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++  FEX::Windows::Logging::Raw(Line);
++}
++} // namespace
++
+ namespace FEXCore::Context {
+ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
+   : HostFeatures {Features}
+@@ -492,6 +618,7 @@ void ContextImpl::OnCodeBufferAllocated(const fextl::shared_ptr<CPU::CodeBuffer>
+ 
+ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
+   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
++  (NewCodeBuffer ? MRFlushNew : MRFlushL12).fetch_add(1, std::memory_order_relaxed);
+ 
+   if (NewCodeBuffer) {
+     // Allocate new CodeBuffer + L3 LookupCache and clear L1+L2 caches
+@@ -638,8 +765,32 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+         }
+ 
+         // Mixed host-page permissions can hide guest writes from write-fault tracking.
+-        const bool ValidateWritableCode = Config.SMCChecks == FEXCore::Config::CONFIG_SMC_MTRACK &&
+-                                          SyscallHandler->QueryGuestExecutableRange(Thread, InstAddress).Writable;
++        bool ValidateWritableCode = false;
++        if (Config.SMCChecks == FEXCore::Config::CONFIG_SMC_MTRACK) {
++          const int ValidationMode = MRWritableValidationMode();
++          if (ValidationMode) {
++            const auto Range = SyscallHandler->QueryGuestExecutableRange(Thread, InstAddress);
++            if (Range.Writable) {
++              ValidateWritableCode = true;
++              if (ValidationMode >= 2) {
++                constexpr uint64_t HostPage = 0x4000;
++                const uint64_t First = InstAddress & ~(HostPage - 1);
++                const uint64_t Last = (InstAddress + std::max<uint64_t>(DecodedInfo->InstSize, 1) - 1) & ~(HostPage - 1);
++                const bool WholeHostPagesRWX = Range.Base <= First && Last + HostPage <= Range.Base + Range.Size;
++                const bool ControlTransfer = TableInfo && (TableInfo->Flags & (FEXCore::X86Tables::InstFlags::FLAGS_SETS_RIP |
++                                                                               FEXCore::X86Tables::InstFlags::FLAGS_CALL |
++                                                                               FEXCore::X86Tables::InstFlags::FLAGS_BLOCK_END));
++                ValidateWritableCode = !WholeHostPagesRWX || (ValidationMode == 3 && ControlTransfer);
++                if (WholeHostPagesRWX) {
++                  MRWritableSkipped.fetch_add(1, std::memory_order_relaxed);
++                }
++              }
++            }
++          }
++        }
++        if (ValidateWritableCode) {
++          MRValidated.fetch_add(1, std::memory_order_relaxed);
++        }
+         if (Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL || Block.ForceFullSMCDetection || ValidateWritableCode) {
+           auto ExistingCodePtr = reinterpret_cast<uint8_t*>(Block.Entry + BlockInstructionsLength);
+           auto InstAddressReg = Thread->OpDispatcher->_EntrypointOffset(GPRSize, InstAddress - GuestRIP);
+@@ -791,8 +942,10 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
+   }
+ 
+   // Generate IR + Meta Info
++  const uint64_t MRIrStart = MRTicks();
+   auto [IRView, TotalInstructions, TotalInstructionsLength, StartAddr, Length, NeedsAddGuestCodeRanges] =
+     GenerateIR(Thread, GuestRIP, Config.GDBSymbols(), MaxInst);
++  MRIrTicks.fetch_add(MRTicks() - MRIrStart, std::memory_order_relaxed);
+   if (!IRView) {
+     // OpDispatcher IR already released in this case.
+     return {{}, nullptr, 0, 0, false};
+@@ -806,6 +959,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
+   if (MaxInst != 1) {
+     if (auto Block = Thread->LookupCache->FindBlock(Thread, GuestRIP)) {
+       // Raced to compile, release the OpDispatcher IR.
++      MRRaced.fetch_add(1, std::memory_order_relaxed);
+       Thread->OpDispatcher->DelayedDisownBuffer();
+       return {.CompiledCode = {.BlockBegin = reinterpret_cast<uint8_t*>(Block), .EntryPoints = {{GuestRIP, reinterpret_cast<uint8_t*>(Block)}}},
+               .DebugData = nullptr,
+@@ -820,7 +974,19 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
+   // If the trap flag is set we generate single instruction blocks that each check to generate a single step exception.
+   bool TFSet = Thread->CurrentFrame->State.flags[X86State::RFLAG_TF_RAW_LOC];
+ 
++  const uint64_t MRCgStart = MRTicks();
+   auto CompiledCode = Thread->CPUBackend->CompileCode(GuestRIP, Length, TotalInstructions == 1, &*IRView, DebugData.get(), TFSet);
++  MRCgTicks.fetch_add(MRTicks() - MRCgStart, std::memory_order_relaxed);
++  MRCodeBytes.fetch_add(DebugData->HostCodeSize, std::memory_order_relaxed);
++  MRMaybeDump(GuestRIP, TotalInstructions, CompiledCode.BlockBegin, DebugData->HostCodeSize, MRCompiles.load(std::memory_order_relaxed));
++  if (MRSeen(GuestRIP)) {
++    MRRepeats.fetch_add(1, std::memory_order_relaxed);
++  }
++  MRInsts.fetch_add(TotalInstructions, std::memory_order_relaxed);
++  for (uint64_t Max = MRMaxInsts.load(std::memory_order_relaxed);
++       TotalInstructions > Max && !MRMaxInsts.compare_exchange_weak(Max, TotalInstructions, std::memory_order_relaxed);) {
++  }
++  MRReport(MRCompiles.fetch_add(1, std::memory_order_relaxed) + 1);
+ 
+   // Release the IR
+   Thread->OpDispatcher->DelayedDisownBuffer();
+@@ -950,6 +1116,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+ 
+ uintptr_t ContextImpl::CompileSingleStep(FEXCore::Core::CpuStateFrame* Frame, uint64_t GuestRIP) {
+   FEXCORE_PROFILE_SCOPED("CompileSingleStep");
++  MRSingle.fetch_add(1, std::memory_order_relaxed);
+   auto Thread = Frame->Thread;
+ 
+   static_cast<ContextImpl*>(Thread->CTX)->SyscallHandler->PreCompile();
+@@ -971,6 +1138,8 @@ uintptr_t ContextImpl::CompileSingleStep(FEXCore::Core::CpuStateFrame* Frame, ui
+ 
+ void ContextImpl::InvalidateCodeBuffersCodeRange(uint64_t Start, uint64_t Length) {
+   FEXCORE_PROFILE_SCOPED("InvalidateCodeBuffersCodeRange");
++  MRInvCalls.fetch_add(1, std::memory_order_relaxed);
++  MRInvBytes.fetch_add(Length, std::memory_order_relaxed);
+ 
+   LOGMAN_THROW_A_FMT(CodeInvalidationMutex.try_lock() == false, "CodeInvalidationMutex needs to be unique_locked here");
+   std::scoped_lock lk {CodeBufferListLock};
+@@ -1006,6 +1175,15 @@ void ContextImpl::InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadS
+ }
+ 
+ void ContextImpl::ThreadRemoveCodeEntryFromJit(FEXCore::Core::CpuStateFrame* Frame, uint64_t GuestRIP) {
++  // Сработала побайтная проверка: код на GuestRIP изменился после трансляции. Первые 64 — в журнал.
++  if (MRRemove.fetch_add(1, std::memory_order_relaxed) < 64) {
++    uint64_t Bytes = 0;
++    memcpy(&Bytes, reinterpret_cast<const void*>(GuestRIP), sizeof(Bytes));
++    char Line[160];
++    auto Result = fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-codechanged: rip={:x} now={:016x}\n", GuestRIP, Bytes);
++    Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  }
+   static_cast<ContextImpl*>(Frame->Thread->CTX)->SyscallHandler->InvalidateGuestCodeRange(Frame->Thread, GuestRIP, 1);
+ }
+ 
+diff --git a/FEXCore/Source/Interface/IR/IREmitter.cpp b/FEXCore/Source/Interface/IR/IREmitter.cpp
+index a0b265166..a86e39b00 100644
+--- a/FEXCore/Source/Interface/IR/IREmitter.cpp
++++ b/FEXCore/Source/Interface/IR/IREmitter.cpp
+@@ -12,10 +12,49 @@ $end_info$
+ #include <FEXCore/Utils/EnumUtils.h>
+ #include <FEXCore/Utils/LogManager.h>
+ 
++#include <atomic>
+ #include <cstdint>
++#include <cstdlib>
+ #include <cstring>
+ 
++// ★ MacRunner Opus 19.09.2026 — «последний блок» без обхода всего списка.
++// CreateNewCodeBlockAfter(nullptr) шёл по Header.Next от текущего блока до конца списка на
++// каждый выход за пределы многоблочной трансляции: O(блоков) на выход, O(N^2) на трансляцию.
++// В профиле загрузки Elden Ring (прогон 085) это 22.8 % занятости главного потока.
++// Все блоки трансляции лежат в одной цепочке (CreateJumpBlocks + CreateNewCodeBlockAfter),
++// поэтому проход от ЛЮБОГО её узла приходит к тому же последнему блоку. Подсказка — узел,
++// последним добавленный в конец; сбрасывается в ResetWorkingList (перед каждой трансляцией).
++// MACRUNNER_FEX_BLOCKWALK_FIX: 0 (по умолчанию) = как было; 1 = идти от подсказки;
++// 2 = считать обоими способами, использовать старый, считать расхождения.
++std::atomic<uint64_t> MacRunnerJitWalkSteps {0};
++std::atomic<uint64_t> MacRunnerJitWalkCalls {0};
++std::atomic<uint64_t> MacRunnerJitWalkMismatch {0};
++int MacRunnerBlockWalkMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_BLOCKWALK_FIX");
++    return (Value && Value[0] >= '0' && Value[0] <= '2' && !Value[1]) ? Value[0] - '0' : 0;
++  }();
++  return Mode;
++}
++
+ namespace FEXCore::IR {
++namespace {
++// НЕ thread_local: у PE-модулей FEX нет каталога TLS (_tls_index вручную = 0), и thread_local
++// пишет в TLS-блок ГЛАВНОГО модуля (слот 0). В прогоне 087 это испортило TLS Elden Ring
++// (падение 0x140E649C3, чтение 0x2FEB). См. Utils/Allocator.cpp «ЗДЕСЬ БЫЛ thread_local».
++// Подсказка — НОМЕР блока в собственном CodeBlocks эмиттера (+ метка владельца), одно
++// 64-битное атомарное значение. Номер разыменовывается только в СВОЁМ CodeBlocks, а любой
++// уже связанный блок своей цепочки ведёт к тому же концу — поэтому даже чужая подсказка
++// (совпадение метки) не ломает результат, только удлиняет проход.
++constexpr size_t MacRunnerHintSlots = 1024;
++std::atomic<uint64_t> MacRunnerHint[MacRunnerHintSlots];
++size_t MacRunnerHintSlot(const void* Owner) {
++  return size_t(((reinterpret_cast<uintptr_t>(Owner) >> 4) * 0x9E3779B97F4A7C15ull) >> 54);
++}
++uint64_t MacRunnerHintTag(const void* Owner) {
++  return (uint64_t(uint32_t(reinterpret_cast<uintptr_t>(Owner) >> 4)) | 1) << 32;
++}
++} // namespace
+ 
+ static bool IsFragmentExit(FEXCore::IR::IROps Op) {
+   switch (Op) {
+@@ -92,6 +131,7 @@ void IREmitter::ResetWorkingList() {
+   InvalidNode = reinterpret_cast<Ref>(DualListData.ListAllocate(sizeof(OrderedNode)));
+   memset(InvalidNode, 0, sizeof(OrderedNode));
+   CurrentCodeBlock = nullptr;
++  MacRunnerHint[MacRunnerHintSlot(this)].store(0, std::memory_order_relaxed);
+ }
+ 
+ void IREmitter::ReplaceAllUsesWithRange(Ref Node, Ref NewNode, AllNodesIterator Begin, AllNodesIterator End) {
+@@ -165,14 +205,43 @@ IREmitter::IRPair<IROp_CodeBlock> IREmitter::CreateNewCodeBlockAfter(Ref insertA
+     LOGMAN_THROW_A_FMT(CurrentCodeBlock != nullptr, "CurrentCodeBlock must not be null here");
+ 
+     // Find last block
+-    auto LastBlock = CurrentCodeBlock;
++    const int Mode = MacRunnerBlockWalkMode();
++    // CodeBlocks.back() — только что созданный и ещё НЕ связанный узел: его исключаем.
++    const uint64_t Packed = MacRunnerHint[MacRunnerHintSlot(this)].load(std::memory_order_relaxed);
++    const size_t HintIndex = size_t(uint32_t(Packed));
++    Ref HintNode = nullptr;
++    if ((Packed & ~uint64_t {0xffffffff}) == MacRunnerHintTag(this) && HintIndex + 1 < CodeBlocks.size()) {
++      HintNode = CodeBlocks[HintIndex];
++      if (HintNode->Op(DualListData.DataBegin())->Op != OP_CODEBLOCK) {
++        HintNode = nullptr;
++      }
++    }
++    const bool HaveHint = HintNode != nullptr;
++    auto LastBlock = (Mode == 1 && HaveHint) ? HintNode : CurrentCodeBlock;
++    uint64_t Steps = 0;
+ 
+     while (LastBlock->Header.Next.GetNode(DualListData.ListBegin()) != InvalidNode) {
+       LastBlock = LastBlock->Header.Next.GetNode(DualListData.ListBegin());
++      ++Steps;
+     }
+ 
++    if (Mode == 2 && HaveHint) {
++      auto FromHint = HintNode;
++      while (FromHint->Header.Next.GetNode(DualListData.ListBegin()) != InvalidNode) {
++        FromHint = FromHint->Header.Next.GetNode(DualListData.ListBegin());
++      }
++      if (FromHint != LastBlock) {
++        MacRunnerJitWalkMismatch.fetch_add(1, std::memory_order_relaxed);
++      }
++    }
++    MacRunnerJitWalkSteps.fetch_add(Steps, std::memory_order_relaxed);
++    MacRunnerJitWalkCalls.fetch_add(1, std::memory_order_relaxed);
++
+     // Append it after the last block
+     LinkCodeBlocks(LastBlock, CodeNode);
++    if (!CodeBlocks.empty() && CodeBlocks.back() == static_cast<Ref>(CodeNode)) {
++      MacRunnerHint[MacRunnerHintSlot(this)].store(MacRunnerHintTag(this) | uint64_t(CodeBlocks.size() - 1), std::memory_order_relaxed);
++    }
+   }
+ 
+   SetWriteCursor(OldCursor);
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index 69edf3207..874f24d05 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -8,6 +8,9 @@ $end_info$
+ */
+ 
+ #include <FEXCore/fextl/fmt.h>
++#include <algorithm>
++#include <atomic>
++extern std::atomic<uint64_t> MacRunnerJitSMC; // ★ MacRunner Opus 19.09: определён в Core.cpp
+ #include <FEXCore/Utils/AllocatorHooks.h>
+ #include <FEXCore/Core/X86Enums.h>
+ #include <FEXCore/Core/SignalDelegator.h>
+@@ -485,6 +488,59 @@ static ARM64_NT_CONTEXT StoreStateToPackedECContext(FEXCore::Core::InternalThrea
+   return ECContext;
+ }
+ 
++// ★ MacRunner Opus 19.09.2026 — стек ГОСТЯ при обращении к нулевой странице.
++// Падение Elden Ring 0x141E880FD (mov rax,[rcx+0x18] с rcx=0x20): у функции 98 мест вызова,
++// winedbg на ARM64-хосте x64-стек не разбирает, а к сигнальному обработчику Wine доходит
++// стек эмулятора, не гостя. Здесь x64-состояние уже восстановлено (Args->Context, раскладка
++// ARM64EC: X8=RAX X0=RCX X1=RDX X27=RBX Sp=RSP Fp=RBP X25=RSI X26=RDI X2=R8 X3=R9 X19..X22=R12..R15).
++// Читаем только [RSP, StackBase) из TEB — занятая часть стека потока. Не больше 16 раз за процесс.
++static void MacRunnerLogNullPageFault(const EXCEPTION_RECORD& Rec, const ARM64_NT_CONTEXT& Ec) {
++  static std::atomic<uint32_t> Count {0};
++  if (Rec.ExceptionCode != EXCEPTION_ACCESS_VIOLATION || Rec.NumberParameters < 2 || Rec.ExceptionInformation[1] >= 0x10000) {
++    return;
++  }
++  if (Count.fetch_add(1, std::memory_order_relaxed) >= 16) {
++    return;
++  }
++  const auto* Tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
++  const uint64_t Low = reinterpret_cast<uint64_t>(Tib->StackLimit);
++  const uint64_t High = reinterpret_cast<uint64_t>(Tib->StackBase);
++  const uint64_t Tid = GetCurrentThreadId();
++  char Line[768];
++  auto Emit = [&](size_t Size) {
++    Line[std::min<size_t>(Size, sizeof(Line) - 1)] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  };
++  Emit(fmt::format_to_n(Line, sizeof(Line) - 1,
++                        "macrunner-fex-nullfault: tid={:x} rip={:x} fault={:x} rax={:x} rcx={:x} rdx={:x} rbx={:x} rsp={:x} rbp={:x} "
++                        "rsi={:x} rdi={:x} r8={:x} r9={:x} r12={:x} r13={:x} r14={:x} r15={:x} stack=[{:x},{:x})\n",
++                        Tid, Ec.Pc, Rec.ExceptionInformation[1], Ec.X8, Ec.X0, Ec.X1, Ec.X27, Ec.Sp, Ec.Fp, Ec.X25, Ec.X26, Ec.X2, Ec.X3,
++                        Ec.X19, Ec.X20, Ec.X21, Ec.X22, Low, High)
++         .size);
++  const uint64_t Rsp = Ec.Sp;
++  if (Rsp < Low || Rsp >= High || (Rsp & 7)) {
++    Emit(fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-nullfault-stack: tid={:x} rsp outside thread stack\n", Tid).size);
++    return;
++  }
++  const auto* Words = reinterpret_cast<const uint64_t*>(Rsp);
++  const uint64_t Available = (High - Rsp) / 8;
++  for (uint64_t Row = 0; Row < 8 && Row * 8 + 8 <= Available; ++Row) {
++    const auto* W = Words + Row * 8;
++    Emit(fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-nullfault-stack: tid={:x} rsp+{:03x}: {:x} {:x} {:x} {:x} {:x} {:x} {:x} {:x}\n",
++                          Tid, Row * 64, W[0], W[1], W[2], W[3], W[4], W[5], W[6], W[7])
++           .size);
++  }
++  // Кандидаты в адреса возврата: слова стека внутри образа eldenring.exe [0x140000000, 0x146000000).
++  unsigned Found = 0;
++  for (uint64_t I = 0; I < Available && I < 0x1000 && Found < 32; ++I) {
++    const uint64_t V = Words[I];
++    if (V >= 0x140001000 && V < 0x146000000) {
++      Emit(fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-nullfault-ret: tid={:x} rsp+{:x}={:x}\n", Tid, I * 8, V).size);
++      ++Found;
++    }
++  }
++}
++
+ static void RethrowGuestException(const EXCEPTION_RECORD& Rec, ARM64_NT_CONTEXT& Context) {
+   const auto& Config = SignalDelegator->GetConfig();
+   auto* Thread = GetCPUArea().ThreadState();
+@@ -498,6 +554,7 @@ static void RethrowGuestException(const EXCEPTION_RECORD& Rec, ARM64_NT_CONTEXT&
+   }
+   Args->Context = StoreStateToPackedECContext(Thread, Context.Fpcr, Context.Fpsr);
+   LogMan::Msg::DFmt("pc: {:X} rip: {:X}", Context.Pc, Args->Context.Pc);
++  MacRunnerLogNullPageFault(Rec, Args->Context);
+ 
+   // X64 Windows always clears TF, DF and AF when handling an exception, restoring after.
+   // Current ARM64EC windows can only restore NZCV+SS when returning from an exception and other flags are left untouched from the handler context.
+@@ -720,6 +777,7 @@ bool ResetToConsistentStateImpl(const ThreadCPUArea CPUArea, EXCEPTION_RECORD* E
+     std::scoped_lock Lock(ThreadCreationMutex);
+     if (InvalidationTracker && InvalidationTracker->HandleRWXAccessViolation(Thread, NativeContext->Pc, FaultAddress)) {
+       FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedSMCCount, 1);
++      ::MacRunnerJitSMC.fetch_add(1, std::memory_order_relaxed);
+       if (CTX->IsAddressInCodeBuffer(Thread, NativeContext->Pc) && !CTX->IsCurrentBlockSingleInst(CPUArea.ThreadState()) &&
+           CTX->IsAddressInCurrentBlock(Thread, FaultAddress & FEX::Windows::ProtectionPageMask, FEX::Windows::ProtectionPageSize)) {
+         // If we are not patching ourself (single inst block case) and potentially patching the current block, this is inline SMC. Reconstruct the current context (before the SMC write) then single step the write to reduce it to regular SMC.

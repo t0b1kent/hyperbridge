@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 04:50:56 +0000
+Subject: [PATCH 05/11] Windows: InvalidationTracker works in 16 KiB host
+ protection units
+
+A single Darwin write fault releases the whole 16 KiB backing page, so the fault
+path invalidates that whole unit, and ProtectRWXIntervalsInternal re-arms and
+invalidates every tracked RWX subpage sharing the host protection unit.
+
+Source: MacRunner lane debug-teb-self-load/small-write-fex (navisworks, 11.09.2026);
+exact file archived into libCommonWindows.a of MacRunner 1.0.2.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Source/Windows/Common/InvalidationTracker.cpp | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index 155403d35..4cf473dfc 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -7,6 +7,7 @@
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include "InvalidationTracker.h"
++#include "MacRunnerHostPageGeometry.h"
+ #include <windef.h>
+ #include <winternl.h>
+ 
+@@ -230,7 +231,8 @@ bool InvalidationTracker::HandleRWXAccessViolation(FEXCore::Core::InternalThread
+     {
+       std::scoped_lock Lock(CTX.GetCodeInvalidationMutex());
+ 
+-      InvalidateIntervalInternalLocked(FaultAddress & FEXCore::Utils::FEX_PAGE_MASK, FEXCore::Utils::FEX_PAGE_SIZE);
++      // A single Darwin fault releases writes for the entire backing page.
++      InvalidateIntervalInternalLocked(FaultAddress & ProtectionPageMask, ProtectionPageSize);
+ 
+       // Invalidate, then unprotect the faulting page with the compilation lock held to ensure that any racing invalidations are not dropped.
+       ULONG TmpProt;
+@@ -339,7 +341,11 @@ void InvalidationTracker::InvalidateIntervalInternalLocked(uint64_t Address, uin
+ }
+ 
+ bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t Size, bool ForWriteLocked) {
+-  const auto End = Address + Size;
++  if (!Size) return false;
++  // Re-arm all tracked RWX subpages sharing a host protection unit.
++  const auto End = (Address + Size + ProtectionPageSize - 1) & ProtectionPageMask;
++  const auto AlignedBase = Address & ProtectionPageMask;
++  Address = AlignedBase;
+   std::shared_lock Lock(IntervalsLock);
+ 
+   if (SMCDetectionDisabled) {
+@@ -356,7 +362,8 @@ bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t
+           // applied and the invalidation mutex must be locked throughout.
+           // Do this lazily only when an RWX region is actually hit.
+           // NOTE: This assumes CodeInvalidationMutex is locked by the caller
+-          InvalidateIntervalInternalLocked(Address, Size);
++          // Unprotecting releases the entire host-page range, not only the caller bytes.
++          InvalidateIntervalInternalLocked(AlignedBase, End - AlignedBase);
+         }
+         HitRWXInterval = true;
+       }

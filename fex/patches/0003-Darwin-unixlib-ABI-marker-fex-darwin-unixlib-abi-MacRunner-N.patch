@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 7 Sep 2026 22:31:13 +1000
+Subject: [PATCH] Darwin: unixlib ABI marker __fex_darwin_unixlib_abi (MacRunner N2d)
+
+Original title: =?UTF-8?q?FEX=20N2d:=20=D0=B7=D0=BD=D0=B0=D0=BA=20?= =?UTF-8?q?=D1=82=D0=B0=D0=B1=D0=BB=D0=B8=D1=86=D1=8B=20=5F=5Ffex=5Fdarwin?= =?UTF-8?q?=5Funixlib=5Fabi=20=D0=B7=D0=B0=D0=BA=D1=80=D1=8B=D0=B2=D0=B0?= =?UTF-8?q?=D0=B5=D1=82=20=D0=BF=D0=BE=D0=B4=D0=BC=D0=B5=D0=BD=D1=83=20?= =?UTF-8?q?=D1=81=D0=BF=D1=83=D1=82=D0=BD=D0=B8=D0=BA=D0=B0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Клей экспортирует опознавательный знак; ntdll не отдаёт таблицу спутнику, который
+его не несёт. Замер обеими руками, различие ровно одно — лежит ли на пути загрузки
+unix-половина HyperBridge:
+
+  прибор                          спутник HB убран   спутник HB на месте
+  macrunner-fex-unixlib-abi знак        ЕСТЬ                 НЕТ
+  таблица                              отдана            НЕ отдана
+  macrunner-fex-glue (конструктор)         1                    0
+  macrunner-fex-jitexec (крюк 7)           4                    0
+  macrunner-fex-call7 «вернулся УСПЕХ»     2                    2   <- ложный успех
+  наибольшее n у jit-mprotect-skip         4              196 608   <- клин
+  код выхода                             124             187 (0xBB)
+
+Третья и пятая строки и есть дефект: PE-сторона получала STATUS_SUCCESS от
+обработчика, который не исполнялся, после чего вставала в клин на 196 608 итерациях.
+Теперь отказ громкий: FEX печатает «НЕТ-КЛЕЯ» и завершает процесс.
+---
+ Source/Windows/UnixLib/FEXUnixLib.cpp | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
+index 9ac66e0b1..960f36704 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.cpp
++++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
+@@ -360,6 +360,33 @@ static NTSTATUS FEXUnixLib_EnableJITExecHandler(void* _Args) {
+ 
+ #endif // __APPLE__
+ 
++// ★★★★ MacRunner N2d 07.09.2026 — ОПОЗНАВАТЕЛЬНЫЙ ЗНАК ТАБЛИЦЫ. Закрывает подмену спутника.
++//
++// ЧТО ИЗМЕРЕНО, ради чего он появился. Две руки, различавшиеся ТОЛЬКО тем, лежит ли на
++// пути загрузки unix-половина HyperBridge (dist/lib/wine/aarch64-unix/xtajit.so):
++//
++//   прибор                              спутник HB убран   спутник HB на месте
++//   macrunner-fex-glue (наш конструктор)        1                  0
++//   macrunner-fex-jitexec (наш крюк 7)          4                  0
++//   macrunner-fex-call7 «вернулся УСПЕХ»        2                  2   <-- ЛОЖНЫЙ УСПЕХ
++//   шаг=13 InitCore                             1                  0
++//   наибольшее n у jit-mprotect-skip            4             196 608   <-- клин
++//
++// Третья строка и есть дефект: PE-сторона получила STATUS_SUCCESS от обработчика,
++// который НЕ ИСПОЛНЯЛСЯ. Механика: у обоих спутников есть символ
++// __wine_unix_call_funcs, virtual.c:1203 пишет модулю unix_path ОДИН раз, dlsym у
++// чужого спутника находит таблицу — и вызовы уходят в НЕЁ. Молчаливая работа с чужой
++// таблицей неотличима от своей ровно до момента, когда что-нибудь встанет.
++//
++// Знак экспортируется с ВИДИМОСТЬЮ ПО УМОЛЧАНИЮ: ntdll ищет его тем же dlsym, что и
++// саму таблицу, и без него таблицу НЕ ОТДАЁТ (get_builtin_unix_funcs). Отказ громкий:
++// FEX печатает «НЕТ-КЛЕЯ» и завершает процесс — это лучше, чем идти дальше вслепую.
++//
++// Значение несёт число мест в таблице: если раскладка разойдётся, разойдётся и знак.
++extern "C" __attribute__((visibility("default")))
++const unsigned long long __fex_darwin_unixlib_abi =
++    0x4645584d52000000ULL | (unsigned long long)ToUnderlying(FEXUnixLibFunctions::MAX);
++
+ extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
+   FEXUnixLib_SetHardwareTSOControlHandler,
+   FEXUnixLib_SetKernelUnalignedAtomicControlHandler,

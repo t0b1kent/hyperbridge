@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 04:50:56 +0000
+Subject: [PATCH 08/11] FEX: do not publish stale block links; full parity at
+ block entry points
+
+ExitFunctionLink re-checks the lookup cache under the invalidation lock and
+returns to the dispatcher if the target was revoked while the lock was dropped.
+RedundantFlagCalculationElimination treats every block entry point as a possible
+external entrant carrying a full-byte PF.
+
+Recovered from the frozen build tree used for MacRunner 1.0.2
+(build/astra-fex-repro-20260908-c/src, uncommitted there).
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Core/JIT/JIT.cpp                  | 7 +++++++
+ .../IR/Passes/RedundantFlagCalculationElimination.cpp      | 4 ++--
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index 0052ef5ea..0750f4a78 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -574,6 +574,13 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+   // Guard the LookupCache lock with the code invalidation mutex, to avoid issues with forking
+   auto lk_inval = GuardSignalDeferringSection<std::shared_lock>(static_cast<Context::ContextImpl*>(Thread->CTX)->CodeInvalidationMutex, Thread);
+ 
++  // Invalidation may revoke the target while lookup/compilation drops the lock.
++  // Re-enter the dispatcher rather than publish an untracked stale link.
++  if (Thread->LookupCache->FindBlock(Thread, GuestRip) != HostCode) {
++    Frame->State.rip = GuestRip;
++    return Frame->Pointers.DispatcherLoopTop;
++  }
++
+   // Lock here is necessary to prevent simultaneous linking and delinking
+   auto lk = Thread->LookupCache->AcquireWriteLock();
+ 
+diff --git a/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp b/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
+index dc44f1606..7630f274d 100644
+--- a/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
+@@ -632,8 +632,8 @@ void DeadFlagCalculationEliminination::OptimizeParity(IREmitter* IREmit, IRListV
+     const auto& Predecessors = CFG.Get(ID)->Predecessors;
+     bool Full = false;
+ 
+-    if (Predecessors.empty()) {
+-      // Conservatively assume there was full parity before the start block
++    if (BlockHeader->C<IROp_CodeBlock>()->EntryPoint || Predecessors.empty()) {
++      // External entrants can carry a full-byte PF, regardless of internal predecessors.
+       Full = true;
+     } else {
+       // If any predecessor needs full parity at the end, we need full parity.

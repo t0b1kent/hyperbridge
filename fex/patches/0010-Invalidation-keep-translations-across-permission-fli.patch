@@ -1,0 +1,602 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 15:05:02 +1000
+Subject: [PATCH 10/11] Invalidation: keep translations across permission
+ flips, revive unchanged blocks, fixed code buffer
+
+Three switches, all default off (behaviour identical to the previous commit without them):
+- MACRUNNER_FEX_PROT_KEEP=1: a protection change of already-executable memory to executable
+  without write access no longer throws the translation away; =2 additionally arms a write
+  trap on whole host pages when the range becomes RWX. Plan in Common/MacRunnerProtKeep.h.
+- MACRUNNER_FEX_REVIVE=1: a block invalidated while its guest bytes are unchanged is returned
+  to service by XXH3 hash instead of being recompiled (same block map, same buffer epoch,
+  executable range, no TF, same Mono mode; classes in Core/MacRunnerRevive.h).
+- MACRUNNER_FEX_CODEBUF_MAX=1: start with the maximal code buffer (128 MiB) so growth does not
+  flush every translation (upstream does this for its code cache).
+Counters callret_clears/callret_ms measure the call-ret stack clearing cost.
+Elden Ring runs showed 33-40 % repeated compilations and ~12.3k invalidations (~45 GB) per run.
+Host tests: 200k random plans and 20k random page maps, with failing mutants as negative controls.
+Not measured in a game yet.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Core/Core.cpp        | 205 +++++++++++++++++-
+ .../Source/Interface/Core/MacRunnerRevive.h   |  64 ++++++
+ Source/Windows/Common/InvalidationTracker.cpp |  67 +++++-
+ Source/Windows/Common/MacRunnerProtKeep.h     |  92 ++++++++
+ 4 files changed, 422 insertions(+), 6 deletions(-)
+ create mode 100644 FEXCore/Source/Interface/Core/MacRunnerRevive.h
+ create mode 100644 Source/Windows/Common/MacRunnerProtKeep.h
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 4251c7875..f7ed0b983 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -53,6 +53,8 @@ $end_info$
+ #include <FEXCore/fextl/fmt.h>
+ #include <FEXCore/fextl/memory.h>
+ #include <FEXCore/fextl/set.h>
++#include <FEXCore/fextl/unordered_map.h>
++#include "MacRunnerRevive.h"
+ #include <FEXCore/fextl/sstream.h>
+ #include <FEXCore/fextl/vector.h>
+ #include <FEXHeaderUtils/Syscalls.h>
+@@ -89,6 +91,8 @@ extern std::atomic<uint64_t> MacRunnerJitWalkCalls;
+ extern std::atomic<uint64_t> MacRunnerJitWalkMismatch;
+ int MacRunnerBlockWalkMode();
+ std::atomic<uint64_t> MacRunnerJitSMC {0}; // Module.cpp: HandleRWXAccessViolation == true
++// ★ MacRunner (Claude, 23.09.2026) — сбросы от смены прав (InvalidationTracker.cpp, MACRUNNER_FEX_PROT_KEEP).
++std::atomic<uint64_t> MacRunnerProtCalls {0}, MacRunnerProtInvBytes {0}, MacRunnerProtKeptBytes {0}, MacRunnerProtTrapBytes {0};
+ namespace {
+ std::atomic<uint64_t> MRCompiles {0}, MRInsts {0}, MRRepeats {0}, MRRaced {0}, MRIrTicks {0}, MRCgTicks {0}, MRMaxInsts {0};
+ // Откуда повторы: полная очистка кэша (буфер кода заполнен), частичная, одиночные компиляции,
+@@ -109,6 +113,71 @@ int MRWritableValidationMode() {
+   }();
+   return Mode;
+ }
++int MRProtKeepModeForReport() {
++  const char* Value = getenv("MACRUNNER_FEX_PROT_KEEP");
++  return (Value && Value[0] >= '0' && Value[0] <= '2' && !Value[1]) ? Value[0] - '0' : 0;
++}
++
++// ★ MacRunner (Claude, 23.09.2026) — MACRUNNER_FEX_REVIVE=1: ВОЗВРАТ ПЕРЕВОДА вместо повторной компиляции.
++//   В прогонах Elden Ring 098..102 33–40 % компиляций — повторные: блок сброшен (смена прав, сброс по
++//   диапазону), а байты гостя те же. Сброс рвёт только ВХОДЯЩИЕ связи блока (GuestToHostMap::Erase);
++//   исходящие записаны под адресами целей и остаются верными, сам код лежит в буфере до его полного
++//   сброса. Поэтому блок можно вернуть в работу, если байты не изменились — это сверяет хеш.
++//   Условия возврата (иначе — обычная компиляция):
++//     • та же карта блоков и та же эпоха буфера (полный сброс буфера или карты обнуляет таблицу:
++//       GuestToHostMap::ClearCache выбрасывает записи связей без восстановления переходов);
++//     • весь диапазон байтов исполняемый сейчас;
++//     • классы страниц: там, где СЕЙЧАС смешанная страница хоста под запись (класс 2 — ловушка слепа),
++//       блок обязан был и при компиляции быть классом 2 (с проверкой байтов в коде);
++//     • хеш совпал ДО постановки ловушки и ПОСЛЕ неё (запись, успевшая до ловушки, не пройдёт).
++//   Запись в таблицу — только если хеш после компиляции и после ловушки совпал и за компиляцию не было
++//   полного сброса. Сбросы по диапазону идут под исключительной блокировкой и с компиляцией (разделяемой)
++//   не пересекаются. Окно, общее с upstream: запись в ЕЩЁ не защищённую ловушкой целую страницу RWX
++//   между декодированием и ловушкой — двойной хеш его сужает, но не закрывает.
++int MRCodeBufMaxForReport() {
++  const char* Value = getenv("MACRUNNER_FEX_CODEBUF_MAX");
++  return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++}
++int MRReviveMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_REVIVE");
++    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++  }();
++  return Mode;
++}
++constexpr uint64_t MRHostPage = 0x4000; // как в проверке записываемого кода (GenerateIR)
++constexpr uint64_t MRMaxInstSize = 15;  // декодер может заглянуть за последнюю команду
++constexpr size_t MRReviveMaxEntries = size_t {1} << 21;
++using MRSeg = FEX::MacRunnerRevive::Seg;
++struct MRReviveEntry {
++  uint64_t HostCode {};
++  uint64_t HashBegin {}, HashEnd {}, Hash {};
++  const void* Map {};
++  uint64_t Epoch {};
++  bool MonoHacks {}; // ForceFullSMCDetection зависит от режима Mono-хаков — он обязан совпасть
++  fextl::vector<uint64_t> CodePages;
++  fextl::vector<MRSeg> Segs;
++};
++std::mutex MRReviveLock;
++fextl::unordered_map<uint64_t, MRReviveEntry> MRReviveTable;
++std::atomic<uint64_t> MRReviveEpoch {1};
++std::atomic<uint64_t> MRRevived {0}, MRReviveHashMiss {0}, MRReviveSkip {0}, MRReviveRegistered {0}, MRReviveUnstable {0};
++// Обнуление стека возвратов при инвалидации (InvalidateThreadCachedCodeRange): число и время.
++std::atomic<uint64_t> MRCallRetClears {0}, MRCallRetTicks {0};
++
++// Разбор и правило — в MacRunnerRevive.h (проверяются тестами на хосте).
++bool MRSegments(FEXCore::HLE::SyscallHandler* Handler, FEXCore::Core::InternalThreadState* Thread, uint64_t Begin, uint64_t End,
++                fextl::vector<MRSeg>& Out) {
++  return FEX::MacRunnerRevive::Segments(
++    [&](uint64_t Address) { return Handler->QueryGuestExecutableRange(Thread, Address); }, Begin, End, MRHostPage, Out);
++}
++bool MRClassesAllow(const fextl::vector<MRSeg>& Then, const fextl::vector<MRSeg>& Now) {
++  return FEX::MacRunnerRevive::ClassesAllow(Then, Now);
++}
++
++uint64_t MRHashGuest(uint64_t Begin, uint64_t End) {
++  return XXH3_64bits(reinterpret_cast<const void*>(Begin), End - Begin);
++}
+ constexpr unsigned MRTableBits = 21;
+ std::atomic<uint64_t> MRTable[size_t {1} << MRTableBits];
+ inline uint64_t MRTicks() {
+@@ -184,11 +253,14 @@ void MRReport(uint64_t Compiles) {
+     return;
+   }
+   const uint64_t Frequency = MRFrequency();
+-  char Line[512];
++  char Line[1024];
+   const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
+     "macrunner-fex-jit: compiles={} repeats={} raced={} guest_insts={} max_insts={} ir_ms={} codegen_ms={} "
+     "walk_calls={} walk_steps={} walk_mismatch={} walk_mode={} smc={} flush_new={} flush_l12={} single={} code_mb={} "
+-    "inv_calls={} inv_mb={} remove={} validated={} writable_skipped={} wv_mode={}\n",
++    "inv_calls={} inv_mb={} remove={} validated={} writable_skipped={} wv_mode={} "
++    "prot_calls={} prot_inv_mb={} prot_kept_mb={} prot_trap_mb={} prot_keep={} "
++    "revived={} revive_hash_miss={} revive_skip={} revive_registered={} revive_unstable={} revive={} codebuf_max={} "
++    "callret_clears={} callret_ms={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+     MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
+     MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+@@ -197,12 +269,23 @@ void MRReport(uint64_t Compiles) {
+     MRFlushNew.load(std::memory_order_relaxed), MRFlushL12.load(std::memory_order_relaxed), MRSingle.load(std::memory_order_relaxed),
+     MRCodeBytes.load(std::memory_order_relaxed) >> 20, MRInvCalls.load(std::memory_order_relaxed), MRInvBytes.load(std::memory_order_relaxed) >> 20,
+     MRRemove.load(std::memory_order_relaxed), MRValidated.load(std::memory_order_relaxed),
+-    MRWritableSkipped.load(std::memory_order_relaxed), MRWritableValidationMode());
++    MRWritableSkipped.load(std::memory_order_relaxed), MRWritableValidationMode(),
++    MacRunnerProtCalls.load(std::memory_order_relaxed), MacRunnerProtInvBytes.load(std::memory_order_relaxed) >> 20,
++    MacRunnerProtKeptBytes.load(std::memory_order_relaxed) >> 20, MacRunnerProtTrapBytes.load(std::memory_order_relaxed) >> 20,
++    MRProtKeepModeForReport(), MRRevived.load(std::memory_order_relaxed), MRReviveHashMiss.load(std::memory_order_relaxed),
++    MRReviveSkip.load(std::memory_order_relaxed), MRReviveRegistered.load(std::memory_order_relaxed),
++    MRReviveUnstable.load(std::memory_order_relaxed), MRReviveMode(), MRCodeBufMaxForReport(),
++    MRCallRetClears.load(std::memory_order_relaxed), MRCallRetTicks.load(std::memory_order_relaxed) * 1000 / Frequency);
+   Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+   FEX::Windows::Logging::Raw(Line);
+ }
+ } // namespace
+ 
++// Для InvalidationTracker.cpp: режимы сохранения перевода опираются на проверку записываемого кода.
++int MacRunnerWritableValidationMode() {
++  return MRWritableValidationMode();
++}
++
+ namespace FEXCore::Context {
+ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
+   : HostFeatures {Features}
+@@ -468,7 +551,16 @@ void ContextImpl::SetFlagsFromCompactedEFLAGS(FEXCore::Core::InternalThreadState
+ }
+ 
+ bool ContextImpl::InitCore() {
+-  if (CodeCache.IsGeneratingCache || FEXCore::Config::Get_ENABLECODECACHINGWIP()) {
++  // ★ MacRunner (Claude, 23.09.2026) — MACRUNNER_FEX_CODEBUF_MAX=1: буфер кода сразу 128 МБ.
++  //   Буфер растёт 16 -> 32 -> 64 -> 128 МБ, и КАЖДЫЙ рост — новый буфер с выбросом всего перевода
++  //   (ClearCodeCache, flush_new). В Elden Ring 098..102 flush_new = 5–6: три из них — только рост,
++  //   выброшено до 112 МБ готового кода. Upstream делает то же самое при кэше кода (строка ниже) —
++  //   переключатель включает это без остального механизма кэша. Память macOS занимается по записи.
++  static const bool MRCodeBufMax = [] {
++    const char* Value = getenv("MACRUNNER_FEX_CODEBUF_MAX");
++    return Value && Value[0] == '1' && !Value[1];
++  }();
++  if (CodeCache.IsGeneratingCache || FEXCore::Config::Get_ENABLECODECACHINGWIP() || MRCodeBufMax) {
+     // Start with a larger code buffer to avoid resizes that would discard code
+     StartMaximalCodeBuffer();
+   }
+@@ -619,6 +711,12 @@ void ContextImpl::OnCodeBufferAllocated(const fextl::shared_ptr<CPU::CodeBuffer>
+ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
+   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
+   (NewCodeBuffer ? MRFlushNew : MRFlushL12).fetch_add(1, std::memory_order_relaxed);
++  // Возврат перевода: весь прежний код и записи связей уходят — таблица больше не годится.
++  MRReviveEpoch.fetch_add(1, std::memory_order_relaxed);
++  {
++    std::scoped_lock ReviveLock(MRReviveLock);
++    MRReviveTable.clear();
++  }
+ 
+   if (NewCodeBuffer) {
+     // Allocate new CodeBuffer + L3 LookupCache and clear L1+L2 caches
+@@ -1027,6 +1125,55 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+     return HostCode;
+   }
+ 
++  // ★ MacRunner — возврат перевода (MACRUNNER_FEX_REVIVE, см. MRReviveMode).
++  const bool MRTrapFlag = Thread->CurrentFrame->State.flags[X86State::RFLAG_TF_RAW_LOC] != 0;
++  const bool MRRevive = MRReviveMode() && MaxInst != 1 && !MRTrapFlag && !CodeCache.IsGeneratingCache;
++  const uint64_t MREpochAtStart = MRReviveEpoch.load(std::memory_order_relaxed);
++  const bool MRMonoAtStart = AreMonoHacksActive();
++  // Обработчик IR на адресе (переходники) мог появиться ПОСЛЕ компиляции: AddCustomIREntrypoint старый
++  // перевод не сбрасывает, а новая компиляция возьмёт обработчик. Возврат его обошёл бы — не возвращаем.
++  bool MRCustomIR = false;
++  if (MRRevive && HasCustomIRHandlers.load(std::memory_order_relaxed)) {
++    std::shared_lock CustomLock(CustomIRMutex);
++    MRCustomIR = CustomIRHandlers.find(GuestRIP) != CustomIRHandlers.end();
++  }
++  if (MRRevive && !MRCustomIR) {
++    MRReviveEntry Entry;
++    bool Found = false;
++    {
++      std::scoped_lock ReviveLock(MRReviveLock);
++      auto It = MRReviveTable.find(GuestRIP);
++      if (It != MRReviveTable.end() && It->second.Epoch == MREpochAtStart && It->second.Map == Thread->LookupCache->Shared &&
++          It->second.MonoHacks == MRMonoAtStart) {
++        Entry = It->second;
++        Found = true;
++      }
++    }
++    if (Found) {
++      fextl::vector<MRSeg> Now;
++      if (!MRSegments(SyscallHandler, Thread, Entry.HashBegin, Entry.HashEnd, Now) || !MRClassesAllow(Entry.Segs, Now)) {
++        MRReviveSkip.fetch_add(1, std::memory_order_relaxed);
++      } else if (MRHashGuest(Entry.HashBegin, Entry.HashEnd) != Entry.Hash) {
++        MRReviveHashMiss.fetch_add(1, std::memory_order_relaxed);
++      } else {
++        // Как при обычной компиляции: страницы блока — в карту страниц, новые страницы — под ловушку.
++        const fextl::set<uint64_t> Entrypoint {GuestRIP};
++        for (auto CodePage : Entry.CodePages) {
++          if (Thread->LookupCache->AddBlockExecutableRange(Thread, Entrypoint, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
++            SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
++          }
++        }
++        // Второй хеш — уже под ловушкой: запись, успевшая до неё, возврат не пропустит.
++        if (MRHashGuest(Entry.HashBegin, Entry.HashEnd) == Entry.Hash) {
++          Thread->LookupCache->AddBlockMapping(Thread, GuestRIP, Entry.CodePages, reinterpret_cast<void*>(Entry.HostCode));
++          MRRevived.fetch_add(1, std::memory_order_relaxed);
++          return Entry.HostCode;
++        }
++        MRReviveHashMiss.fetch_add(1, std::memory_order_relaxed);
++      }
++    }
++  }
++
+   // Accumulate a JIT count now, as even if another thread raced us, it should count as a compile.
+   FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedJITCount, 1);
+ 
+@@ -1039,6 +1186,22 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+     return reinterpret_cast<uintptr_t>(CodePtr);
+   }
+ 
++  // ★ MacRunner — возврат перевода: первый хеш байтов сразу после компиляции, до ловушки записи.
++  uint64_t MRHashEnd = 0, MRHashFirst = 0;
++  fextl::vector<MRSeg> MRSegsAtCompile;
++  if (MRRevive && !MRCustomIR && NeedsAddGuestCodeRanges && Length) {
++    MRHashEnd = StartAddr + Length;
++    const auto Tail = SyscallHandler->QueryGuestExecutableRange(Thread, MRHashEnd);
++    if (Tail.Size && Tail.Base <= MRHashEnd && MRHashEnd < Tail.Base + Tail.Size) {
++      MRHashEnd = std::min<uint64_t>(MRHashEnd + MRMaxInstSize, Tail.Base + Tail.Size);
++    }
++    if (MRSegments(SyscallHandler, Thread, StartAddr, MRHashEnd, MRSegsAtCompile)) {
++      MRHashFirst = MRHashGuest(StartAddr, MRHashEnd);
++    } else {
++      MRHashEnd = 0;
++    }
++  }
++
+   // The core managed to compile the code.
+   if (Config.BlockJITNaming()) {
+     auto FragmentBasePtr = CompiledCode.BlockBegin;
+@@ -1104,6 +1267,34 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+     Thread->LookupCache->AddBlockMapping(Thread, GuestAddr, CodePages, HostAddr);
+   }
+ 
++  // ★ MacRunner — возврат перевода: запомнить блок, если байты не менялись с компиляции до ловушки
++  //   и за это время не было полного сброса буфера.
++  if (MRHashEnd) {
++    if (MRHashGuest(StartAddr, MRHashEnd) == MRHashFirst && MRReviveEpoch.load(std::memory_order_relaxed) == MREpochAtStart &&
++        AreMonoHacksActive() == MRMonoAtStart) {
++      MRReviveEntry Entry;
++      Entry.HashBegin = StartAddr;
++      Entry.HashEnd = MRHashEnd;
++      Entry.Hash = MRHashFirst;
++      Entry.Map = Thread->LookupCache->Shared;
++      Entry.Epoch = MREpochAtStart;
++      Entry.MonoHacks = MRMonoAtStart;
++      Entry.CodePages = CodePages;
++      Entry.Segs = std::move(MRSegsAtCompile);
++      std::scoped_lock ReviveLock(MRReviveLock);
++      if (MRReviveTable.size() >= MRReviveMaxEntries) {
++        MRReviveTable.clear();
++      }
++      for (auto [GuestAddr, HostAddr] : CompiledCode.EntryPoints) {
++        Entry.HostCode = reinterpret_cast<uint64_t>(HostAddr);
++        MRReviveTable.insert_or_assign(GuestAddr, Entry);
++      }
++      MRReviveRegistered.fetch_add(1, std::memory_order_relaxed);
++    } else {
++      MRReviveUnstable.fetch_add(1, std::memory_order_relaxed);
++    }
++  }
++
+   if (CodeMapWriter) {
+     auto Region = SyscallHandler->LookupExecutableFileSection(Thread, GuestRIP);
+     if (Region && Region->FileStartVA != 0) {
+@@ -1167,7 +1358,13 @@ void ContextImpl::InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadS
+     // This may cause access violations in the thread on Windows as zeroing is not atomic, this is handled by the frontend
+ #ifdef _WIN32
+     // This private cache must not re-enter guest allocation notifications under the code lock.
++    // ★ MacRunner (Claude, 23.09.2026): это 4 МБ на поток на КАЖДУЮ инвалидацию, задевшую его кэш, и под
++    //   исключительной блокировкой (компиляция всех потоков стоит). Upstream здесь дешёвый VirtualDontNeed.
++    //   Сколько это стоит — не мерено; счётчики callret_clears / callret_ms в строке macrunner-fex-jit.
++    const uint64_t MRClearStart = MRTicks();
+     memset(Thread->CallRetStackBase, 0, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++    MRCallRetTicks.fetch_add(MRTicks() - MRClearStart, std::memory_order_relaxed);
++    MRCallRetClears.fetch_add(1, std::memory_order_relaxed);
+ #else
+     Allocator::VirtualDontNeed(Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
+ #endif
+diff --git a/FEXCore/Source/Interface/Core/MacRunnerRevive.h b/FEXCore/Source/Interface/Core/MacRunnerRevive.h
+new file mode 100644
+index 000000000..8d70b40d2
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/MacRunnerRevive.h
+@@ -0,0 +1,64 @@
++// SPDX-License-Identifier: MIT
++#pragma once
++// ★ MacRunner (Claude, 23.09.2026) — классы страниц для возврата перевода (MACRUNNER_FEX_REVIVE).
++//   Чистые функции: разбор диапазона байтов гостя на куски «интервал исполняемого × страница хоста»
++//   с классом и правило, можно ли вернуть перевод. Вынесены отдельно, чтобы ровно этот код проверялся
++//   тестами на хосте (tests/revive_test.cpp). Запрос прав передаётся функцией: в FEX это
++//   SyscallHandler->QueryGuestExecutableRange, в тесте — модель.
++#include <algorithm>
++#include <cstdint>
++
++namespace FEX::MacRunnerRevive {
++struct Seg {
++  uint64_t Begin, End;
++  uint8_t Class; // 0 — без записи; 1 — запись, страница хоста целиком в интервале (ловушка); 2 — смешанная
++};
++
++// Query(Address) -> {Base, Size, Writable} интервала исполняемого, содержащего Address; Size == 0 — нет.
++// Класс считается так же, как проверка записываемого кода в GenerateIR: страница хоста целиком внутри
++// интервала RWX — ловушка видит запись (1); иначе — только проверка байтов в коде (2).
++template<typename Vector, typename QueryFn>
++bool Segments(QueryFn&& Query, uint64_t Begin, uint64_t End, uint64_t HostPage, Vector& Out) {
++  Out.clear();
++  uint64_t Address = Begin;
++  while (Address < End) {
++    const auto Range = Query(Address);
++    if (!Range.Size || Address < Range.Base || Address >= Range.Base + Range.Size) {
++      return false;
++    }
++    const uint64_t RangeEnd = std::min<uint64_t>(End, Range.Base + Range.Size);
++    while (Address < RangeEnd) {
++      const uint64_t HostFirst = Address & ~(HostPage - 1);
++      const uint64_t ChunkEnd = std::min<uint64_t>(RangeEnd, HostFirst + HostPage);
++      uint8_t Class = 0;
++      if (Range.Writable) {
++        Class = (Range.Base <= HostFirst && HostFirst + HostPage <= Range.Base + Range.Size) ? 1 : 2;
++      }
++      Out.push_back({Address, ChunkEnd, Class});
++      Address = ChunkEnd;
++    }
++  }
++  return true;
++}
++
++// Там, где СЕЙЧАС класс 2 (ловушка слепа), при компиляции тоже должен был быть класс 2 — тогда в коде
++// есть проверка байтов. Класс 0 и 1 сейчас безопасны при любом прошлом: записи нет или её ловит ловушка
++// (при возврате новые страницы блока ставятся под ловушку так же, как при компиляции).
++template<typename Vector>
++bool ClassesAllow(const Vector& Then, const Vector& Now) {
++  size_t I = 0, J = 0;
++  while (I < Then.size() && J < Now.size()) {
++    const uint64_t Begin = std::max(Then[I].Begin, Now[J].Begin);
++    const uint64_t End = std::min(Then[I].End, Now[J].End);
++    if (Begin < End && Now[J].Class == 2 && Then[I].Class != 2) {
++      return false;
++    }
++    if (Then[I].End <= Now[J].End) {
++      ++I;
++    } else {
++      ++J;
++    }
++  }
++  return true;
++}
++} // namespace FEX::MacRunnerRevive
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index 4cf473dfc..e20dbec11 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -8,8 +8,36 @@
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include "InvalidationTracker.h"
+ #include "MacRunnerHostPageGeometry.h"
++#include "MacRunnerProtKeep.h"
+ #include <windef.h>
+ #include <winternl.h>
++#include <algorithm>
++#include <atomic>
++#include <cstdlib>
++
++// ★ MacRunner (Claude, 23.09.2026) — MACRUNNER_FEX_PROT_KEEP: смена прав БЕЗ сброса переведённого кода.
++//   Upstream сбрасывает весь диапазон при КАЖДОЙ смене прав, после которой память исполняемая, —
++//   в том числе RWX->RX и RX->RX, когда байты не менялись и меняться незаметно не могли. Elden Ring
++//   (Arxan) переключает права на крупных участках кода постоянно: 12,3 тыс. сбросов на 45 ГБ за прогон,
++//   39 % компиляций — повторные (post095-game-098..102, строка macrunner-fex-jit).
++//   0 — как upstream (по умолчанию), только счётчики;
++//   1 — не сбрасывать уже исполняемое при переходе в исполняемое БЕЗ записи: запись туда до этого
++//       была невозможна (RX), ловилась ловушкой (целые страницы хоста RWX) или проверяется кодом
++//       (смешанные страницы, MACRUNNER_FEX_WRITABLE_VALIDATION >= 1). Гонок нет.
++//   2 — как 1, плюс при переходе уже исполняемого в RWX целые страницы хоста не сбрасываются, а сразу
++//       ставятся под ловушку записи; края со смешанными страницами сбрасываются. ОКНО ГОНКИ: запись
++//       ДРУГОГО потока между системным вызовом и ловушкой не будет замечена. Arxan пишет из того же
++//       потока после возврата VirtualProtect — поэтому режим отдельный, по согласию.
++//   Оба режима — только при включённом отслеживании (SMC) и проверке записываемого кода; иначе как 0.
++extern std::atomic<uint64_t> MacRunnerProtCalls, MacRunnerProtInvBytes, MacRunnerProtKeptBytes, MacRunnerProtTrapBytes; // Core.cpp
++int MacRunnerWritableValidationMode(); // Core.cpp
++int MacRunnerProtKeepMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_PROT_KEEP");
++    return (Value && Value[0] >= '0' && Value[0] <= '2' && !Value[1]) ? Value[0] - '0' : 0;
++  }();
++  return Mode;
++}
+ 
+ namespace FEX::Windows {
+ InvalidationTracker::InvalidationTracker(FEXCore::Context::Context& CTX, const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads)
+@@ -48,6 +76,10 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
+   const auto AlignedBase = Address & FEXCore::Utils::FEX_PAGE_MASK;
+   const auto AlignedSize = (Address - AlignedBase + Size + FEXCore::Utils::FEX_PAGE_SIZE - 1) & FEXCore::Utils::FEX_PAGE_MASK;
+ 
++  // Что сбросить и что поставить под ловушку (MacRunnerProtKeep.h). Переполнение — сброс всего диапазона, как upstream.
++  MacRunnerProtKeep::Plan Plan;
++  bool InvalidateAll = false;
++
+   const bool NeedsInvalidate = [&]() {
+     std::unique_lock Lock(IntervalsLock);
+ 
+@@ -58,6 +90,15 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
+     const bool EffectiveRWX = EffectiveExec && ProtIsWritable(Prot);
+ 
+     if (EffectiveExec) {
++      const int KeepMode = MacRunnerProtKeepMode();
++      if (KeepMode && !DEPDisabled && !SMCDetectionDisabled && MacRunnerWritableValidationMode() >= 1) {
++        // Разбор по XIntervals ДО вставки: уже исполняемое против нового.
++        Plan = MacRunnerProtKeep::Compute(XIntervals, AlignedBase, AlignedBase + AlignedSize, EffectiveRWX, KeepMode, ProtectionPageSize);
++        InvalidateAll = Plan.Overflow;
++      } else {
++        InvalidateAll = true;
++      }
++
+       XIntervals.Insert(ProtInterval);
+       if (EffectiveRWX) {
+         LogMan::Msg::DFmt("Add SMC interval: {:X} - {:X}", AlignedBase, AlignedBase + AlignedSize);
+@@ -73,15 +114,37 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
+       if (DEPDisabled) {
+         DEPPromotedIntervals.Remove(ProtInterval);
+       }
++      InvalidateAll = true;
+       return true;
+     }
+ 
+     return false;
+   }();
+ 
+-  if (NeedsInvalidate) {
+-    // IntervalsLock cannot be held during invalidation
++  if (!NeedsInvalidate) {
++    return;
++  }
++  MacRunnerProtCalls.fetch_add(1, std::memory_order_relaxed);
++
++  // IntervalsLock cannot be held during invalidation
++  if (InvalidateAll) {
++    MacRunnerProtInvBytes.fetch_add(AlignedSize, std::memory_order_relaxed);
+     InvalidateIntervalInternal(AlignedBase, AlignedSize);
++    return;
++  }
++  MacRunnerProtKeptBytes.fetch_add(Plan.KeptBytes, std::memory_order_relaxed);
++  for (size_t I = 0; I < Plan.InvalidateCount; ++I) {
++    const auto& Span = Plan.Invalidate[I];
++    MacRunnerProtInvBytes.fetch_add(Span.End - Span.Begin, std::memory_order_relaxed);
++    InvalidateIntervalInternal(Span.Begin, Span.End - Span.Begin);
++  }
++  for (size_t I = 0; I < Plan.TrapCount; ++I) {
++    // Ловушка записи вместо сброса: первая же запись даст отказ, HandleRWXAccessViolation сбросит ровно
++    // её страницу хоста. Код, переведённый раньше, остаётся в работе.
++    const auto& Span = Plan.Trap[I];
++    MacRunnerProtTrapBytes.fetch_add(Span.End - Span.Begin, std::memory_order_relaxed);
++    std::scoped_lock CodeLock(CTX.GetCodeInvalidationMutex());
++    ProtectRWXIntervalsInternal(Span.Begin, Span.End - Span.Begin, false);
+   }
+ }
+ 
+diff --git a/Source/Windows/Common/MacRunnerProtKeep.h b/Source/Windows/Common/MacRunnerProtKeep.h
+new file mode 100644
+index 000000000..bee679ee8
+--- /dev/null
++++ b/Source/Windows/Common/MacRunnerProtKeep.h
+@@ -0,0 +1,92 @@
++// SPDX-License-Identifier: MIT
++#pragma once
++// ★ MacRunner (Claude, 23.09.2026) — план смены прав для MACRUNNER_FEX_PROT_KEEP.
++//   Чистая функция: на входе XIntervals ДО смены прав и новый диапазон, на выходе — что сбросить,
++//   что поставить под ловушку записи и сколько байт перевода оставить. Вынесена отдельно, чтобы
++//   ровно этот код проверялся тестами на хосте (tests/prot_keep_test.cpp).
++#include <FEXCore/Utils/IntervalList.h>
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++
++namespace FEX::Windows::MacRunnerProtKeep {
++struct Span {
++  uint64_t Begin, End;
++};
++constexpr size_t MaxSpans = 64;
++
++struct Plan {
++  Span Invalidate[MaxSpans];
++  size_t InvalidateCount = 0;
++  Span Trap[MaxSpans];
++  size_t TrapCount = 0;
++  uint64_t KeptBytes = 0;
++  bool Overflow = false; // не хватило места — вызывающий обязан сбросить весь диапазон, как upstream
++};
++
++// Mode 1: уже исполняемое, переходящее в исполняемое БЕЗ записи, — оставить; остальное — сбросить.
++// Mode 2: + уже исполняемое, переходящее в RWX: целые страницы хоста — под ловушку, края — сбросить.
++// Новое исполняемое (не было в XIntervals) сбрасывается всегда: запись туда не отслеживалась.
++inline Plan Compute(const FEXCore::IntervalList<uint64_t>& XIntervals, uint64_t Begin, uint64_t End, bool NewWritable, int Mode,
++                    uint64_t HostPageSize) {
++  Plan Result;
++  const uint64_t HostPageMask = ~(HostPageSize - 1);
++  auto Push = [&](Span* List, size_t& Count, uint64_t SpanBegin, uint64_t SpanEnd) {
++    if (SpanBegin >= SpanEnd) {
++      return;
++    }
++    // Соседние куски сливаем: меньше вызовов сброса и меньше риск переполнения.
++    if (Count && List[Count - 1].End == SpanBegin) {
++      List[Count - 1].End = SpanEnd;
++      return;
++    }
++    if (Count == MaxSpans) {
++      Result.Overflow = true;
++      return;
++    }
++    List[Count++] = {SpanBegin, SpanEnd};
++  };
++
++  uint64_t Cursor = Begin;
++  while (Cursor < End) {
++    const auto Query = XIntervals.Query(Cursor);
++    uint64_t Next;
++    if (Query.Enclosed) {
++      Next = std::min<uint64_t>(End, Cursor + Query.Size);
++      // IntervalList не сливает интервалы стык в стык ([a,b) и [b,c) остаются раздельными), а права
++      // ставят соседними кусками. Продлеваем кусок через стыки — иначе страница хоста на стыке
++      // не получила бы ловушку и сбрасывалась зря (найдено тестом, 907 случаев из 200 000).
++      while (Next < End) {
++        const auto Touching = XIntervals.Query(Next);
++        if (!Touching.Enclosed) {
++          break;
++        }
++        Next = std::min<uint64_t>(End, Next + Touching.Size);
++      }
++      if (!NewWritable) {
++        Result.KeptBytes += Next - Cursor;
++      } else if (Mode >= 2) {
++        const uint64_t InnerBegin = (Cursor + HostPageSize - 1) & HostPageMask;
++        const uint64_t InnerEnd = Next & HostPageMask;
++        if (InnerBegin < InnerEnd) {
++          Push(Result.Invalidate, Result.InvalidateCount, Cursor, InnerBegin);
++          Push(Result.Trap, Result.TrapCount, InnerBegin, InnerEnd);
++          Push(Result.Invalidate, Result.InvalidateCount, InnerEnd, Next);
++        } else {
++          Push(Result.Invalidate, Result.InvalidateCount, Cursor, Next);
++        }
++      } else {
++        Push(Result.Invalidate, Result.InvalidateCount, Cursor, Next);
++      }
++    } else {
++      Next = Query.Size ? std::min<uint64_t>(End, Cursor + Query.Size) : End;
++      Push(Result.Invalidate, Result.InvalidateCount, Cursor, Next);
++    }
++    Cursor = Next;
++  }
++  if (Result.Overflow) {
++    Result.TrapCount = 0;
++  }
++  return Result;
++}
++} // namespace FEX::Windows::MacRunnerProtKeep

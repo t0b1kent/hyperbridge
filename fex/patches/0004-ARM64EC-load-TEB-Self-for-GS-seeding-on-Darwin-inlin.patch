@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 04:50:56 +0000
+Subject: [PATCH 04/11] ARM64EC: load TEB Self for GS seeding on Darwin;
+ inline-SMC check per 16 KiB granule
+
+Under FEX_WINE_DARWIN, LoadStateFromECContext reads TEB->Self through x18 and keeps
+it in a general register for both GS stores, so a cleared x18 on Darwin does not
+leave GS unseeded (AI War 2 cold-load fault: gs_cached=0).
+The inline self-modifying-code check in the RWX access-violation handler tests the
+whole host protection granule (16 KiB on Darwin) instead of one 4 KiB page.
+New header Common/MacRunnerHostPageGeometry.h: ProtectionPageSize/Mask.
+
+Source: MacRunner lanes aiwar2-gs-self-load (10.09.2026) and hostpage-smc
+(navisworks, 10-11.09.2026); exact file compiled into MacRunner 1.0.2.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Source/Windows/ARM64EC/Module.cpp                 | 10 +++++++++-
+ Source/Windows/Common/MacRunnerHostPageGeometry.h | 13 +++++++++++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+ create mode 100644 Source/Windows/Common/MacRunnerHostPageGeometry.h
+
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index b22edc839..69edf3207 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -1,3 +1,4 @@
++#include "Common/MacRunnerHostPageGeometry.h"
+ // SPDX-License-Identifier: MIT
+ /*
+ $info$
+@@ -353,7 +354,14 @@ static void LoadStateFromECContext(FEXCore::Core::InternalThreadState* Thread, C
+     State.gs_idx = Context.SegGs & 0xffff;
+ 
+     // The TEB is the only populated GDT entry by default
++#ifdef FEX_WINE_DARWIN
++    uint64_t TEB;
++    // Darwin can clear x18 without a fault. Load Self so Wine can retry a null
++    // x18, and retain the result in a general register for both GS stores.
++    __asm__ __volatile__("ldr %0, [x18, #0x30]" : "=r"(TEB) : : "memory");
++#else
+     const auto TEB = reinterpret_cast<uint64_t>(NtCurrentTeb());
++#endif
+     auto GDT = State.GetSegmentFromIndex(State, (Context.SegGs & 0xffff));
+     State.SetGDTBase(GDT, TEB);
+     State.SetGDTLimit(GDT, 0xF'FFFFU);
+@@ -713,7 +721,7 @@ bool ResetToConsistentStateImpl(const ThreadCPUArea CPUArea, EXCEPTION_RECORD* E
+     if (InvalidationTracker && InvalidationTracker->HandleRWXAccessViolation(Thread, NativeContext->Pc, FaultAddress)) {
+       FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedSMCCount, 1);
+       if (CTX->IsAddressInCodeBuffer(Thread, NativeContext->Pc) && !CTX->IsCurrentBlockSingleInst(CPUArea.ThreadState()) &&
+-          CTX->IsAddressInCurrentBlock(Thread, FaultAddress & FEXCore::Utils::FEX_PAGE_MASK, FEXCore::Utils::FEX_PAGE_SIZE)) {
++          CTX->IsAddressInCurrentBlock(Thread, FaultAddress & FEX::Windows::ProtectionPageMask, FEX::Windows::ProtectionPageSize)) {
+         // If we are not patching ourself (single inst block case) and potentially patching the current block, this is inline SMC. Reconstruct the current context (before the SMC write) then single step the write to reduce it to regular SMC.
+         Exception::ReconstructThreadState(Thread, *NativeContext);
+         LogMan::Msg::DFmt("Handled inline self-modifying code: pc: {:X} rip: {:X} fault: {:X}", NativeContext->Pc,
+diff --git a/Source/Windows/Common/MacRunnerHostPageGeometry.h b/Source/Windows/Common/MacRunnerHostPageGeometry.h
+new file mode 100644
+index 000000000..290ce967f
+--- /dev/null
++++ b/Source/Windows/Common/MacRunnerHostPageGeometry.h
+@@ -0,0 +1,13 @@
++// SPDX-License-Identifier: MIT
++// Copyright (c) 2026 MacRunner contributors. Part of HyperBridge (FEX-based).
++#pragma once
++#include <cstdint>
++namespace FEX::Windows {
++// MacRunner's native Darwin ARM64 runtime has 16 KiB protection units.
++#ifdef FEX_WINE_DARWIN
++inline constexpr uint64_t ProtectionPageSize = 16384;
++#else
++inline constexpr uint64_t ProtectionPageSize = 4096;
++#endif
++inline constexpr uint64_t ProtectionPageMask = ~(ProtectionPageSize - 1);
++}

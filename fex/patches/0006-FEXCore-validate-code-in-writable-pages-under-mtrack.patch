@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 04:50:56 +0000
+Subject: [PATCH 06/11] FEXCore: validate code in writable pages under mtrack;
+ memset call-ret stack on Windows
+
+With SMCChecks=mtrack, blocks whose guest range is writable get per-instruction
+code validation, because mixed host-page permissions can hide guest writes from
+write-fault tracking. On _WIN32 the call-ret stack is cleared with memset instead
+of VirtualDontNeed, which would re-enter guest allocation notifications under the
+code lock.
+
+Source: MacRunner lane debug-teb-self-load/writable-validation-clear-fex
+(navisworks, 11.09.2026); exact file compiled into MacRunner 1.0.2.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Core/Core.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index a39c9a130..5ef1a2e61 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -637,7 +637,10 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+           Thread->OpDispatcher->_GuestOpcode(InstAddress - GuestRIP);
+         }
+ 
+-        if (Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL || Block.ForceFullSMCDetection) {
++        // Mixed host-page permissions can hide guest writes from write-fault tracking.
++        const bool ValidateWritableCode = Config.SMCChecks == FEXCore::Config::CONFIG_SMC_MTRACK &&
++                                          SyscallHandler->QueryGuestExecutableRange(Thread, InstAddress).Writable;
++        if (Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL || Block.ForceFullSMCDetection || ValidateWritableCode) {
+           auto ExistingCodePtr = reinterpret_cast<uint8_t*>(Block.Entry + BlockInstructionsLength);
+           auto InstAddressReg = Thread->OpDispatcher->_EntrypointOffset(GPRSize, InstAddress - GuestRIP);
+           std::array<uint8_t, 0x10> CodeOriginal;
+@@ -993,7 +996,12 @@ void ContextImpl::InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadS
+     FEXCORE_PROFILE_SCOPED("InvalidateCallRet");
+ 
+     // This may cause access violations in the thread on Windows as zeroing is not atomic, this is handled by the frontend
++#ifdef _WIN32
++    // This private cache must not re-enter guest allocation notifications under the code lock.
++    memset(Thread->CallRetStackBase, 0, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++#else
+     Allocator::VirtualDontNeed(Thread->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
++#endif
+   }
+ }
+ 

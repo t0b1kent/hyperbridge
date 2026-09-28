@@ -1,0 +1,392 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 8 Sep 2026 10:59:45 +1000
+Subject: [PATCH 11/11] x87: division by zero raises the exception; SF in the
+ x87 status word
+
+From the MacRunner branch fex-defekty-08.09 (a9c161aa0, 08.09.2026). Not in MacRunner 1.0.2.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: GPT-6 Astra <noreply@openai.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Interface/Core/OpcodeDispatcher.cpp       |  59 ++++++++-
+ .../Source/Interface/Core/OpcodeDispatcher.h  |   2 +
+ .../Interface/Core/OpcodeDispatcher/X87.cpp   |  13 +-
+ .../IR/Passes/x87StackOptimizationPass.cpp    | 117 +++++++++++++++++-
+ Source/Windows/ARM64EC/Module.cpp             |   1 +
+ Source/Windows/Common/Exception.h             |   1 +
+ Source/Windows/WOW64/Module.cpp               |   4 +-
+ 7 files changed, 183 insertions(+), 14 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 31f9eddc0..838e71fce 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -3704,19 +3704,62 @@ void OpDispatchBuilder::NEGOp(OpcodeArgs) {
+   }
+ }
+ 
++// x86 raises #DE when the divisor is zero. AArch64's UDIV/SDIV do not trap at all -
++// they quietly produce a zero quotient - so the check has to be materialised here,
++// otherwise a guest that expects STATUS_INTEGER_DIVIDE_BY_ZERO silently continues
++// with a wrong value.
++//
++// The fault reports the address of the dividing instruction itself, so a handler that
++// fixes the divisor up and returns EXCEPTION_CONTINUE_EXECUTION re-runs it.
++void OpDispatchBuilder::RaiseDivideErrorIfZero(FEXCore::X86Tables::DecodedOp Op, Ref Divisor) {
++  CalculateDeferredFlags();
++
++  const auto GPRSize = GetGPROpSize();
++
++  auto FaultBlock = CreateNewCodeBlockAfter(GetCurrentBlock());
++  auto ContinueBlock = CreateNewCodeBlockAfter(FaultBlock);
++
++  CondJump(Divisor, Constant(0), FaultBlock, ContinueBlock, CondClass::EQ);
++
++  SetCurrentCodeBlock(FaultBlock);
++  StartNewBlock();
++  {
++    auto NewRIP = GetRelocatedPC(Op, -Op->InstSize);
++    _StoreContextGPR(GPRSize, NewRIP, offsetof(FEXCore::Core::CPUState, rip));
++
++    // Signal/si_code follow the INTO (#OF) precedent: SIGSEGV is only the transport
++    // that hands control back to the host fault handler, TrapNumber carries the x86
++    // meaning and is what the Windows/Linux frontends decode.
++    Break(FEXCore::IR::BreakDefinition {
++      .ErrorRegister = 0,
++      .Signal = Core::FAULT_SIGSEGV,
++      .TrapNumber = X86State::X86_TRAPNO_DE,
++      .si_code = 0x80,
++    });
++  }
++
++  SetCurrentCodeBlock(ContinueBlock);
++  StartNewBlock();
++}
++
+ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+   const auto GPRSize = GetGPROpSize();
+   auto Size = OpSizeFromSrc(Op);
+ 
+-  // This loads the divisor. 32-bit/64-bit paths mask inside the JIT, 8/16 do not.
+-  Ref Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = Size >= OpSize::i32Bit});
+-
+   if (Size == OpSize::i64Bit && !Is64BitMode) {
+     LogMan::Msg::EFmt("Doesn't exist in 32bit mode");
+     DecodeFailure = true;
+     return;
+   }
+ 
++  // Fault before anything is written back. The load is clean (no upper garbage) so a
++  // plain compare against zero is valid for every operand size.
++  RaiseDivideErrorIfZero(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags));
++
++  // Rematerialised after the branch: FEX IR only allows defs local to a single block.
++  // This loads the divisor. 32-bit/64-bit paths mask inside the JIT, 8/16 do not.
++  Ref Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = Size >= OpSize::i32Bit});
++
+   Ref Quotient = _AllocateGPR(true);
+   Ref Remainder = _AllocateGPR(true);
+ 
+@@ -3746,9 +3789,6 @@ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+ }
+ 
+ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+-  // This loads the divisor
+-  Ref Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+-
+   const auto GPRSize = GetGPROpSize();
+   auto Size = OpSizeFromSrc(Op);
+ 
+@@ -3758,6 +3798,13 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+     return;
+   }
+ 
++  // See RaiseDivideErrorIfZero: SDIV does not trap on a zero divisor either.
++  RaiseDivideErrorIfZero(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags));
++
++  // Rematerialised after the branch: FEX IR only allows defs local to a single block.
++  // This loads the divisor
++  Ref Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++
+   Ref Quotient = _AllocateGPR(true);
+   Ref Remainder = _AllocateGPR(true);
+ 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index e2239ae0e..33e8daef5 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -455,6 +455,8 @@ public:
+   void NEGOp(OpcodeArgs);
+   void DIVOp(OpcodeArgs);
+   void IDIVOp(OpcodeArgs);
++  // Raises #DE (divide error) when Divisor is zero, then continues in a fresh block.
++  void RaiseDivideErrorIfZero(FEXCore::X86Tables::DecodedOp Op, Ref Divisor);
+   void BSFOp(OpcodeArgs);
+   void BSROp(OpcodeArgs);
+   void CMPXCHGOp(OpcodeArgs);
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+index 2adcf1c94..6c9161005 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+@@ -427,12 +427,14 @@ Ref OpDispatchBuilder::ReconstructX87StateFromFSW_Helper(Ref FSW) {
+   auto C2 = _Bfe(OpSize::i32Bit, 1, 10, FSW);
+   auto C3 = _Bfe(OpSize::i32Bit, 1, 14, FSW);
+   auto IE = _Bfe(OpSize::i32Bit, 1, 0, FSW);
++  auto SF = _Bfe(OpSize::i32Bit, 1, 6, FSW);
+ 
+   SetRFLAG<FEXCore::X86State::X87FLAG_C0_LOC>(C0);
+   SetRFLAG<FEXCore::X86State::X87FLAG_C1_LOC>(C1);
+   SetRFLAG<FEXCore::X86State::X87FLAG_C2_LOC>(C2);
+   SetRFLAG<FEXCore::X86State::X87FLAG_C3_LOC>(C3);
+   SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(IE);
++  SetRFLAG<FEXCore::X86State::X87FLAG_SF_LOC>(SF);
+   return Top;
+ }
+ 
+@@ -724,8 +726,10 @@ void OpDispatchBuilder::X87ModifySTP(OpcodeArgs, bool Inc) {
+ // Operations dealing with loading and storing environment pieces
+ 
+ // Reconstruct as a constant the Status Word of the FPU.
+-// We only track stack top and each of the code conditions (C flags)
++// We only track stack top, the stack fault flag and each of the code conditions (C flags)
+ // Top is 3 bits at bit 11.
++// IE is 1 bit at bit 0.
++// SF is 1 bit at bit 6.
+ // C0 is 1 bit at bit 8.
+ // C1 is 1 bit at bit 9.
+ // C2 is 1 bit at bit 10.
+@@ -750,6 +754,9 @@ Ref OpDispatchBuilder::ReconstructFSW_Helper(Ref T) {
+   auto C3 = GetRFLAG(FEXCore::X86State::X87FLAG_C3_LOC);
+   FSW = _Orlshl(OpSize::i64Bit, FSW, C3, 14);
+ 
++  auto SF = GetRFLAG(FEXCore::X86State::X87FLAG_SF_LOC);
++  FSW = _Orlshl(OpSize::i64Bit, FSW, SF, 6);
++
+   auto IE = GetRFLAG(FEXCore::X86State::X87FLAG_IE_LOC);
+   FSW = _Or(OpSize::i64Bit, FSW, IE);
+ 
+@@ -766,8 +773,9 @@ void OpDispatchBuilder::X87FNSTSW(OpcodeArgs) {
+ }
+ 
+ void OpDispatchBuilder::FNCLEX(OpcodeArgs) {
+-  // Clear the exception flag bit
++  // Clear the exception flag bit and the stack fault flag
+   SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(_Constant(0));
++  SetRFLAG<FEXCore::X86State::X87FLAG_SF_LOC>(_Constant(0));
+ }
+ 
+ void OpDispatchBuilder::FNINIT(OpcodeArgs) {
+@@ -796,6 +804,7 @@ void OpDispatchBuilder::FNINIT(OpcodeArgs) {
+   SetRFLAG<FEXCore::X86State::X87FLAG_C2_LOC>(Zero);
+   SetRFLAG<FEXCore::X86State::X87FLAG_C3_LOC>(Zero);
+   SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(Zero);
++  SetRFLAG<FEXCore::X86State::X87FLAG_SF_LOC>(Zero);
+ }
+ 
+ void OpDispatchBuilder::X87FFREE(OpcodeArgs) {
+diff --git a/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp b/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
+index a53ce14e0..e049666f1 100644
+--- a/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
+@@ -289,6 +289,23 @@ private:
+   // Resets fields to initial values
+   void Reset();
+ 
++  // x87 stack fault (#IS) on push.
++  // A push lands in the slot at offset 7 from the current top. If that slot is still
++  // tagged valid the push overflows the register stack, which is a masked invalid
++  // operation: IE and SF latch, C1 says "overflow" (as opposed to underflow) and the
++  // destination is loaded with the QNaN indefinite instead of the requested value.
++  enum class PushOverflow {
++    No,      // statically known not to overflow
++    Yes,     // statically known to overflow
++    Runtime, // Pred holds a 0/1 value that has to be tested at runtime
++  };
++  PushOverflow GetPushOverflow(Ref& Pred);
++  void SetX87Flag(uint32_t FlagLoc, Ref Value);
++  Ref GetX87Flag(uint32_t FlagLoc);
++  Ref GetIndefiniteValue();
++  // Applies the masked #IS above and returns the value that should actually be pushed.
++  Ref ApplyPushOverflow(Ref Value);
++
+   struct StackMemberInfo {
+     constexpr StackMemberInfo() = default;
+     constexpr StackMemberInfo(Ref Data)
+@@ -468,6 +485,84 @@ inline Ref X87StackOptimization::GetX87ValidTag_Slow(uint8_t Offset) {
+   }
+ }
+ 
++inline void X87StackOptimization::SetX87Flag(uint32_t FlagLoc, Ref Value) {
++  IREmit->_StoreContextGPR(OpSize::i8Bit, Value, offsetof(FEXCore::Core::CPUState, flags) + FlagLoc);
++}
++
++inline Ref X87StackOptimization::GetX87Flag(uint32_t FlagLoc) {
++  return IREmit->_LoadContextGPR(OpSize::i8Bit, offsetof(FEXCore::Core::CPUState, flags) + FlagLoc);
++}
++
++inline Ref X87StackOptimization::GetIndefiniteValue() {
++  if (ReducedPrecisionMode) {
++    // QNaN indefinite expressed as a double.
++    return IREmit->_VCastFromGPR(OpSize::i64Bit, OpSize::i64Bit, IREmit->_Constant(static_cast<int64_t>(0xFFF8000000000000ULL)));
++  }
++  // 80-bit QNaN indefinite: sign 1, exponent 0x7FFF, significand 0xC000000000000000.
++  return IREmit->_VLoadTwoGPRs(IREmit->_Constant(static_cast<int64_t>(0xC000000000000000ULL)), IREmit->_Constant(0xFFFF));
++}
++
++X87StackOptimization::PushOverflow X87StackOptimization::GetPushOverflow(Ref& Pred) {
++  const StackSlot Tag = SlowPath ? TopValidCache[7] : StackData.top(7).Type;
++
++  if (Tag == StackSlot::VALID) {
++    return PushOverflow::Yes;
++  }
++  if (Tag == StackSlot::INVALID) {
++    return PushOverflow::No;
++  }
++
++  if (SlowPath) {
++    Pred = GetX87ValidTag_Slow(7);
++    return PushOverflow::Runtime;
++  }
++
++  // Fast path with an untouched slot. Untouched means this block has neither written
++  // that register nor flushed Top, so the tag word and Top still in the context are
++  // exactly the ones this block started with and can be read directly. Deliberately
++  // not via the *_Slow caches - those are only maintained once on the slow path.
++  Ref Top =
++    IREmit->_LoadContextGPR(OpSize::i8Bit, offsetof(FEXCore::Core::CPUState, flags) + FEXCore::X86State::X87FLAG_TOP_LOC);
++  Ref FTW = IREmit->_LoadContextGPR(OpSize::i8Bit, offsetof(FEXCore::Core::CPUState, AbridgedFTW));
++
++  // Slot = (Top - TopOffset - 1) mod 8, written as an addition to keep the constant positive.
++  const uint32_t Bias = static_cast<uint32_t>(-(StackData.TopOffset + 1)) & 7;
++  Ref Slot = IREmit->_And(OpSize::i32Bit, IREmit->_Add(OpSize::i32Bit, Top, GetConstant(Bias)), GetConstant(7));
++  Pred = IREmit->_And(OpSize::i32Bit, IREmit->_Lshr(OpSize::i32Bit, FTW, Slot), GetConstant(1));
++  return PushOverflow::Runtime;
++}
++
++Ref X87StackOptimization::ApplyPushOverflow(Ref Value) {
++  Ref Pred {};
++  switch (GetPushOverflow(Pred)) {
++  case PushOverflow::No: return Value;
++
++  case PushOverflow::Yes:
++    SetX87Flag(FEXCore::X86State::X87FLAG_IE_LOC, GetConstant(1));
++    SetX87Flag(FEXCore::X86State::X87FLAG_SF_LOC, GetConstant(1));
++    SetX87Flag(FEXCore::X86State::X87FLAG_C1_LOC, GetConstant(1));
++    return GetIndefiniteValue();
++
++  case PushOverflow::Runtime: {
++    // IE and SF are sticky, so they are OR'd in. C1 is only ever set here - a
++    // successful push is left alone so that a C1 written by the instruction itself
++    // (FXTRACT, FSINCOS, ...) is not clobbered.
++    SetX87Flag(FEXCore::X86State::X87FLAG_IE_LOC,
++               IREmit->_Or(OpSize::i32Bit, GetX87Flag(FEXCore::X86State::X87FLAG_IE_LOC), Pred));
++    SetX87Flag(FEXCore::X86State::X87FLAG_SF_LOC,
++               IREmit->_Or(OpSize::i32Bit, GetX87Flag(FEXCore::X86State::X87FLAG_SF_LOC), Pred));
++    SetX87Flag(FEXCore::X86State::X87FLAG_C1_LOC,
++               IREmit->_Or(OpSize::i32Bit, GetX87Flag(FEXCore::X86State::X87FLAG_C1_LOC), Pred));
++
++    const auto RegSize = ReducedPrecisionMode ? OpSize::i64Bit : OpSize::i128Bit;
++    Ref Mask = IREmit->_VDupFromGPR(RegSize, OpSize::i64Bit, IREmit->_Neg(OpSize::i64Bit, Pred));
++    return IREmit->_VBSL(RegSize, Mask, GetIndefiniteValue(), Value);
++  }
++  }
++
++  return Value;
++}
++
+ inline Ref X87StackOptimization::LoadStackValueAtOffset_Slow(uint8_t Offset) {
+   OrderedNode* TopOffsetAddress = GetOffsetTopAddressWithCache_Slow(Offset);
+   auto Size = ReducedPrecisionMode ? OpSize::i64Bit : OpSize::i128Bit;
+@@ -936,16 +1031,22 @@ void X87StackOptimization::Run(IREmitter* Emit) {
+         const auto* Op = IROp->C<IROp_PushStack>();
+         auto* SourceNode = CurrentIR.GetNode(Op->X80Src);
+ 
++        // Must be evaluated before Top moves.
++        Ref PushedNode = ApplyPushOverflow(SourceNode);
++        // When the value can be the indefinite instead of the loaded one, the tracked
++        // original is no longer what lands in the register, so drop that optimization.
++        const bool KeepOriginal = !Op->OriginalValue.IsInvalid() && PushedNode == SourceNode;
++
+         if (SlowPath) {
+           UpdateTopForPush_Slow();
+-          StoreStackValueAtOffset_Slow(SourceNode);
++          StoreStackValueAtOffset_Slow(PushedNode);
+         } else {
+-          if (Op->OriginalValue.IsInvalid()) {
++          if (!KeepOriginal) {
+             // No original value to track - just push the converted data
+-            StackData.push(StackMemberInfo {SourceNode});
++            StackData.push(StackMemberInfo {PushedNode});
+           } else {
+             auto* OriginalNode = CurrentIR.GetNode(Op->OriginalValue);
+-            StackData.push(StackMemberInfo {SourceNode, OriginalNode, Op->LoadSize});
++            StackData.push(StackMemberInfo {PushedNode, OriginalNode, Op->LoadSize});
+           }
+         }
+         break;
+@@ -958,10 +1059,16 @@ void X87StackOptimization::Run(IREmitter* Emit) {
+ 
+         if (SlowPath) {
+           Ref St0 = LoadStackValueAtOffset_Slow(Offset);
++          St0 = ApplyPushOverflow(St0);
+           UpdateTopForPush_Slow();
+           StoreStackValueAtOffset_Slow(St0);
+         } else {
+-          StackData.push(*Value);
++          Ref Pushed = ApplyPushOverflow(Value->StackDataNode);
++          if (Pushed == Value->StackDataNode) {
++            StackData.push(*Value);
++          } else {
++            StackData.push(StackMemberInfo {Pushed});
++          }
+         }
+         break;
+       }
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index 874f24d05..6c28d3537 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -389,6 +389,7 @@ static void LoadStateFromECContext(FEXCore::Core::InternalThreadState* Thread, C
+ 
+     State.FCW = Context.FltSave.ControlWord;
+     State.flags[FEXCore::X86State::X87FLAG_IE_LOC] = Context.FltSave.StatusWord & 1;
++    State.flags[FEXCore::X86State::X87FLAG_SF_LOC] = (Context.FltSave.StatusWord >> 6) & 1;
+     State.flags[FEXCore::X86State::X87FLAG_C0_LOC] = (Context.FltSave.StatusWord >> 8) & 1;
+     State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = (Context.FltSave.StatusWord >> 9) & 1;
+     State.flags[FEXCore::X86State::X87FLAG_C2_LOC] = (Context.FltSave.StatusWord >> 10) & 1;
+diff --git a/Source/Windows/Common/Exception.h b/Source/Windows/Common/Exception.h
+index 73bf5a9f3..4384d5090 100644
+--- a/Source/Windows/Common/Exception.h
++++ b/Source/Windows/Common/Exception.h
+@@ -63,6 +63,7 @@ static inline EXCEPTION_RECORD HandleGuestException(FEXCore::Core::CpuStateFrame
+         return Dst;
+       }
+       break;
++    case FEXCore::X86State::X86_TRAPNO_DE: Dst.ExceptionCode = EXCEPTION_INT_DIVIDE_BY_ZERO; return Dst;
+     case FEXCore::X86State::X86_TRAPNO_OF: Dst.ExceptionCode = EXCEPTION_INT_OVERFLOW; return Dst;
+     case FEXCore::X86State::X86_TRAPNO_PF:
+       // A page-fault raised by an explicit break in JIT code is always an execute fault
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+index 7d19917d2..1cbce11e5 100644
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -234,6 +234,7 @@ void LoadStateFromWowContext(FEXCore::Core::InternalThreadState* Thread, uint64_
+ 
+   State.FCW = XSave->ControlWord;
+   State.flags[FEXCore::X86State::X87FLAG_IE_LOC] = XSave->StatusWord & 1;
++  State.flags[FEXCore::X86State::X87FLAG_SF_LOC] = (XSave->StatusWord >> 6) & 1;
+   State.flags[FEXCore::X86State::X87FLAG_C0_LOC] = (XSave->StatusWord >> 8) & 1;
+   State.flags[FEXCore::X86State::X87FLAG_C1_LOC] = (XSave->StatusWord >> 9) & 1;
+   State.flags[FEXCore::X86State::X87FLAG_C2_LOC] = (XSave->StatusWord >> 10) & 1;
+@@ -276,7 +277,8 @@ void StoreWowContextFromState(FEXCore::Core::InternalThreadState* Thread, WOW64_
+   XSave->ControlWord = State.FCW;
+   XSave->StatusWord = (State.flags[FEXCore::X86State::X87FLAG_TOP_LOC] << 11) | (State.flags[FEXCore::X86State::X87FLAG_C0_LOC] << 8) |
+                       (State.flags[FEXCore::X86State::X87FLAG_C1_LOC] << 9) | (State.flags[FEXCore::X86State::X87FLAG_C2_LOC] << 10) |
+-                      (State.flags[FEXCore::X86State::X87FLAG_C3_LOC] << 14) | State.flags[FEXCore::X86State::X87FLAG_IE_LOC];
++                      (State.flags[FEXCore::X86State::X87FLAG_C3_LOC] << 14) |
++                      (State.flags[FEXCore::X86State::X87FLAG_SF_LOC] << 6) | State.flags[FEXCore::X86State::X87FLAG_IE_LOC];
+   XSave->TagWord = State.AbridgedFTW;
+ 
+   Context->FloatSave.ControlWord = XSave->ControlWord;

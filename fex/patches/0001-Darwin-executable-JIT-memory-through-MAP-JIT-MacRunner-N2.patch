@@ -1,0 +1,378 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 7 Sep 2026 20:12:12 +1000
+Subject: [PATCH] Darwin: executable JIT memory through MAP_JIT (MacRunner N2)
+
+Original title: =?UTF-8?q?FEX=20N2:=20=D0=B8=D1=81=D0=BF=D0=BE?= =?UTF-8?q?=D0=BB=D0=BD=D1=8F=D0=B5=D0=BC=D0=B0=D1=8F=20=D0=BF=D0=B0=D0=BC?= =?UTF-8?q?=D1=8F=D1=82=D1=8C=20=D1=87=D0=B5=D1=80=D0=B5=D0=B7=20MAP=5FJIT?= =?UTF-8?q?;=20=D0=BA=D0=BE=D0=BD=D1=81=D1=82=D1=80=D1=83=D0=BA=D1=86?= =?UTF-8?q?=D0=B8=D1=8F=20CrossOver=20=D0=B7=D0=B0=D0=BA=D1=80=D1=8B=D1=82?= =?UTF-8?q?=D0=B0=20=D1=8F=D0=B4=D1=80=D0=BE=D0=BC?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Замер закрыл главную неизвестность наряда и отменил перенос обработчика 6:
+XNU kern_mman.c:403-423 разрешает MAP_JIT|MAP_FIXED только при странице 4 КБ,
+у нас 16 КБ -> EINVAL. Проба подтвердила фактом, отрицательный контроль (RWX без
+MAP_JIT -> EACCES) отработал верно. Дорога CrossOver — перезапуск в 4К-процесс —
+нам закрыта отсутствием права: posix_spawn rc=88 на трёх двоичных, включая /bin/echo,
+при рабочем контроле без атрибута.
+
+Второй замер определил конструкцию: область MAP_JIT принимает mprotect РОВНО ОДИН
+раз (2000 отказов из 2000 после первого), значит модель Wine protect/protect_old к
+ней неприменима.
+
+Правка: VPROT_MACRUNNER_JIT; в map_view отображение MAP_JIT с адресом от ядра;
+в mprotect_exec ранний возврат для таких представлений. Обработчик 6 переписан с
+MAP_FIXED-разметки на проверку через mach_vm_region.
+
+Прогоны (образец i386, 40 с):
+  hb  контроль  exit=42, все столбцы совпали с эталоном N3 -> HyperBridge не сломан
+  fex           43 области MAP_JIT, 30 пропущенных mprotect, отказов 0
+Критерий 1 НЕ доказан: BTCpuProcessInit в руке fex не запускался, значит источник
+шторма не работал и падение счётчика ему приписать нельзя. Причина названа уликой:
+PE-половина собрана 16:43, до переименования .def в 18:53 — внутреннее имя осталось
+libwow64fex.dll.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ Source/Windows/ARM64EC/CMakeLists.txt    |   4 +
+ Source/Windows/ARM64EC/libarm64ecfex.def |   2 +-
+ Source/Windows/UnixLib/CMakeLists.txt    |  15 +-
+ Source/Windows/UnixLib/FEXUnixLib.cpp    | 181 +++++++++++++++++++++++
+ Source/Windows/UnixLib/FEXUnixLib.h      |  25 ++++
+ Source/Windows/WOW64/CMakeLists.txt      |   6 +
+ Source/Windows/WOW64/libwow64fex.def     |   2 +-
+ 7 files changed, 229 insertions(+), 6 deletions(-)
+
+diff --git a/Source/Windows/ARM64EC/CMakeLists.txt b/Source/Windows/ARM64EC/CMakeLists.txt
+index 0c9a57a17..1de759a3d 100644
+--- a/Source/Windows/ARM64EC/CMakeLists.txt
++++ b/Source/Windows/ARM64EC/CMakeLists.txt
+@@ -4,6 +4,10 @@ add_library(arm64ecfex SHARED
+   libarm64ecfex.def
+   $<TARGET_OBJECTS:FEXCore_object>)
+ 
++# MacRunner N3 2026-09-07: HKLM\Software\Microsoft\Wow64\amd64 = "xtajit64.dll"
++# (loader/wine.inf.in:396). Имя цели сборки arm64ecfex оставлено как есть.
++set_target_properties(arm64ecfex PROPERTIES OUTPUT_NAME "xtajit64" PREFIX "" SUFFIX ".dll")
++
+ patch_library_wine(arm64ecfex)
+ 
+ target_include_directories(arm64ecfex PRIVATE
+diff --git a/Source/Windows/ARM64EC/libarm64ecfex.def b/Source/Windows/ARM64EC/libarm64ecfex.def
+index bb51ca889..bd70ff5c4 100644
+--- a/Source/Windows/ARM64EC/libarm64ecfex.def
++++ b/Source/Windows/ARM64EC/libarm64ecfex.def
+@@ -1,4 +1,4 @@
+-LIBRARY libarm64ecfex.dll
++LIBRARY xtajit64.dll
+ 
+ EXPORTS
+   BTCpu64FlushInstructionCache
+diff --git a/Source/Windows/UnixLib/CMakeLists.txt b/Source/Windows/UnixLib/CMakeLists.txt
+index 37eda6aa0..ce56e9df7 100644
+--- a/Source/Windows/UnixLib/CMakeLists.txt
++++ b/Source/Windows/UnixLib/CMakeLists.txt
+@@ -5,10 +5,17 @@ include(GNUInstallDirs)
+ 
+ function(CreateLib TargetName LibName)
+   add_library(${TargetName} SHARED FEXUnixLib.cpp)
+-  set_target_properties(${TargetName} PROPERTIES OUTPUT_NAME ${LibName} PREFIX "lib" SUFFIX ".so")
+-  target_link_libraries(${TargetName} PRIVATE rt)
++  set_target_properties(${TargetName} PROPERTIES OUTPUT_NAME ${LibName} PREFIX "" SUFFIX ".so")
++  if (NOT APPLE)
++    target_link_libraries(${TargetName} PRIVATE rt)
++  else()
++    # MacRunner N2: клей грузится dlopen'ом внутрь Wine. Исключения и RTTI ему не нужны,
++    # а тянут за собой libc++abi — снимаем, чтобы список импортов остался коротким.
++    target_compile_options(${TargetName} PRIVATE -fno-exceptions -fno-rtti)
++  endif()
+   install(TARGETS ${TargetName} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Runtime)
+ endfunction()
+ 
+-CreateLib(wow64fex_unixlib wow64fex)
+-CreateLib(arm64ecfex_unixlib arm64ecfex)
++# MacRunner N3 2026-09-07: basename спутника обязан совпадать с PE.
++CreateLib(wow64fex_unixlib xtajit)
++CreateLib(arm64ecfex_unixlib xtajit64)
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
+index 692e459f1..4779c8dd7 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.cpp
++++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
+@@ -4,9 +4,22 @@
+ #include <fcntl.h>
+ #include <string>
+ #include <sys/mman.h>
++#ifndef __APPLE__
+ #include <sys/prctl.h>
++#endif
+ #include <unistd.h>
+ 
++#ifdef __APPLE__
++#include <cerrno>
++#include <cstdio>
++#include <cstdlib>
++#include <dlfcn.h>
++#include <pthread.h>
++// Для проверки обработчика 6: фактические права области, а не наше предположение о них.
++#include <mach/mach.h>
++#include <mach/mach_vm.h>
++#endif
++
+ #include "FEXUnixLib.h"
+ 
+ // Equivalent to C++23's std::to_underlying.
+@@ -23,6 +36,161 @@ constexpr NTSTATUS STATUS_SUCCESS = 0;
+ constexpr NTSTATUS STATUS_NOT_SUPPORTED = 0xC00000BB;
+ constexpr NTSTATUS STATUS_INTERNAL_ERROR = 0xC00000E5;
+ 
++#ifdef __APPLE__
++// ===========================================================================================
++// MacRunner N2 2026-09-07 — дарвиновская половина клея.
++//
++// Написана по спецификации reports/FEX-KLEY-SPEC-8-OBRABOTCHIKOV.md, снятой дизассемблером
++// с работающего спутника CrossOver. До этого захода исходника клея не существовало НИГДЕ:
++// двоичный собран 07.09 в 15:25 вне репозитория, пересобрать его было нечем. Копия того
++// двоичного лежит в artifacts/KLEY-FEX-BEZ-ISHODNIKA-070926/.
++//
++// Почему это вообще нужно: macOS отказывает в RWX КАТЕГОРИЧЕСКИ — и через mmap, и через
++// mprotect (замер тремя руками, reports/FEX-N3-lab/rwx_probe*.c, errno=13 EACCES; право
++// com.apple.security.cs.allow-unsigned-executable-memory запрет НЕ снимает). Законных дорог
++// ровно две: (A) MAP_JIT + pthread_jit_write_protect_np — ею идут FEX и CrossOver;
++// (B) RW -> запись -> mprotect RX — ею идёт HyperBridge. Обработчики 6 и 7 — это дорога (A).
++//
++// Отличие от снятого двоичного НАМЕРЕННОЕ и одно: их обработчик 6 отбрасывает результат
++// mmap (`bl _mmap / mov w0,#0 / ret`), то есть рапортует успех даже при неудаче разметки.
++// Здесь результат проверяется. Молчаливый ложный успех — худший из возможных отказов:
++// он выглядит как работающая разметка и уводит диагностику на несколько дней.
++// ===========================================================================================
++
++// Метка для сверки развёрнутого двоичного: `strings -a <файл> | grep macrunner-fex-glue`.
++// Правило проекта: гейт, активность которого не доказана, считается выключенным, — поэтому
++// у клея должна быть опознавательная строка, переживающая линковку.
++__attribute__((used)) static const char MacRunnerGlueMarker[] = "macrunner-fex-glue-darwin-v1";
++
++// Печать безусловная, в stderr: каналы wine (ERR/MESSAGE) до наших журналов не доходят,
++// проверено — строк `err:` нет НИ В ОДНОМ прогоне за всю историю проекта.
++static uint64_t MarkJITCount {};
++static uint64_t JITExecCount {};
++
++static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
++  // thread_set_x86_64_compat есть в libsystem (dlsym его находит), но включение требует
++  // права com.apple.security.cs.x86-64-abi-version-2, которого у нас НЕТ: подпись
++  // отказывает -413 "No matching profile found". Пока права нет, обработчик обязан вернуть
++  // ненулевое, чтобы FEX честно ушёл на программные барьеры. Молча считать TSO включённым
++  // НЕЛЬЗЯ — это порча модели памяти, а не потеря скорости.
++  //
++  // Символ берётся через dlsym, а не линковкой: он приватный, и его исчезновение в другой
++  // версии macOS не должно ломать ЗАГРУЗКУ клея целиком.
++  auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
++  using tso_fn = int (*)(int);
++  // Файловый статик, а не локальный: локальный потребовал бы __cxa_guard_acquire, то есть
++  // зависимость клея от libc++abi. Клей грузится dlopen'ом внутрь Wine — лишние
++  // зависимости здесь это лишняя поверхность отказа. Повторный dlsym безвреден.
++  auto SetCompat = reinterpret_cast<tso_fn>(dlsym(RTLD_DEFAULT, "thread_set_x86_64_compat"));
++  if (!SetCompat) {
++    return STATUS_NOT_SUPPORTED;
++  }
++  return SetCompat(Args->Enable ? 1 : 0) == 0 ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
++}
++
++// 1-5: механизма в ядре macOS НЕТ. Это не недоделка — соответствующих вызовов не существует,
++// и нативная сборка Mach-O их не откроет. Возврат совпадает с CrossOver, включая пятый:
++// у прежнего нашего двоичного пятый возвращал 0, и это было расхождение с эталоном.
++//   1 SetKernelUnalignedAtomicControl — prctl(0x46455849) есть только в ЗАПЛАТЕ FEX к ядру
++//     Linux, её нет даже в обычном Linux;
++//   2 Madvise — зовётся только под MADV_HUGEPAGE; прозрачных огромных страниц в macOS нет;
++//   3 SetVMAName — подписи областей в /proc/maps, чистая диагностика;
++//   4/5 GetSHMStatsVMA / DeleteSHMStatsFile — телеметрия через shm_open("/fex-<pid>-stats").
++static NTSTATUS FEXUnixLib_SetKernelUnalignedAtomicControlHandler(void* _Args) {
++  return STATUS_NOT_SUPPORTED;
++}
++static NTSTATUS FEXUnixLib_MadviseHandler(void* _Args) {
++  return STATUS_NOT_SUPPORTED;
++}
++static NTSTATUS FEXUnixLib_SetVMANameHandler(void* _Args) {
++  return STATUS_NOT_SUPPORTED;
++}
++static NTSTATUS FEXUnixLib_GetSHMStatsVMAHandler(void* _Args) {
++  return STATUS_NOT_SUPPORTED;
++}
++static NTSTATUS FEXUnixLib_DeleteSHMStatsFileHandler(void* _Args) {
++  return STATUS_NOT_SUPPORTED;
++}
++
++// ★★★ ПЕРЕПИСАНО 07.09.2026 ПОСЛЕ ЗАМЕРА. Прежняя редакция была построчным переносом
++// CrossOver: mmap(Addr, Size, RWX, MAP_ANON|MAP_PRIVATE|MAP_FIXED|MAP_JIT). Замер эту
++// конструкцию УБИЛ, и причина внешняя, не наша.
++//
++//   XNU bsd/kern/kern_mman.c:403-423 — MAP_JIT вместе с MAP_FIXED разрешён ТОЛЬКО когда
++//   страница карты процесса 4096 и карта не exotic; иначе EINVAL, безусловно.
++//
++// Проба reports/FEX-N2-lab/rwx_probe.c на этой машине (страница 16384):
++//     MAP_JIT без MAP_FIXED              -> ok, prot=7 max=7, код вернул 42, затем 43
++//     MAP_JIT|MAP_FIXED поверх RW        -> EINVAL
++//     MAP_JIT|MAP_FIXED поверх PROT_NONE -> EINVAL
++//     RWX без MAP_JIT (контроль)         -> EACCES
++//
++// CrossOver обходит это ОТДЕЛЬНЫМ ПЕРЕЗАПУСКОМ в 4К-процесс
++// (_posix_spawnattr_set_4k_page_size_np). Нам эта дорога закрыта не по незнанию:
++// reports/FEX-N2-lab/spawn4k_probe.c даёт posix_spawn rc=88 на ТРЁХ разных двоичных,
++// включая системный /bin/echo, тогда как тот же spawn без атрибута работает. Требуется
++// право com.apple.private.4k-pages либо cross-architecture-support (XNU
++// mach_loader.c:985-1025), которого у нас нет.
++//
++// ОТСЮДА НОВЫЙ ДОГОВОР: отображение с MAP_JIT делает САМ Wine при выделении
++// (virtual.c, map_view, VPROT_MACRUNNER_JIT), потому что только там адрес ещё не
++// зафиксирован и его может выбрать ядро. Обработчику 6 остаётся ПРОВЕРКА, и это не
++// уступка: без неё «разметил» и «не разметил» дают одинаковый успех, а именно на этом
++// эталон CrossOver и слеп (его обработчик 6 возвращает 0, не глядя на результат mmap).
++static NTSTATUS FEXUnixLib_MarkJITMemoryHandler(void* _Args) {
++  auto Args = reinterpret_cast<const FEXUnixLib_MarkJITMemory*>(_Args);
++  const uint64_t N = __atomic_add_fetch(&MarkJITCount, 1, __ATOMIC_RELAXED);
++
++  mach_vm_address_t Addr = reinterpret_cast<mach_vm_address_t>(Args->Addr);
++  mach_vm_size_t Size = 0;
++  vm_region_basic_info_data_64_t Info {};
++  mach_msg_type_number_t Count = VM_REGION_BASIC_INFO_COUNT_64;
++  mach_port_t Object = MACH_PORT_NULL;
++
++  const kern_return_t KR = mach_vm_region(mach_task_self(), &Addr, &Size, VM_REGION_BASIC_INFO_64,
++                                          reinterpret_cast<vm_region_info_t>(&Info), &Count, &Object);
++
++  // Годной считаем область, которая (а) найдена, (б) НАКРЫВАЕТ весь запрошенный диапазон
++  // целиком — mach_vm_region умеет вернуть СЛЕДУЮЩУЮ область, если по адресу пусто, —
++  // и (в) имеет max_protection = RWX, что и есть признак отображения с MAP_JIT.
++  const bool Covers = (KR == KERN_SUCCESS) && (Addr <= reinterpret_cast<mach_vm_address_t>(Args->Addr)) &&
++                      (Addr + Size >= reinterpret_cast<mach_vm_address_t>(Args->Addr) + Args->Size);
++  const bool Ok = Covers && ((Info.max_protection & VM_PROT_ALL) == VM_PROT_ALL) && (Info.protection & VM_PROT_EXECUTE);
++
++  if (N <= 8 || !Ok) {
++    fprintf(stderr,
++            "macrunner-fex-markjit: addr=%p size=%zu kr=%d обл=%p+0x%llx prot=%d max=%d "
++            "накрывает=%d ok=%d n=%llu jit_wp_supported=%d\n",
++            Args->Addr, Args->Size, KR, reinterpret_cast<void*>(Addr), (unsigned long long)Size, Info.protection,
++            Info.max_protection, Covers ? 1 : 0, Ok ? 1 : 0, (unsigned long long)N,
++            pthread_jit_write_protect_supported_np() ? 1 : 0);
++    fflush(stderr);
++  }
++
++  // ★ Отказ здесь — НАСТОЯЩИЙ отказ, а не молчаливый ноль эталона: если область не
++  // MAP_JIT, то первая же запись кода упрётся в W^X, и лучше узнать это здесь.
++  return Ok ? STATUS_SUCCESS : STATUS_INTERNAL_ERROR;
++}
++
++static NTSTATUS FEXUnixLib_EnableJITExecHandler(void* _Args) {
++  auto Args = reinterpret_cast<const FEXUnixLib_EnableJITExec*>(_Args);
++
++  // ★ ПОТОКОВОЕ состояние. pthread_jit_write_protect_np действует на ВЫЗЫВАЮЩИЙ поток и
++  // сразу на ВСЕ области MAP_JIT процесса. Значит поток, который пишет код, обязан сам
++  // открыть запись и сам закрыть её — чужой поток за него этого не сделает, и наоборот:
++  // открыв запись, он лишает СЕБЯ права исполнять JIT-код до обратного переключения.
++  pthread_jit_write_protect_np(Args->Enable);
++
++  const uint64_t N = __atomic_add_fetch(&JITExecCount, 1, __ATOMIC_RELAXED);
++  if (N <= 4 || (N & 0xFFFFF) == 0) {
++    fprintf(stderr, "macrunner-fex-jitexec: enable=%d n=%llu\n", Args->Enable, (unsigned long long)N);
++    fflush(stderr);
++  }
++  return STATUS_SUCCESS;
++}
++
++#else // !__APPLE__
++
+ #ifndef PR_GET_MEM_MODEL
+ #define PR_GET_MEM_MODEL 0x6d4d444c
+ #endif
+@@ -163,6 +331,17 @@ static NTSTATUS FEXUnixLib_DeleteSHMStatsFileHandler(void* _Args) {
+   return STATUS_SUCCESS;
+ }
+ 
++// На Linux кодовый буфер и так RWX, переключать нечего — оба новых обработчика
++// успешные пустышки. Это НЕ отказ: делать здесь нечего по устройству платформы.
++static NTSTATUS FEXUnixLib_MarkJITMemoryHandler(void* _Args) {
++  return STATUS_SUCCESS;
++}
++static NTSTATUS FEXUnixLib_EnableJITExecHandler(void* _Args) {
++  return STATUS_SUCCESS;
++}
++
++#endif // __APPLE__
++
+ extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
+   FEXUnixLib_SetHardwareTSOControlHandler,
+   FEXUnixLib_SetKernelUnalignedAtomicControlHandler,
+@@ -170,6 +349,8 @@ extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
+   FEXUnixLib_SetVMANameHandler,
+   FEXUnixLib_GetSHMStatsVMAHandler,
+   FEXUnixLib_DeleteSHMStatsFileHandler,
++  FEXUnixLib_MarkJITMemoryHandler,
++  FEXUnixLib_EnableJITExecHandler,
+ };
+ 
+ static_assert(sizeof(__wine_unix_call_funcs) / sizeof(__wine_unix_call_funcs[0]) == ToUnderlying(FEXUnixLibFunctions::MAX));
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.h b/Source/Windows/UnixLib/FEXUnixLib.h
+index 4795d62c0..f51885842 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.h
++++ b/Source/Windows/UnixLib/FEXUnixLib.h
+@@ -10,6 +10,14 @@ enum class FEXUnixLibFunctions : uint32_t {
+   SetVMAName,
+   GetSHMStatsVMA,
+   DeleteSHMStatsFile,
++  // MacRunner N2 2026-09-07 (Darwin W^X).
++  // Дописано ПОСЛЕ DeleteSHMStatsFile и ПЕРЕД MAX. Это не выбор по вкусу: таблица
++  // __wine_unix_call_funcs спутника CrossOver, снятая otool, содержит РОВНО восемь
++  // указателей именно в этом порядке — индексы 0-5 совпадают с апстримом, новые идут
++  // следом. Порядок 0-5 менять нельзя: заголовок требует совпадения между wow64,
++  // arm64ec и Linux.
++  MarkJITMemory,
++  EnableJITExec,
+   MAX,
+ };
+ 
+@@ -51,3 +59,20 @@ struct FEXUnixLib_GetSHMStatsVMA {
+   uint32_t MaxSize;
+ };
+ static_assert(sizeof(FEXUnixLib_GetSHMStatsVMA) == 16);
++
++// MacRunner N2: раскладка выведена из дизассемблера спутника CrossOver, не из головы.
++//   _handler_mark_jit_memory: ldp x8, x1, [x0]  -> два 64-битных поля, адрес и длина
++//   _handler_enable_jit_exec: ldr w0, [x0]      -> одно 32-битное поле
++struct FEXUnixLib_MarkJITMemory {
++  void* Addr;
++  size_t Size;
++};
++static_assert(sizeof(FEXUnixLib_MarkJITMemory) == 16);
++
++struct FEXUnixLib_EnableJITExec {
++  // 1 = страницы MAP_JIT исполняемые (запись запрещена),
++  // 0 = страницы MAP_JIT записываемые (исполнение запрещено).
++  // Состояние ПОТОКОВОЕ: действует на вызывающий поток, не на процесс.
++  int32_t Enable;
++};
++static_assert(sizeof(FEXUnixLib_EnableJITExec) == 4);
+diff --git a/Source/Windows/WOW64/CMakeLists.txt b/Source/Windows/WOW64/CMakeLists.txt
+index 5bc5accff..047ccdd4f 100644
+--- a/Source/Windows/WOW64/CMakeLists.txt
++++ b/Source/Windows/WOW64/CMakeLists.txt
+@@ -3,6 +3,12 @@ add_library(wow64fex SHARED
+   libwow64fex.def
+   $<TARGET_OBJECTS:FEXCore_object>)
+ 
++# MacRunner N3 2026-09-07: Wine выбирает CPU-модуль по имени из реестра
++# HKLM\Software\Microsoft\Wow64\x86 = "xtajit.dll" (loader/wine.inf.in:398), а нативного
++# спутника ищет в ТОМ ЖЕ корне WINEDLLPATH с заменой расширения на .so
++# (dlls/ntdll/unix/loader.c:2110-2121,2143-2146). Поэтому PE обязан называться xtajit.dll.
++set_target_properties(wow64fex PROPERTIES OUTPUT_NAME "xtajit" PREFIX "" SUFFIX ".dll")
++
+ patch_library_wine(wow64fex)
+ 
+ target_include_directories(wow64fex PRIVATE
+diff --git a/Source/Windows/WOW64/libwow64fex.def b/Source/Windows/WOW64/libwow64fex.def
+index 5fff39032..375596824 100644
+--- a/Source/Windows/WOW64/libwow64fex.def
++++ b/Source/Windows/WOW64/libwow64fex.def
+@@ -1,4 +1,4 @@
+-LIBRARY libwow64fex.dll
++LIBRARY xtajit.dll
+ 
+ EXPORTS
+   BTCpuFlushInstructionCache2

@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "upstream": {
+    "url": "https://github.com/FEX-Emu/FEX",
+    "commit": "fd141ed6d721d03062619e4702bca1a0c93b6dd9",
+    "submodules": {
+      "External/rpmalloc": "1d85c246cd827ead6865f4f880d4fef53f2b1864",
+      "External/fmt": "1be298e1bd68957e4cd352e1f676f00e07dcfb57",
+      "External/xxhash": "e626a72bc2321cd320e953a0ccf1584cad60f363",
+      "External/range-v3": "ca1388fb9da8e69314dda222dc7b139ca84e092f",
+      "External/unordered_dense": "3234af2c03549bc85656bfd3a86993bf1cd8aef1",
+      "Source/Common/cpp-optparse": "9f94388a339fcbb0bc95c17768eb786c85988f6e"
+    }
+  },
+  "toolchain": {
+    "windows_halves": "llvm-mingw-20260505-ucrt-macos-universal (clang 22)",
+    "unix_libraries": "Apple clang 21.0.0 (clang-2100.3.34.2), macOS SDK 27.0, deployment target 26.0",
+    "cmake_options": "-DCMAKE_BUILD_TYPE=Release -DTUNE_CPU=none -DENABLE_LTO=OFF -DENABLE_JEMALLOC_GLIBC_ALLOC=OFF -DRANGES_NATIVE=OFF -DBUILD_TESTING=OFF -DFEX_WINE_DARWIN=ON",
+    "link_flags": "-static -static-libgcc -static-libstdc++ -Wl,--file-alignment=4096,/mllvm:-align-loops=1 -Wl,--Xlink=/timestamp:<1788779472 ARM64EC | 1788779471 WOW64>"
+  },
+  "macrunner_1_0_2": {
+    "verified": "2026-09-28: rebuilt from the reconstructed source with the original path prefixes; both PE files byte-identical",
+    "xtajit64.dll": {
+      "patches": "0001-0007",
+      "sha256_release_unstripped": "9aba4f220173a1045bfd45eacbff90dc36803bee7ddb306a2c1083fac8912308",
+      "sha256_shipped_stripped": "f718484b22a6779191c3035abe2c40a4d7453f9a6b124f027d6d13cb389f8c7d",
+      "link_timestamp": 1788779472
+    },
+    "xtajit.dll": {
+      "patches": "0001-0002",
+      "sha256_release_unstripped": "deaf27bebe5c68912bdd128bfd34b717c14cffd2005914fcf0145fbd181a7c08",
+      "sha256_shipped_stripped": "52c00299e9090d7e25986950fb2d7404aa5c4ee9fa6d1761f6e6968ff0b85d77",
+      "link_timestamp": 1788779471
+    },
+    "unix_libraries": {
+      "patches": "0001-0003",
+      "sha256_shipped": {
+        "libarm64ecfex.so": "c7948688071db5769834701d5d0290ac4bae57044d9c7d026be9c766332abe52",
+        "libwow64fex.so": "1e42343538e82443ab0d70fcd579a629871aec1d2b9ab79aeb08a4a10156f157"
+      },
+      "note": "Linked with the macOS 26.5 SDK and ld 1267. A rebuild with SDK 27.0 has the same exports (__fex_darwin_unixlib_abi, __wine_unix_call_funcs), the same 9 functions and the same 9 imports, but is not byte-identical."
+    }
+  },
+  "series_head": {
+    "patches": "0001-0011",
+    "sha256_local_build_original_paths": {
+      "xtajit64.dll": "345a0f7cbcd049da0ef224c1041b0895b7ddaa242f84557d7d734d6148a1bb2e",
+      "xtajit.dll": "e54288200da8024cf707670ffaa3fdc4a4c4a99c960cfcb3f4e547c386785260"
+    },
+    "note": "fex/build.sh maps source paths to /hyperbridge/fex/src; two clean builds in different directories gave identical hashes (28 Sep 2026). The local build differs from it in embedded strings: source path prefix, install prefix and version hash (it used the original 1.0.2 values).",
+    "sha256_build_sh": {
+      "xtajit64.dll": "0393b4f9bd57c1fdbfdcb401db7c559fe2d530977f55d93e7b3b1855141d919a",
+      "xtajit.dll": "21b6b1c173c3c9e5ed4d7222754ac943bec97d822e154167e5d4d27e25a3d57d",
+      "xtajit64.so": "373e34d2b1756cb712d5aa8356edd02e8ab5efc7386ac227d182d989d29b4089",
+      "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
+    },
+    "game_check": "Hollow Knight gameplay from a save, DXMT frame counter, 120 Hz display: series head 119.2 and 118.2 FPS, menu 41.7 and 39.5 s; MacRunner 1.0.2 FEX in the same series 117.9, 113.4 and 118.7 FPS, menu 41.7 and 41.2 s. All switches of patches 0009-0010 off."
+  }
+}
