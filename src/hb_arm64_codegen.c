@@ -840,6 +840,10 @@ static unsigned long long macrunner_hb_stlr_granule_str_emitted;
  * компилируется один раз и может не выполниться ни разу. Именно это число
  * объясняет, почему снятие проверки выравнивания не дало времени. */
 static unsigned long long macrunner_hb_fallback_store_calls;
+/* Single-threaded differential probes sample the existing helper census. */
+uint64_t hb_codegen_fallback_store_count(void) {
+    return macrunner_hb_fallback_store_calls;
+}
 static unsigned long long macrunner_hb_fallback_load_calls;
 
 static void macrunner_hb_tso_report(void) {
@@ -8043,13 +8047,25 @@ static bool emit_direct_mem_store_from_x20_tso(hb_codegen_buffer_t* buf,
         ea_materialize(buf);  /* X21 идёт как ЗНАЧЕНИЕ — база обязана быть прибавлена */
         aligned_branch = emit_align_guard_deferred(buf, mask, &aligned_is_tbz);
 
-        emit_mov_reg(buf, 0, 19);
-        ea_materialize(buf);  /* X21 идёт как ЗНАЧЕНИЕ — база обязана быть прибавлена */
-        emit_mov_reg(buf, 1, 21);
-        emit_mov_reg(buf, 2, 20);
-        emit_mov_imm_compact(buf, 3, (uint64_t)dst->size);
-        emit_call_helper(buf, (void*)hb_jit_helper_store_sized);
-        emit_return_if_helper_failed(buf);
+        /* x64 arm 0: opt in to host-MMU permission granularity (16 KiB on M1).
+         * Only the unaligned ordinary-store fallback changes; aligned STLR and
+         * atomic/RMW paths retain their existing code. A writable sibling guest
+         * subpage can make a guest-RO 4 KiB page writable to the host: this arm
+         * deliberately accepts that loss of precision for a separate A/B run.
+         * The ordinary-store emitter uses DMB ISH + STR without an alignment
+         * proof (unless an explicit pre-existing relaxed/diagnostic gate wins). */
+        if (buf->arch == HB_ARCH_X64 &&
+            hb_jit_gate_flag(HB_GATE_HB_X64_STORE_UNALIGNED_HOSTMMU, 0)) {
+            emit_direct_mem_store_from_x20(buf, dst->size);
+        } else {
+            emit_mov_reg(buf, 0, 19);
+            ea_materialize(buf);
+            emit_mov_reg(buf, 1, 21);
+            emit_mov_reg(buf, 2, 20);
+            emit_mov_imm_compact(buf, 3, (uint64_t)dst->size);
+            emit_call_helper(buf, (void*)hb_jit_helper_store_sized);
+            emit_return_if_helper_failed(buf);
+        }
         done_branch = emit_b_deferred(buf);
 
         patch_align_guard(buf, aligned_branch, aligned_is_tbz, buf->size);

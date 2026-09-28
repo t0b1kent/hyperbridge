@@ -701,6 +701,19 @@ clean: clean-zero-transit-budget-test
 clean-zero-transit-budget-test:
 	rm -f tests/hb_zero_transit_budget_test tests/hb_zero_transit_budget_test.d
 
+tests/hb_x64_store_permmap_test: tests/hb_x64_store_permmap_test.c $(STATIC_LIB)
+	$(CC) $(CFLAGS) $< $(STATIC_LIB) -o $@
+
+.PHONY: x64-store-permmap-test clean-x64-store-permmap-test
+x64-store-permmap-test: tests/hb_x64_store_permmap_test
+	./tests/hb_x64_store_permmap_test off
+	./tests/hb_x64_store_permmap_test hostmmu
+
+test: x64-store-permmap-test
+clean: clean-x64-store-permmap-test
+clean-x64-store-permmap-test:
+	rm -f tests/hb_x64_store_permmap_test tests/hb_x64_store_permmap_test.d
+
 tests/hb_cooperative_yield_test: tests/hb_cooperative_yield_test.c adapter/src/hb_cooperative_yield.h include/hb_result.h
 	$(CC) $(CFLAGS) $< -o $@
 

@@ -429,6 +429,8 @@ bool hb_ic_slot_derzhit_native(uint64_t native);
 uint64_t hb_ic_slotov_zanyato(void);
 
 /* Generic codegen helpers */
+/* Existing store-helper census, for single-threaded differential probes. */
+uint64_t hb_codegen_fallback_store_count(void);
 hb_codegen_buffer_t* hb_codegen_buffer_create(size_t cap);
 void hb_codegen_buffer_destroy(hb_codegen_buffer_t* buf);
 hb_result_t hb_codegen_buffer_append(hb_codegen_buffer_t* buf, const uint8_t* bytes, size_t len);

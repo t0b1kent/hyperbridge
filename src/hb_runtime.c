@@ -6949,6 +6949,7 @@ static unsigned persistent_cache_version(void) {
          * Все пять сдвигают номер, то есть записи разных сочетаний физически не встречаются. */
         HB_KEY_GATE("MACRUNNER_HB_STATIC_REGS");
         HB_KEY_GATE("MACRUNNER_HB_REG_FORWARD");
+        HB_KEY_GATE("MACRUNNER_HB_X64_STORE_UNALIGNED_HOSTMMU");
         HB_KEY_GATE("MACRUNNER_HB_XMM_FORWARD");
         HB_KEY_GATE("MACRUNNER_HB_TEST_REG_FORWARD_FLIP");
         /* 05.09.2026: три гейта отката (NO_SNAPSHOT, CHAIN_SCOPED_ROLLBACK,
