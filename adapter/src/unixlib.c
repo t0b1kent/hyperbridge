@@ -124,12 +124,78 @@ static void guard_free_remember( uint64_t page, uint64_t generation )
     slot->generation = generation;
 }
 
+/* Claude 28.09.2026 — ТОЧНОЕ ГАШЕНИЕ КЕША СТРАНИЦ (гейт MACRUNNER_HB_VMCACHE_RANGE, умолчание 0).
+ *
+ * Кеш «страница выделена, доступна, без сторожа» у прямой записи/чтения (direct_access_pages_ok) держит
+ * ключом vm_map_generation, а оно растёт на КАЖДОМ уведомлении alloc/map/protect/free/unmap — любое
+ * выделение в процессе гасит ответ для всех страниц всех потоков. HK, геймплей (fPp1, sample 20 с):
+ * помощник записи hb_jit_helper_store_sized -> native_write -> NtQueryVirtualMemory (get_basic_memory_info:
+ * блокировка виртуальной памяти Wine + pthread_sigmask) — ~1,8 % главного потока и ~5 % UnityGfxDeviceWorker;
+ * уведомлений ~83 тыс. за прогон (inval-why: 163 периода по 512).
+ * Здесь каждое такое уведомление пишется в кольцо диапазонов с порядковым номером; ответ кеша верен,
+ * пока ни один диапазон ПОСЛЕ его номера не задел страницу. Длина 0 (освобождение без размера,
+ * неизвестная область) задевает всё — как прежнее поколение. Кольцо переполнено, запись не дописана
+ * или переписана — промах (запрос, как раньше). Допущение то же, что у поколения: сторож и снятие
+ * доступа приходят только через эти уведомления. */
+#define VM_INVAL_RING 256u
+struct vm_inval_rec { uint64_t start, end, seq; };
+static struct vm_inval_rec vm_inval_ring[VM_INVAL_RING];
+static uint64_t vm_inval_seq;
+
+static int vmcache_range_enabled( void )
+{
+    static int enabled = -1;
+    if (enabled < 0)
+    {
+        const char *v = getenv( "MACRUNNER_HB_VMCACHE_RANGE" );
+        enabled = (v && v[0] && v[0] != '0') ? 1 : 0;
+    }
+    return enabled;
+}
+
+static void vm_inval_record( uint64_t start, uint64_t len )
+{
+    uint64_t seq = __atomic_add_fetch( &vm_inval_seq, 1, __ATOMIC_ACQ_REL );
+    struct vm_inval_rec *r = &vm_inval_ring[seq & (VM_INVAL_RING - 1)];
+    uint64_t lo = start & ~UINT64_C(4095);
+    uint64_t hi = (len && start + len > start) ? ((start + len + 4095) & ~UINT64_C(4095)) : UINT64_MAX;
+    if (!len) lo = 0;
+    __atomic_store_n( &r->seq, 0, __ATOMIC_RELAXED );
+    __atomic_thread_fence( __ATOMIC_RELEASE );
+    __atomic_store_n( &r->start, lo, __ATOMIC_RELAXED );
+    __atomic_store_n( &r->end, hi, __ATOMIC_RELAXED );
+    __atomic_store_n( &r->seq, seq, __ATOMIC_RELEASE );
+}
+
+/* TRUE — страницу [page, page+4096) после номера since не задел ни один записанный диапазон. */
+static BOOL vm_page_untouched_since( uint64_t page, uint64_t since, uint64_t *now_out )
+{
+    uint64_t now = __atomic_load_n( &vm_inval_seq, __ATOMIC_ACQUIRE ), s;
+    *now_out = now;
+    if (now - since >= VM_INVAL_RING) return FALSE;
+    for (s = since + 1; s <= now; s++)
+    {
+        const struct vm_inval_rec *r = &vm_inval_ring[s & (VM_INVAL_RING - 1)];
+        uint64_t lo, hi;
+        if (__atomic_load_n( &r->seq, __ATOMIC_ACQUIRE ) != s) return FALSE;
+        lo = __atomic_load_n( &r->start, __ATOMIC_RELAXED );
+        hi = __atomic_load_n( &r->end, __ATOMIC_RELAXED );
+        __atomic_thread_fence( __ATOMIC_ACQUIRE );
+        if (__atomic_load_n( &r->seq, __ATOMIC_RELAXED ) != s) return FALSE;
+        if (page < hi && page + 4096 > lo) return FALSE;
+    }
+    return TRUE;
+}
+
 /* Сброс по диапазону (бит 16 MACRUNNER_HB_FAST_EXEC): только задетые байты. */
 static void publish_cache_range(enum hb_cache_notification event, BOOL is_post,
                                 NTSTATUS status, uint64_t start, uint64_t len)
 {
     if (event != HB_CACHE_FLUSH && event != HB_CACHE_DIRTY && event != HB_CACHE_READ)
+    {
+        if (vmcache_range_enabled()) vm_inval_record( start, len );
         __atomic_add_fetch( &vm_map_generation, 1, __ATOMIC_ACQ_REL );
+    }
     if (fast_exec_flags() & 16)
         (void)hb_cache_notify_publish_range(event, is_post, (int32_t)status, start, len);
     else
@@ -588,12 +654,24 @@ static BOOL direct_access_pages_ok( uint64_t addr, size_t size )
     for (;;)
     {
         struct guard_free_slot *slot = &direct_ok_cache[(page >> 12) & (GUARD_FREE_SLOTS - 1)];
-        if (!(slot->page == page &&
-              slot->generation == __atomic_load_n( &vm_map_generation, __ATOMIC_ACQUIRE )))
+        BOOL hit;
+        if (vmcache_range_enabled())
+        {
+            uint64_t now = 0;
+            hit = slot->page == page && vm_page_untouched_since( page, slot->generation, &now );
+            if (hit) slot->generation = now;
+        }
+        else
+            hit = slot->page == page &&
+                  slot->generation == __atomic_load_n( &vm_map_generation, __ATOMIC_ACQUIRE );
+        if (!hit)
         {
             MEMORY_BASIC_INFORMATION mbi;
             SIZE_T returned = 0;
-            uint64_t generation = __atomic_load_n( &vm_map_generation, __ATOMIC_ACQUIRE );
+            /* Номер берётся ДО запроса: уведомление посреди запроса даст промах в следующий раз. */
+            uint64_t generation = vmcache_range_enabled() ?
+                __atomic_load_n( &vm_inval_seq, __ATOMIC_ACQUIRE ) :
+                __atomic_load_n( &vm_map_generation, __ATOMIC_ACQUIRE );
             if (NtQueryVirtualMemory( NtCurrentProcess(), (void *)(uintptr_t)page, MemoryBasicInformation,
                                       &mbi, sizeof(mbi), &returned ) || returned < sizeof(mbi))
                 return FALSE;
