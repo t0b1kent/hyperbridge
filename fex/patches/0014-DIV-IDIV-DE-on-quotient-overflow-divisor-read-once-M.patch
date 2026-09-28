@@ -1,0 +1,295 @@
+From e24af05fcdc087ecc73c860de302d3b5c42365e8 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 09:09:09 +1000
+Subject: [PATCH 14/15] DIV/IDIV: #DE on quotient overflow, divisor read once
+ (MACRUNNER_FEX_DIV_OVERFLOW_DE)
+
+x86 raises #DE not only for a zero divisor but also when the quotient does not fit the destination;
+AArch64 UDIV/SDIV and the 128-bit helpers silently truncate it. With MACRUNNER_FEX_DIV_OVERFLOW_DE=1
+(default off) DIVOp/IDIVOp build the full condition without dividing, zero divisor included:
+DIV faults iff the high half of the dividend >= the divisor (unsigned); IDIV faults iff
+|dividend| >= |divisor| * 2^(n-1), plus |divisor| for a negative quotient; for r64 a 128-bit compare.
+The divisor is read once: check, division and write-back stay in one block, RAX/RDX keep their old
+values through a select when #DE is due, and the #DE branch follows the write-back. The division then
+gets divisor 1, so LDIV/LUDIV never see /0 or INT128_MIN / -1. Without the gate the existing zero check
+(which reads a memory divisor twice) is unchanged.
+
+MacRunnerDivOverflowChecks counts translations with the full check; a macrunner-fex-div-overflow-de line
+is printed at 1, 2, 4, ... HB<->FEX oracle (72 219 cases, product and native feature sets, one binary for
+both arms): 26 of 26 overflow cases become x86-correct, no other result changes, 73 non-overflowing
+DIV/IDIV cases stay correct. Windows reports a quotient overflow as STATUS_INTEGER_OVERFLOW (0xC0000095,
+measured under Prism); the frontends still report every #DE as EXCEPTION_INT_DIVIDE_BY_ZERO.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Interface/Core/OpcodeDispatcher.cpp       | 175 ++++++++++++++++--
+ .../Source/Interface/Core/OpcodeDispatcher.h  |   6 +
+ 2 files changed, 162 insertions(+), 19 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 838e71fce..5c02571ed 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -24,10 +24,31 @@ $end_info$
+ #include <FEXCore/Utils/LogManager.h>
+ 
+ #include <FEXHeaderUtils/BitUtils.h>
++#include <FEXCore/fextl/fmt.h>
+ 
+ #include <algorithm>
+ #include <array>
++#include <atomic>
+ #include <cstdint>
++#include <cstdlib>
++
++// FEX::Windows::Logging::Raw (__wine_dbg_output): fprintf in the PE part of FEX kills the process (see Core.cpp).
++namespace FEX::Windows::Logging {
++void Raw(const char* Message);
++}
++
++// ★ MacRunner Claude 29.09.2026: MACRUNNER_FEX_DIV_OVERFLOW_DE=1 makes DIV/IDIV raise #DE when the quotient does not
++// fit the destination, not only when the divisor is zero (HB<->FEX oracle 28.09, class FEX-DIV-OVERFLOW). Unset or any
++// other value keeps the zero-divisor check alone. MacRunnerDivOverflowChecks counts DIV/IDIV translations that carry
++// the full check; a macrunner-fex-div-overflow-de line is printed when it reaches 1, 2, 4, 8, ...
++std::atomic<uint64_t> MacRunnerDivOverflowChecks {0};
++int MacRunnerDivOverflowMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_DIV_OVERFLOW_DE");
++    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++  }();
++  return Mode;
++}
+ 
+ namespace FEXCore::IR {
+ 
+@@ -3713,13 +3734,95 @@ void OpDispatchBuilder::NEGOp(OpcodeArgs) {
+ // fixes the divisor up and returns EXCEPTION_CONTINUE_EXECUTION re-runs it.
+ void OpDispatchBuilder::RaiseDivideErrorIfZero(FEXCore::X86Tables::DecodedOp Op, Ref Divisor) {
+   CalculateDeferredFlags();
+-
++  RaiseDivideErrorIf(Op, Divisor, CondClass::EQ);
++}
++
++// ★ MacRunner Claude 29.09.2026 (MACRUNNER_FEX_DIV_OVERFLOW_DE=1): x86 also raises #DE when the quotient does not fit
++// the destination (SDM, DIV/IDIV); UDIV/SDIV silently truncate it. The condition is built without dividing and covers
++// the zero divisor as well:
++//   DIV:  quotient >= 2^n  <=>  high half of the dividend >= divisor (unsigned).
++//   IDIV: with A = |dividend| and B = |divisor| the quotient overflows iff A >= B * 2^(n-1) when it is positive and
++//         A >= B * (2^(n-1) + 1) when it is negative (-2^(n-1) still fits). B = 0 makes the threshold 0.
++//         Up to n = 32 the dividend fits 64 bits. For n = 64, A is the 128-bit |RDX:RAX| and the threshold is the
++//         pair (B >> 1 : B << 63 | (negative ? B : 0)); adding B to B << 63 never carries, since B <= 2^63.
++// Divisor must be the clean (no upper garbage) value the division itself uses. Returns 1 when #DE is due, else 0.
++Ref OpDispatchBuilder::DivideErrorCondition(FEXCore::X86Tables::DecodedOp Op, Ref Divisor, bool Signed) {
++  const auto Size = OpSizeFromSrc(Op);
++  const uint8_t Bits = IR::OpSizeAsBits(Size);
++  Ref Fault {};
++
++  if (!Signed) {
++    // High half of the dividend: AH, DX, EDX or RDX. Up to 32 bits a 32-bit compare ignores any garbage above.
++    Ref High = Size == OpSize::i8Bit ? LoadGPRRegister(X86State::REG_RAX, OpSize::i8Bit, 8) : LoadGPRRegister(X86State::REG_RDX, Size);
++    Fault = Select01(Size == OpSize::i64Bit ? OpSize::i64Bit : OpSize::i32Bit, CondClass::UGE, High, Divisor);
++  } else if (Size != OpSize::i64Bit) {
++    // Sign-extended AX, DX:AX or EDX:EAX.
++    Ref Dividend {};
++    if (Size == OpSize::i8Bit) {
++      Dividend = _Sbfe(OpSize::i64Bit, 16, 0, LoadGPRRegister(X86State::REG_RAX));
++    } else {
++      Ref Low = _Bfe(OpSize::i64Bit, Bits, 0, LoadGPRRegister(X86State::REG_RAX));
++      Dividend = _Orlshl(OpSize::i64Bit, Low, LoadGPRRegister(X86State::REG_RDX), Bits);
++      if (Size == OpSize::i16Bit) {
++        Dividend = _Sbfe(OpSize::i64Bit, 32, 0, Dividend);
++      }
++    }
++    Ref SignedDivisor = _Sbfe(OpSize::i64Bit, Bits, 0, Divisor);
++
++    Ref DividendSign = _Ashr(OpSize::i64Bit, Dividend, Constant(63));
++    Ref DivisorSign = _Ashr(OpSize::i64Bit, SignedDivisor, Constant(63));
++    Ref A = _Sub(OpSize::i64Bit, _Xor(OpSize::i64Bit, Dividend, DividendSign), DividendSign);
++    Ref B = _Sub(OpSize::i64Bit, _Xor(OpSize::i64Bit, SignedDivisor, DivisorSign), DivisorSign);
++    // B * 2^(n-1), plus B when the quotient is negative.
++    Ref Threshold = _Add(OpSize::i64Bit, _Lshl(OpSize::i64Bit, B, Constant(Bits - 1)),
++                         _And(OpSize::i64Bit, B, _Xor(OpSize::i64Bit, DividendSign, DivisorSign)));
++    Fault = Select01(OpSize::i64Bit, CondClass::UGE, A, Threshold);
++  } else {
++    Ref Low = LoadGPRRegister(X86State::REG_RAX);
++    Ref High = LoadGPRRegister(X86State::REG_RDX);
++
++    Ref DividendSign = _Ashr(OpSize::i64Bit, High, Constant(63));
++    Ref DivisorSign = _Ashr(OpSize::i64Bit, Divisor, Constant(63));
++    // |RDX:RAX|: the low half negates as usual, the high half takes the carry only when the low half is zero.
++    Ref ALow = _Sub(OpSize::i64Bit, _Xor(OpSize::i64Bit, Low, DividendSign), DividendSign);
++    Ref XHigh = _Xor(OpSize::i64Bit, High, DividendSign);
++    Ref AHigh = _Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::EQ, Low, Constant(0), _Sub(OpSize::i64Bit, XHigh, DividendSign), XHigh);
++    Ref B = _Sub(OpSize::i64Bit, _Xor(OpSize::i64Bit, Divisor, DivisorSign), DivisorSign);
++    // Threshold B * 2^63, plus B when the quotient is negative, as a 128-bit pair.
++    Ref TLow = _Or(OpSize::i64Bit, _Lshl(OpSize::i64Bit, B, Constant(63)),
++                   _And(OpSize::i64Bit, B, _Xor(OpSize::i64Bit, DividendSign, DivisorSign)));
++    Ref THigh = _Lshr(OpSize::i64Bit, B, Constant(1));
++    // A >= T  <=>  AHigh > THigh || (AHigh == THigh && ALow >= TLow)
++    Ref HighAbove = Select01(OpSize::i64Bit, CondClass::UGT, AHigh, THigh);
++    Ref HighEqual = Select01(OpSize::i64Bit, CondClass::EQ, AHigh, THigh);
++    Ref LowAtLeast = Select01(OpSize::i64Bit, CondClass::UGE, ALow, TLow);
++    Fault = _Or(OpSize::i64Bit, HighAbove, _And(OpSize::i64Bit, HighEqual, LowAtLeast));
++  }
++
++  const uint64_t Checks = MacRunnerDivOverflowChecks.fetch_add(1, std::memory_order_relaxed) + 1;
++  if ((Checks & (Checks - 1)) == 0) {
++    char Line[160];
++    const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-div-overflow-de: checks={} rip={:x} op={} size={}\n",
++                                         Checks, Op->PC, Signed ? "idiv" : "div", unsigned {Bits});
++    Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  }
++  return Fault;
++}
++
++// MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE): the value a register keeps written back — the old one when #DE is due.
++// Without a condition (the gate is off) the new value as is, and no IR is emitted.
++Ref OpDispatchBuilder::KeepOnDivideError(Ref Fault, Ref Old, Ref New) {
++  return Fault ? _Select(GetGPROpSize(), OpSize::i64Bit, CondClass::NEQ, Fault, Constant(0), Old, New) : New;
++}
++
++void OpDispatchBuilder::RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond) {
+   const auto GPRSize = GetGPROpSize();
+ 
+   auto FaultBlock = CreateNewCodeBlockAfter(GetCurrentBlock());
+   auto ContinueBlock = CreateNewCodeBlockAfter(FaultBlock);
+ 
+-  CondJump(Divisor, Constant(0), FaultBlock, ContinueBlock, CondClass::EQ);
++  CondJump(Value, Constant(0), FaultBlock, ContinueBlock, Cond);
+ 
+   SetCurrentCodeBlock(FaultBlock);
+   StartNewBlock();
+@@ -3752,13 +3855,27 @@ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+     return;
+   }
+ 
+-  // Fault before anything is written back. The load is clean (no upper garbage) so a
+-  // plain compare against zero is valid for every operand size.
+-  RaiseDivideErrorIfZero(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags));
++  // ★ MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE=1): the divisor is read ONCE and the check, the division and the
++  // write-back stay in one block; the #DE branch follows the write-back, which keeps RAX/RDX when #DE is due. The path
++  // below reads a memory divisor again after its branch, so another thread can change it between check and division.
++  const bool OverflowDE = MacRunnerDivOverflowMode();
++  Ref Divisor {};
++  Ref Fault {};
++  if (OverflowDE) {
++    CalculateDeferredFlags();
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++    Fault = DivideErrorCondition(Op, Divisor, false);
++    // Divide by 1 when the result is thrown away: the 128-bit helper must never see a zero divisor.
++    Divisor = _Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::NEQ, Fault, Constant(0), Constant(1), Divisor);
++  } else {
++    // Fault before anything is written back. The load is clean (no upper garbage) so a
++    // plain compare against zero is valid for every operand size.
++    RaiseDivideErrorIfZero(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags));
+ 
+-  // Rematerialised after the branch: FEX IR only allows defs local to a single block.
+-  // This loads the divisor. 32-bit/64-bit paths mask inside the JIT, 8/16 do not.
+-  Ref Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = Size >= OpSize::i32Bit});
++    // Rematerialised after the branch: FEX IR only allows defs local to a single block.
++    // This loads the divisor. 32-bit/64-bit paths mask inside the JIT, 8/16 do not.
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = Size >= OpSize::i32Bit});
++  }
+ 
+   Ref Quotient = _AllocateGPR(true);
+   Ref Remainder = _AllocateGPR(true);
+@@ -3770,7 +3887,7 @@ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+ 
+     // AX[15:0] = concat<URem[7:0]:UDiv[7:0]>
+     auto ResultAX = _Bfi(GPRSize, 8, 8, Quotient, Remainder);
+-    StoreGPRRegister(X86State::REG_RAX, ResultAX, OpSize::i16Bit);
++    StoreGPRRegister(X86State::REG_RAX, KeepOnDivideError(Fault, Src1, ResultAX), OpSize::i16Bit);
+   } else {
+     Ref Src1 = LoadGPRRegister(X86State::REG_RAX);
+     Ref Src2 = LoadGPRRegister(X86State::REG_RDX);
+@@ -3783,8 +3900,12 @@ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+       Size = OpSize::iInvalid;
+     }
+ 
+-    StoreGPRRegister(X86State::REG_RAX, Quotient, Size);
+-    StoreGPRRegister(X86State::REG_RDX, Remainder, Size);
++    StoreGPRRegister(X86State::REG_RAX, KeepOnDivideError(Fault, Src1, Quotient), Size);
++    StoreGPRRegister(X86State::REG_RDX, KeepOnDivideError(Fault, Src2, Remainder), Size);
++  }
++
++  if (OverflowDE) {
++    RaiseDivideErrorIf(Op, Fault, CondClass::NEQ);
+   }
+ }
+ 
+@@ -3798,12 +3919,24 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+     return;
+   }
+ 
+-  // See RaiseDivideErrorIfZero: SDIV does not trap on a zero divisor either.
+-  RaiseDivideErrorIfZero(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags));
++  // ★ MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE=1): one read of the divisor, the #DE branch after the write-back — see
++  // DIVOp. The divide-by-1 substitute also keeps INT128_MIN / -1 away from the 128-bit helper.
++  const bool OverflowDE = MacRunnerDivOverflowMode();
++  Ref Divisor {};
++  Ref Fault {};
++  if (OverflowDE) {
++    CalculateDeferredFlags();
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++    Fault = DivideErrorCondition(Op, Divisor, true);
++    Divisor = _Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::NEQ, Fault, Constant(0), Constant(1), Divisor);
++  } else {
++    // See RaiseDivideErrorIfZero: SDIV does not trap on a zero divisor either.
++    RaiseDivideErrorIfZero(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags));
+ 
+-  // Rematerialised after the branch: FEX IR only allows defs local to a single block.
+-  // This loads the divisor
+-  Ref Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++    // Rematerialised after the branch: FEX IR only allows defs local to a single block.
++    // This loads the divisor
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++  }
+ 
+   Ref Quotient = _AllocateGPR(true);
+   Ref Remainder = _AllocateGPR(true);
+@@ -3817,7 +3950,7 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+ 
+     // AX[15:0] = concat<URem[7:0]:UDiv[7:0]>
+     auto ResultAX = _Bfi(GPRSize, 8, 8, Quotient, Remainder);
+-    StoreGPRRegister(X86State::REG_RAX, ResultAX, OpSize::i16Bit);
++    StoreGPRRegister(X86State::REG_RAX, KeepOnDivideError(Fault, Src1, ResultAX), OpSize::i16Bit);
+   } else {
+     Ref Src1 = LoadGPRRegister(X86State::REG_RAX);
+     Ref Src2 = LoadGPRRegister(X86State::REG_RDX);
+@@ -3830,8 +3963,12 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+       Size = OpSize::iInvalid;
+     }
+ 
+-    StoreGPRRegister(X86State::REG_RAX, Quotient, Size);
+-    StoreGPRRegister(X86State::REG_RDX, Remainder, Size);
++    StoreGPRRegister(X86State::REG_RAX, KeepOnDivideError(Fault, Src1, Quotient), Size);
++    StoreGPRRegister(X86State::REG_RDX, KeepOnDivideError(Fault, Src2, Remainder), Size);
++  }
++
++  if (OverflowDE) {
++    RaiseDivideErrorIf(Op, Fault, CondClass::NEQ);
+   }
+ }
+ 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index 33e8daef5..4515f0827 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -457,6 +457,12 @@ public:
+   void IDIVOp(OpcodeArgs);
+   // Raises #DE (divide error) when Divisor is zero, then continues in a fresh block.
+   void RaiseDivideErrorIfZero(FEXCore::X86Tables::DecodedOp Op, Ref Divisor);
++  // MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE=1): 1 when #DE is due (zero divisor or the quotient does not fit), else 0.
++  Ref DivideErrorCondition(FEXCore::X86Tables::DecodedOp Op, Ref Divisor, bool Signed);
++  // MacRunner: the value a register keeps written back — Old when Fault is set; New when there is no condition.
++  Ref KeepOnDivideError(Ref Fault, Ref Old, Ref New);
++  // Raises #DE when Value <Cond> 0, then continues in a fresh block.
++  void RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond);
+   void BSFOp(OpcodeArgs);
+   void BSROp(OpcodeArgs);
+   void CMPXCHGOp(OpcodeArgs);
+-- 
+2.54.0 (Apple Git-157)
+

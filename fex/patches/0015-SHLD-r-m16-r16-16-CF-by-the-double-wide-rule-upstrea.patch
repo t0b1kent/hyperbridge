@@ -1,0 +1,127 @@
+From 95d49054c2829f282a0b543355836a9abf23ee79 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 09:09:09 +1000
+Subject: [PATCH 15/15] SHLD r/m16, r16, 16: CF by the double-wide rule,
+ upstream 6646a5cc behind MACRUNNER_FEX_SHLD16_CF
+
+Upstream FEX 6646a5cc ("Fixes SHLD by 16 behaviour", 25 Aug 2026) behind a gate for this series: for the
+double-wide shift a count equal to the operand width is defined (CF = the last bit shifted out of the
+destination); only a larger count is undefined. CalculateFlags_ShiftLeftImmediate gets the DoubleWide
+argument as upstream; with MACRUNNER_FEX_SHLD16_CF=1 (default off) SHLDImmediateOp uses it. The upstream
+unit test SHLD_CF.asm is not carried over, since it fails with the gate off.
+
+MacRunnerShld16CfApplied counts SHLD translations whose CF the gate changed (count == width); a
+macrunner-fex-shld16-cf line is printed at 1, 2, 4, ... HB<->FEX oracle: 3 of 3 SHLD-16 cases become
+x86-correct, no other result changes.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Interface/Core/OpcodeDispatcher.cpp       |  2 +-
+ .../Source/Interface/Core/OpcodeDispatcher.h  |  2 +-
+ .../Interface/Core/OpcodeDispatcher/Flags.cpp | 43 ++++++++++++++++++-
+ 3 files changed, 43 insertions(+), 4 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 5c02571ed..40828f745 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -1547,7 +1547,7 @@ void OpDispatchBuilder::SHLDImmediateOp(OpcodeArgs) {
+       Res = _Extr(OpSizeFromSrc(Op), Dest, Src, Size - Shift);
+     }
+ 
+-    CalculateFlags_ShiftLeftImmediate(OpSizeFromSrc(Op), Res, Dest, Shift);
++    CalculateFlags_ShiftLeftImmediate(OpSizeFromSrc(Op), Res, Dest, Shift, true);
+     CalculateDeferredFlags();
+     StoreResultGPR(Op, Res);
+   } else if (Shift == 0 && Size == 32) {
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index 4515f0827..381488f67 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -2380,7 +2380,7 @@ private:
+   void CalculateFlags_MUL(IR::OpSize SrcSize, Ref Res, Ref High);
+   void CalculateFlags_UMUL(Ref High);
+   void CalculateFlags_Logical(IR::OpSize SrcSize, Ref Res);
+-  void CalculateFlags_ShiftLeftImmediate(IR::OpSize SrcSize, Ref Res, Ref Src1, uint64_t Shift);
++  void CalculateFlags_ShiftLeftImmediate(IR::OpSize SrcSize, Ref Res, Ref Src1, uint64_t Shift, bool DoubleWide = false);
+   void CalculateFlags_ShiftRightImmediate(IR::OpSize SrcSize, Ref Res, Ref Src1, uint64_t Shift);
+   void CalculateFlags_ShiftRightDoubleImmediate(IR::OpSize SrcSize, Ref Res, Ref Src1, uint64_t Shift);
+   void CalculateFlags_ShiftRightImmediateCommon(IR::OpSize SrcSize, Ref Res, Ref Src1, uint64_t Shift);
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/Flags.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/Flags.cpp
+index 82c1a1a6c..0216b217b 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/Flags.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/Flags.cpp
+@@ -12,9 +12,32 @@ $end_info$
+ #include <FEXCore/Core/X86Enums.h>
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Utils/LogManager.h>
++#include <FEXCore/fextl/fmt.h>
+ 
++#include <algorithm>
+ #include <array>
++#include <atomic>
+ #include <cstdint>
++#include <cstdlib>
++
++// FEX::Windows::Logging::Raw (__wine_dbg_output): fprintf in the PE part of FEX kills the process (see Core.cpp).
++namespace FEX::Windows::Logging {
++void Raw(const char* Message);
++}
++
++// ★ MacRunner Claude 29.09.2026: MACRUNNER_FEX_SHLD16_CF=1 enables upstream FEX 6646a5cc (25.08.2026, "Fixes SHLD by 16
++// behaviour") for our series: for the double-wide SHLD a count equal to the operand width is defined (CF = the last bit
++// shifted out of the destination); only a larger count is undefined. Unset or any other value keeps the single-wide
++// rule (CF cleared). MacRunnerShld16CfApplied counts SHLD translations the gate changed (count == width); a
++// macrunner-fex-shld16-cf line is printed when it reaches 1, 2, 4, 8, ...
++std::atomic<uint64_t> MacRunnerShld16CfApplied {0};
++int MacRunnerShld16CfMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_SHLD16_CF");
++    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++  }();
++  return Mode;
++}
+ 
+ namespace FEXCore::IR {
+ constexpr std::array<uint32_t, 17> FlagOffsets = {
+@@ -432,7 +455,7 @@ void OpDispatchBuilder::CalculateFlags_Logical(IR::OpSize SrcSize, Ref Res) {
+   SetNZP_ZeroCV(SrcSize, Res);
+ }
+ 
+-void OpDispatchBuilder::CalculateFlags_ShiftLeftImmediate(IR::OpSize SrcSize, Ref UnmaskedRes, Ref Src1, uint64_t Shift) {
++void OpDispatchBuilder::CalculateFlags_ShiftLeftImmediate(IR::OpSize SrcSize, Ref UnmaskedRes, Ref Src1, uint64_t Shift, bool DoubleWide) {
+   // No flags changed if shift is zero
+   if (Shift == 0) {
+     return;
+@@ -447,10 +470,26 @@ void OpDispatchBuilder::CalculateFlags_ShiftLeftImmediate(IR::OpSize SrcSize, Re
+     // Extract the last bit shifted in to CF. Shift is already masked, but for
+     // 8/16-bit it might be >= SrcSizeBits, in which case CF is cleared. There's
+     // nothing to do in that case since we already cleared CF above.
++    //
++    // - Double-wide shift has UB when shift is GREATER-THAN operand.
++    // - Single-wide shift has UB when shift is GREATER-THAN-EQUAL operand.
++    // (MacRunner: the double-wide rule only with MACRUNNER_FEX_SHLD16_CF=1, see the top of this file.)
+     const auto SrcSizeBits = IR::OpSizeAsBits(SrcSize);
+-    if (Shift < SrcSizeBits) {
++    const bool DoubleWideRule = DoubleWide && MacRunnerShld16CfMode();
++    const bool ShouldSetCF = DoubleWideRule ? (Shift <= SrcSizeBits) : (Shift < SrcSizeBits);
++    if (ShouldSetCF) {
+       SetCFDirect(Src1, SrcSizeBits - Shift, true);
+     }
++
++    if (DoubleWideRule && Shift == SrcSizeBits) {
++      const uint64_t Applied = MacRunnerShld16CfApplied.fetch_add(1, std::memory_order_relaxed) + 1;
++      if ((Applied & (Applied - 1)) == 0) {
++        char Line[96];
++        const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-shld16-cf: applied={} size={}\n", Applied, unsigned {SrcSizeBits});
++        Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++        FEX::Windows::Logging::Raw(Line);
++      }
++    }
+   }
+ 
+   CalculatePF(UnmaskedRes);
+-- 
+2.54.0 (Apple Git-157)
+

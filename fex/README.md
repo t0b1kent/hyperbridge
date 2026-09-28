@@ -1,13 +1,14 @@
-# fex/ — the FEX-based CPU engine of MacRunner
+# fex/ — HyperBridge, the FEX-based CPU engine of MacRunner
 
 MacRunner runs x86-64 and x86 Windows programs on Apple Silicon through ARM64 Wine. Its CPU
 engine is [FEX-Emu](https://github.com/FEX-Emu/FEX) (MIT), ported to macOS by the MacRunner
 project. This directory holds that port as a patch series on top of an exact upstream commit.
-Together with the translator in `src/`, it forms HyperBridge.
+Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earlier translator in
+`src/` stays in the repository; its interpreter is the reference side of the HB<->FEX oracle.
 
 - Upstream: `https://github.com/FEX-Emu/FEX`, commit `fd141ed6d721d03062619e4702bca1a0c93b6dd9`
   (6 Aug 2026, right after the FEX-2608 release).
-- Series: `patches/0001-…` to `patches/0013-…`, applied in order with `git am`.
+- Series: `patches/0001-…` to `patches/0015-…`, applied in order with `git am`.
 - Build: `fex/build.sh <work-dir> [patch-count]` (llvm-mingw for the Windows halves, Xcode
   clang for the unix libraries). `MANIFEST.json` lists the expected output hashes.
 
@@ -28,6 +29,12 @@ Together with the translator in `src/`, it forms HyperBridge.
 | 0011 | x87: division by zero raises the exception; SF in the x87 status word | no |
 | 0012 | JIT map on Windows: `MACRUNNER_FEX_JITMAP_DIR` (with `FEX_BLOCKJITNAMING=1`) writes block names as `<guest module>+0x<offset>`; the flush interval works | no |
 | 0013 | `GetSectionFilePath` converts the section path in a stack buffer instead of allocating from the process heap under `ThreadCreationMutex`; fixes a deadlock between DLL mapping on one thread and heap growth on another | no |
+| 0014 | `MACRUNNER_FEX_DIV_OVERFLOW_DE` (default off): DIV/IDIV raise #DE also when the quotient does not fit, and the divisor is read once | no |
+| 0015 | `MACRUNNER_FEX_SHLD16_CF` (default off): SHLD r/m16 with a count of 16 sets CF as x86 does (upstream `6646a5cc`) | no |
+
+0014 and 0015 were checked with the HB<->FEX oracle (72 219 x86-64 cases, FEXCore built natively on
+macOS, one binary with the gates off and on): only the targeted cases change — 26 DIV/IDIV, 3 SHLD.
+They are not yet built with `build.sh` and have not been run in a game.
 
 ## Provenance of MacRunner 1.0.2
 
