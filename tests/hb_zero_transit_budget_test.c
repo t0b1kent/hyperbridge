@@ -39,12 +39,37 @@ static const budget_t budgets[] = {
 };
 static const char *const shapes[] = {"direct-self", "direct-pair", "indirect-pair", "call-ret"};
 static int force_sra, force_callret, force_ic, force_l1;
+static unsigned oracle_timeout_seconds = 20;
+static volatile sig_atomic_t watchdog_in_oracle;
 
 static void timeout_handler(int sig) {
-    static const char message[] = "ZERO_TRANSIT_BUDGET watchdog: infinite chain did not yield\n";
+    static const char jit_message[] = "ZERO_TRANSIT_BUDGET watchdog: phase=jit infinite chain did not yield\n";
+    static const char oracle_message[] = "ZERO_TRANSIT_BUDGET watchdog: phase=interpreter oracle replay timed out\n";
     (void)sig;
-    (void)write(STDERR_FILENO, message, sizeof(message) - 1);
+    if (watchdog_in_oracle)
+        (void)write(STDERR_FILENO, oracle_message, sizeof(oracle_message) - 1);
+    else
+        (void)write(STDERR_FILENO, jit_message, sizeof(jit_message) - 1);
     _exit(124);
+}
+
+/* Only the interpreter oracle may need more wall time under background scheduling;
+ * every JIT watchdog remains fixed at 20 seconds. */
+static int configure_oracle_timeout(void) {
+    const char *value = getenv("HB_TEST_ORACLE_TIMEOUT_SECONDS");
+    unsigned seconds = 0;
+    if (!value) return 1;
+    for (const char *p = value; *p; ++p) {
+        if (*p < '0' || *p > '9') goto invalid;
+        seconds = seconds * 10 + (unsigned)(*p - '0');
+        if (seconds > 3600) goto invalid;
+    }
+    if (!seconds) goto invalid;
+    oracle_timeout_seconds = seconds;
+    return 1;
+invalid:
+    fprintf(stderr, "HB_TEST_ORACLE_TIMEOUT_SECONDS must be an integer from 1 to 3600\n");
+    return 0;
 }
 
 static void game_gates(void) {
@@ -279,9 +304,11 @@ static int run_case(unsigned shape, const budget_t *budget, int no_counters, int
             memcpy(snapshots + 2*PAGE, f.data, PAGE);
             memcpy(snapshots + 3*PAGE, f.stack, PAGE);
             memcpy(f.data, snapshots, PAGE); memcpy(f.stack, snapshots + PAGE, PAGE);
-            alarm(20);
+            watchdog_in_oracle = 1;
+            alarm(oracle_timeout_seconds);
             int replayed = replay(&f, completed);
             alarm(0);
+            watchdog_in_oracle = 0;
             int materialized = hb_lazy_flags_materialize(f.ctx[0], HB_FLAG_BIT_ALL) == HB_OK &&
                                hb_lazy_flags_materialize(f.ctx[1], HB_FLAG_BIT_ALL) == HB_OK;
             int regs = memcmp(&f.ctx[0]->regs.x64, &f.ctx[1]->regs.x64, sizeof(hb_regs_x64_t)) != 0;
@@ -456,6 +483,7 @@ int main(int argc, char **argv) {
     int on = !strcmp(mode, "on"), pc = !strcmp(mode, "pc");
     int no_counters = on || !strcmp(mode, "counters");
     if (!on && !pc && !no_counters && strcmp(mode, "off")) return 2;
+    if (!configure_oracle_timeout()) return 2;
     game_gates();
     setenv("MACRUNNER_HB_CHAIN_BODY_ENTRY", on ? "1" : "0", 1);
     setenv("MACRUNNER_HB_CHAIN_NO_COUNTERS", no_counters ? "1" : "0", 1);
