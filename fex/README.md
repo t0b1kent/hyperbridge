@@ -7,7 +7,7 @@ Together with the translator in `src/`, it forms HyperBridge.
 
 - Upstream: `https://github.com/FEX-Emu/FEX`, commit `fd141ed6d721d03062619e4702bca1a0c93b6dd9`
   (6 Aug 2026, right after the FEX-2608 release).
-- Series: `patches/0001-…` to `patches/0012-…`, applied in order with `git am`.
+- Series: `patches/0001-…` to `patches/0013-…`, applied in order with `git am`.
 - Build: `fex/build.sh <work-dir> [patch-count]` (llvm-mingw for the Windows halves, Xcode
   clang for the unix libraries). `MANIFEST.json` lists the expected output hashes.
 
@@ -27,6 +27,7 @@ Together with the translator in `src/`, it forms HyperBridge.
 | 0010 | `MACRUNNER_FEX_PROT_KEEP`, `MACRUNNER_FEX_REVIVE`, `MACRUNNER_FEX_CODEBUF_MAX` (all default off) | no |
 | 0011 | x87: division by zero raises the exception; SF in the x87 status word | no |
 | 0012 | JIT map on Windows: `MACRUNNER_FEX_JITMAP_DIR` (with `FEX_BLOCKJITNAMING=1`) writes block names as `<guest module>+0x<offset>`; the flush interval works | no |
+| 0013 | `GetSectionFilePath` converts the section path in a stack buffer instead of allocating from the process heap under `ThreadCreationMutex`; fixes a deadlock between DLL mapping on one thread and heap growth on another | no |
 
 ## Provenance of MacRunner 1.0.2
 

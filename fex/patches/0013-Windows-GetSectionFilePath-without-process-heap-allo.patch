@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 18:59:10 +1000
+Subject: [PATCH] Windows: GetSectionFilePath without process-heap allocation
+ (deadlock)
+
+GetSectionFilePath converted the mapped section name with RtlUnicodeStringToAnsiString(..., TRUE),
+which allocates from the process heap. It runs under ThreadCreationMutex (NotifyMapViewOfSection ->
+HandleImageMap). A thread that grows the process heap holds the heap lock and then waits for the same
+mutex in NotifyMemoryAlloc before NtAllocateVirtualMemory, so the two threads deadlock: one mapping a
+DLL, the other in HeapAlloc. Seen as a black-screen hang in Elden Ring (LoadLibraryW on one thread,
+HeapAlloc on the main thread, confirmed with a macOS sample of the hung process); long waits on the same
+mutex also appeared in three earlier runs. The path is now converted into a stack buffer with
+RtlUnicodeToMultiByteN. Used by both the ARM64EC and the WOW64 module.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Source/Windows/Common/Module.h | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/Source/Windows/Common/Module.h b/Source/Windows/Common/Module.h
+index 2076e1f6f..397715353 100644
+--- a/Source/Windows/Common/Module.h
++++ b/Source/Windows/Common/Module.h
+@@ -32,12 +32,18 @@ inline fextl::string GetSectionFilePath(uint64_t Address) {
+     return {};
+   }
+ 
+-  STRING PathA;
+-  RtlUnicodeStringToAnsiString(&PathA, &Buffer.Info.SectionFileName, TRUE);
+-  fextl::string Path(PathA.Buffer);
+-  RtlFreeAnsiString(&PathA);
++  // ★ MacRunner Claude 28.09.2026: no RtlUnicodeStringToAnsiString(..., TRUE) here. It allocates from the process heap,
++  // and this runs under ThreadCreationMutex (NotifyMapViewOfSection -> HandleImageMap). A thread that grows the heap
++  // holds the heap lock and then waits for that mutex in NotifyMemoryAlloc, so the two threads deadlock. Elden Ring
++  // game116: LoadLibraryW on one thread, HeapAlloc on the main thread, black screen; FEX mutex waits also in runs 102,
++  // 106 and 107. The path is converted into a stack buffer instead.
++  char PathA[PATH_MAX * 3 + 1];
++  ULONG Written = 0;
++  if (RtlUnicodeToMultiByteN(PathA, sizeof(PathA) - 1, &Written, Buffer.Info.SectionFileName.Buffer, Buffer.Info.SectionFileName.Length)) {
++    return {};
++  }
+ 
+-  return Path;
++  return fextl::string(PathA, Written);
+ }
+ 
+ inline std::string_view BaseName(std::string_view Path) {
