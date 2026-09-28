@@ -43,10 +43,15 @@
   },
   "series_head": {
     "patches": "0001-0015",
-    "sha256_build_sh": null,
-    "note": "Patches 0014-0015 add two gated fixes, both default off. Not yet built with fex/build.sh; the last build.sh output (0001-0013) is kept under history.series_0001_0013.",
+    "sha256_build_sh": {
+      "xtajit64.dll": "c5f82c5569f8b3900044611d6a64c67f55f8d95d85717a186e666c9b1f64c7a2",
+      "xtajit.dll": "f998d84ef323c5cdf91472e7173d32cfe4f8bcf7be029efa89fde227ec0ad342",
+      "xtajit64.so": "373e34d2b1756cb712d5aa8356edd02e8ab5efc7386ac227d182d989d29b4089",
+      "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
+    },
+    "note": "Patches 0014-0015 add two gated fixes, both default off. Two clean fex/build.sh builds (29 Sep 2026) in different directories are byte-identical, and the patched source tree equals the series head tree. The two unix libraries are byte-identical to the 0001-0013 head: 0014 and 0015 change FEXCore, which is linked only into the PE halves.",
     "verification": "HB<->FEX oracle, 29 Sep 2026: 72 219 x86-64 cases, FEXCore built natively on macOS, product and native host-feature sets, one binary for all arms (gates off / SHLD / DIV / both). Gates off: no result changes against the 28 Sep baseline. MACRUNNER_FEX_DIV_OVERFLOW_DE=1: 26 of 26 quotient-overflow cases become x86-correct. MACRUNNER_FEX_SHLD16_CF=1: 3 of 3 SHLD-16 cases. No other result changes. Not run as xtajit64.dll under Wine.",
-    "game_check": "Not run."
+    "game_check": "Not run on this build."
   },
   "history": {
     "series_0001_0013": {

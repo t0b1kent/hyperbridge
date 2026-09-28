@@ -34,7 +34,8 @@ Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earl
 
 0014 and 0015 were checked with the HB<->FEX oracle (72 219 x86-64 cases, FEXCore built natively on
 macOS, one binary with the gates off and on): only the targeted cases change — 26 DIV/IDIV, 3 SHLD.
-They are not yet built with `build.sh` and have not been run in a game.
+Two clean `build.sh` builds of 0001–0015 are byte-identical (hashes in `MANIFEST.json`); this build has not been
+run in a game yet.
 
 ## Provenance of MacRunner 1.0.2
 
