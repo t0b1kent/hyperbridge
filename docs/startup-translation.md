@@ -94,8 +94,9 @@ without the writable-code check. The cause is in the range answer itself. For a 
 was told [start of the executable interval, next writable interval), and that range can cover a writable page lying
 *before* the address inside the same interval (here a 4 KiB writable page inside a 3.7 MiB image range). The decoder
 caches the answer, the gate reused it, and so do FEX-Emu's own Mono decisions that read the cached writability.
-An experimental patch makes a non-writable answer start at the queried address; its check on the stand is pending.
-The Hollow Knight, ABZU, Divinity and Hedon records emit the same code with and without the gate.
+An experimental patch makes a non-writable answer start at the queried address. Checked on the stand with the
+recorded answers rewritten that way: the gate now emits the same code as without it for all 6 655 Stardew
+translations (before: 4 differences), and the Hollow Knight, ABZU, Divinity and Hedon records are unchanged.
 
 ## 6. Mono call-site patches
 
