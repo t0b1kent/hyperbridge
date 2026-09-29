@@ -49,12 +49,12 @@ CrossOver's FEX or faster, and faster than Prism on all 13, by 3 % up to 2.5 tim
 it spends slightly less CPU time per frame than CrossOver's FEX.
 
 **Where it is behind.** Hollow Knight starts much slower: Unity's assembly loading takes 2.2 s against 0.41 s
-under CrossOver's FEX, and about two thirds of that gap is FEX's software memory ordering, which CrossOver can
+under CrossOver's FEX, and about four fifths of that gap is FEX's software memory ordering, which CrossOver can
 replace with Apple's hardware mode (HyperBridge needs an Apple entitlement for that). In gameplay, HyperBridge
 needs 2.2 times the native CPU time per frame and has more frame-time spikes. Prism needs 31–48 % less time per
 call and return and 16 times less per x87 `fadd`, and matches x86 floating-point results more often.
-CrossOver's FEX divides faster (patch 0017, not yet released, addresses it) and reports the Arm cryptography
-instructions to programs.
+CrossOver's FEX divides faster (engine 0019 closes most of the gap for `cqo; idiv` behind a switch) and reports
+the Arm cryptography instructions to programs.
 
 [Full results, conditions and limits →](COMPARISON.md)
 

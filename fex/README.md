@@ -8,7 +8,7 @@ Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earl
 
 - Upstream: `https://github.com/FEX-Emu/FEX`, commit `fd141ed6d721d03062619e4702bca1a0c93b6dd9`
   (6 Aug 2026, right after the FEX-2608 release).
-- Series: `patches/0001-…` to `patches/0015-…`, applied in order with `git am`.
+- Series: `patches/0001-…` to `patches/0019-…`, applied in order with `git am`.
 - Build: `fex/build.sh <work-dir> [patch-count]` (llvm-mingw for the Windows halves, Xcode
   clang for the unix libraries). `MANIFEST.json` lists the expected output hashes.
 
@@ -31,11 +31,23 @@ Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earl
 | 0013 | `GetSectionFilePath` converts the section path in a stack buffer instead of allocating from the process heap under `ThreadCreationMutex`; fixes a deadlock between DLL mapping on one thread and heap growth on another | no |
 | 0014 | `MACRUNNER_FEX_DIV_OVERFLOW_DE` (default off): DIV/IDIV raise #DE also when the quotient does not fit, and the divisor is read once | no |
 | 0015 | `MACRUNNER_FEX_SHLD16_CF` (default off): SHLD r/m16 with a count of 16 sets CF as x86 does (upstream `6646a5cc`) | no |
+| 0016 | `MACRUNNER_FEX_NULL_HOST` (default off): a branch to guest address 0 takes the full lookup instead of jumping to host address 0, so the guest gets its own fault | no |
+| 0017 | `MACRUNNER_FEX_DIV_PROVEN_HIGH` (default off): DIV/IDIV right after `xor edx,edx`, CDQ or CQO is a plain n-bit division; with 0014 the #DE test is only "divisor 0" (and INT_MIN / -1 for IDIV) | no |
+| 0018 | With `MACRUNNER_FEX_DIV_OVERFLOW_DE`: Windows programs get `STATUS_INTEGER_OVERFLOW` (0xC0000095) for a quotient overflow and `STATUS_INTEGER_DIVIDE_BY_ZERO` (0xC0000094) for a zero divisor, as under Prism | no |
+| 0019 | Darwin: no process-wide hardware TSO from a one-thread probe (the macOS mode is per thread and not inherited); software TSO stays until every thread is admitted | no |
 
-0014 and 0015 were checked with the HB<->FEX oracle (72 219 x86-64 cases, FEXCore built natively on
-macOS, one binary with the gates off and on): only the targeted cases change — 26 DIV/IDIV, 3 SHLD.
-Two clean `build.sh` builds of 0001–0015 are byte-identical (hashes in `MANIFEST.json`); this build has not been
-run in a game yet.
+0014–0018 were checked with the HB<->FEX oracle (72 219 x86-64 cases plus 133 division idioms, FEXCore
+built natively on macOS, one binary with the gates off and on): only the targeted cases change —
+26 DIV/IDIV, 3 SHLD, 1 branch to address 0 — and 0017 changes no result. 0018 was checked under
+MacRunner's Wine with a 64-bit probe of 88 DIV/IDIV cases (8 to 64 bits, register and memory operands):
+with `MACRUNNER_FEX_DIV_OVERFLOW_DE=1` every exception code, fault flag and RAX/RDX value equals
+Microsoft Prism's. Speed on this Mac (xbench, ns per iteration, three alternating runs, median): `cqo; idiv rcx` takes 0.969 ns
+without gates, 0.783 ns with `MACRUNNER_FEX_DIV_PROVEN_HIGH=1` (the engine of MacRunner 1.0.2: 0.722 ns),
+and 3.05 → 2.01 ns together with `MACRUNNER_FEX_DIV_OVERFLOW_DE=1`. The `div ecx` loop does not speed up
+(1.01 ns): a `mov eax` sits between `xor edx,edx` and the division, and 0017 only recognizes the idiom
+directly before it. Loops without division are unchanged by 0016–0019 (within 1 %).
+Two clean `build.sh` builds of 0001–0019 are byte-identical (hashes in `MANIFEST.json`). The 0001–0015 build
+is the engine of MacRunner 1.0.3.
 
 ## Provenance of MacRunner 1.0.2
 

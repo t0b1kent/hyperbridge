@@ -1,0 +1,149 @@
+From 4b52dea7a8fa6a9b3ef6a381e1b19ae937a53fb6 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 11:03:38 +1000
+Subject: [PATCH 18/19] DIV/IDIV: STATUS_INTEGER_OVERFLOW for a quotient
+ overflow (MACRUNNER_FEX_DIV_OVERFLOW_DE)
+
+With MACRUNNER_FEX_DIV_OVERFLOW_DE=1 (patch 0014) a DIV/IDIV quotient overflow raises #DE, but the
+Windows frontend reported every #DE as EXCEPTION_INT_DIVIDE_BY_ZERO (0xC0000094). Under Prism
+(Windows 11 on Arm 26200, emulator 10.0.26100.9168) a quotient overflow with a non-zero divisor is
+EXCEPTION_INT_OVERFLOW (0xC0000095), and a zero divisor is 0xC0000094 even when the quotient would
+also overflow; the same in x64 and WOW64 processes, 8 to 64 bits, at the dividing instruction.
+
+Under the switch the fault block now tells the two apart: it reads the divisor operand again and
+raises #DE with ErrorRegister 0 for a zero divisor and 1 otherwise, and
+Source/Windows/Common/Exception.h reports err_code 1 as EXCEPTION_INT_OVERFLOW (ARM64EC and WOW64
+share it). For a memory operand this is a second read, made only when the division faults.
+Without the switch nothing changes: the zero-divisor check of patch 0011 raises #DE with
+ErrorRegister 0 as before.
+
+HB<->FEX oracle, native runner with 0017, arms OVERFLOW_DE and OVERFLOW_DE + PROVEN_HIGH: the 133
+idiom cases in product and native mode and the 72 219 cases of the other corpora in product mode
+give the same results as the series before this patch (the 2 fexici differences are RDTSC). The
+oracle compares fault class and address, not the Windows code.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Interface/Core/OpcodeDispatcher.cpp       | 41 ++++++++++++++-----
+ .../Source/Interface/Core/OpcodeDispatcher.h  |  5 ++-
+ Source/Windows/Common/Exception.h             |  6 ++-
+ 3 files changed, 39 insertions(+), 13 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index c97ed0734..90c5c846d 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -3891,7 +3891,7 @@ Ref OpDispatchBuilder::KeepOnDivideError(Ref Fault, Ref Old, Ref New) {
+   return Fault ? _Select(GetGPROpSize(), OpSize::i64Bit, CondClass::NEQ, Fault, Constant(0), Old, New) : New;
+ }
+ 
+-void OpDispatchBuilder::RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond) {
++void OpDispatchBuilder::RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond, bool ClassifyCause) {
+   const auto GPRSize = GetGPROpSize();
+ 
+   auto FaultBlock = CreateNewCodeBlockAfter(GetCurrentBlock());
+@@ -3899,21 +3899,42 @@ void OpDispatchBuilder::RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref
+ 
+   CondJump(Value, Constant(0), FaultBlock, ContinueBlock, Cond);
+ 
+-  SetCurrentCodeBlock(FaultBlock);
+-  StartNewBlock();
+-  {
++  // Signal/si_code follow the INTO (#OF) precedent: SIGSEGV is only the transport
++  // that hands control back to the host fault handler, TrapNumber carries the x86
++  // meaning and is what the Windows/Linux frontends decode.
++  auto Raise = [&](uint16_t Cause) {
+     auto NewRIP = GetRelocatedPC(Op, -Op->InstSize);
+     _StoreContextGPR(GPRSize, NewRIP, offsetof(FEXCore::Core::CPUState, rip));
+ 
+-    // Signal/si_code follow the INTO (#OF) precedent: SIGSEGV is only the transport
+-    // that hands control back to the host fault handler, TrapNumber carries the x86
+-    // meaning and is what the Windows/Linux frontends decode.
+     Break(FEXCore::IR::BreakDefinition {
+-      .ErrorRegister = 0,
++      .ErrorRegister = Cause,
+       .Signal = Core::FAULT_SIGSEGV,
+       .TrapNumber = X86State::X86_TRAPNO_DE,
+       .si_code = 0x80,
+     });
++  };
++
++  SetCurrentCodeBlock(FaultBlock);
++  StartNewBlock();
++  if (ClassifyCause) {
++    // ★ MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE=1): the processor raises one #DE for both causes; Windows then tells
++    // them apart by the divisor — zero is STATUS_INTEGER_DIVIDE_BY_ZERO, anything else is a quotient overflow,
++    // STATUS_INTEGER_OVERFLOW (measured under Prism, Windows 11 ARM 26200, x64 and WOW64, 8 to 64 bits). This block
++    // runs only when #DE is due, and then the divisor and RAX/RDX are unchanged (KeepOnDivideError), so the divisor is
++    // read again here to pick the cause: ErrorRegister 0 for a zero divisor, 1 for an overflow (Windows Exception.h).
++    auto ZeroBlock = CreateNewCodeBlockAfter(FaultBlock);
++    auto OverflowBlock = CreateNewCodeBlockAfter(ZeroBlock);
++    CondJump(LoadSourceGPR(Op, Op->Dest, Op->Flags), Constant(0), ZeroBlock, OverflowBlock, CondClass::EQ);
++
++    SetCurrentCodeBlock(ZeroBlock);
++    StartNewBlock();
++    Raise(0);
++
++    SetCurrentCodeBlock(OverflowBlock);
++    StartNewBlock();
++    Raise(1);
++  } else {
++    Raise(0);
+   }
+ 
+   SetCurrentCodeBlock(ContinueBlock);
+@@ -3983,7 +4004,7 @@ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+   }
+ 
+   if (OverflowDE) {
+-    RaiseDivideErrorIf(Op, Fault, CondClass::NEQ);
++    RaiseDivideErrorIf(Op, Fault, CondClass::NEQ, true);
+   }
+ }
+ 
+@@ -4050,7 +4071,7 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+   }
+ 
+   if (OverflowDE) {
+-    RaiseDivideErrorIf(Op, Fault, CondClass::NEQ);
++    RaiseDivideErrorIf(Op, Fault, CondClass::NEQ, true);
+   }
+ }
+ 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index cc4dcd9c7..9a4b7d038 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -469,8 +469,9 @@ public:
+   Ref DivideErrorConditionProven(FEXCore::X86Tables::DecodedOp Op, Ref Divisor, bool Signed);
+   // MacRunner: the value a register keeps written back — Old when Fault is set; New when there is no condition.
+   Ref KeepOnDivideError(Ref Fault, Ref Old, Ref New);
+-  // Raises #DE when Value <Cond> 0, then continues in a fresh block.
+-  void RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond);
++  // Raises #DE when Value <Cond> 0, then continues in a fresh block. MacRunner: with ClassifyCause the fault reports a
++  // zero divisor (ErrorRegister 0) apart from a quotient overflow (ErrorRegister 1).
++  void RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond, bool ClassifyCause = false);
+   void BSFOp(OpcodeArgs);
+   void BSROp(OpcodeArgs);
+   void CMPXCHGOp(OpcodeArgs);
+diff --git a/Source/Windows/Common/Exception.h b/Source/Windows/Common/Exception.h
+index 4384d5090..92aee80c5 100644
+--- a/Source/Windows/Common/Exception.h
++++ b/Source/Windows/Common/Exception.h
+@@ -63,7 +63,11 @@ static inline EXCEPTION_RECORD HandleGuestException(FEXCore::Core::CpuStateFrame
+         return Dst;
+       }
+       break;
+-    case FEXCore::X86State::X86_TRAPNO_DE: Dst.ExceptionCode = EXCEPTION_INT_DIVIDE_BY_ZERO; return Dst;
++    case FEXCore::X86State::X86_TRAPNO_DE:
++      // MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE): ErrorRegister 1 is a quotient overflow with a non-zero divisor, which
++      // Windows reports as STATUS_INTEGER_OVERFLOW; 0 is a zero divisor (OpcodeDispatcher.cpp, RaiseDivideErrorIf).
++      Dst.ExceptionCode = Fault.err_code == 1 ? EXCEPTION_INT_OVERFLOW : EXCEPTION_INT_DIVIDE_BY_ZERO;
++      return Dst;
+     case FEXCore::X86State::X86_TRAPNO_OF: Dst.ExceptionCode = EXCEPTION_INT_OVERFLOW; return Dst;
+     case FEXCore::X86State::X86_TRAPNO_PF:
+       // A page-fault raised by an explicit break in JIT code is always an execute fault
+-- 
+2.54.0 (Apple Git-157)
+

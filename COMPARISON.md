@@ -52,7 +52,7 @@ Each environment started the game three times and ran to the main menu. The runs
 
 ¹ The main menu appears only after the game's GOG Galaxy sign-in has failed (there is no Galaxy service in these setups), so this time includes that wait.
 
-Wine starts just as fast under HyperBridge as under CrossOver: Mono starts after 4.1 s in both. After that, HyperBridge takes 5.4 times as long as CrossOver's FEX to load the game's assemblies, and 3 to 6 times as long for the first garbage collections, although both engines are FEX-based and equal on simple instruction loops. A diagnostic run with FEX's software memory ordering switched off (`FEX_TSOENABLED=0`; not usable for playing, because x86 memory ordering is then not kept) brought `Loaded All Assemblies` from 2.24–2.30 s down to 0.77–0.82 s (two runs each, alternating), the domain reset from 0.17–0.19 s to 0.01–0.02 s and the main menu from 42 s to 29–31 s; the first garbage collection did not change. So the software ordering accounts for about two thirds of the start-up gap to CrossOver, whose FEX can use Apple's hardware ordering (see Memory ordering below). The rest is not yet explained.
+Wine starts just as fast under HyperBridge as under CrossOver: Mono starts after 4.1 s in both. After that, HyperBridge takes 5.4 times as long as CrossOver's FEX to load the game's assemblies, and 3 to 6 times as long for the first garbage collections, although both engines are FEX-based and equal on simple instruction loops. A diagnostic run with FEX's software memory ordering switched off (`FEX_TSOENABLED=0`; not usable for playing, because x86 memory ordering is then not kept) brought `Loaded All Assemblies` from 2.24–2.30 s down to 0.77–0.82 s (two runs each, alternating), the domain reset from 0.17–0.19 s to 0.01–0.02 s and the main menu from 42 s to 29–31 s; the first garbage collection did not change. So the software ordering accounts for about four fifths of the assembly-loading gap to CrossOver (1.47 of 1.86 s) and about two thirds of the gap to the main menu; CrossOver's FEX can use Apple's hardware ordering (see Memory ordering below). The rest, and the slower garbage collection, are not yet explained.
 
 ### In King's Pass
 
@@ -101,7 +101,7 @@ One x64 Windows program, [`xbench`](bench/xbench/) (`xbench.exe` SHA-256 `cc743d
 
 **How to read it.** Where HyperBridge and CrossOver differ by less than 4 %, their three runs overlap, so those loops count as equal. On `cvttss2si` and `cvttsd2si` the runs do not overlap: HyperBridge is 7–11 % faster. Prism, measured inside a virtual machine, is slower on simple loops and faster on calls, returns and x87. `lock xadd` costs the same everywhere.
 
-**Division.** The division loops are slower in HyperBridge 0015 than in the engine of MacRunner 1.0.2. In a separate alternating series of the HyperBridge builds, the 1.0.2 engine took 0.86 ns (`div`) and 0.70 ns (`idiv`), and 0015 took 0.99 and 0.95 ns. With the division-exception switch `MACRUNNER_FEX_DIV_OVERFLOW_DE=1`, 0015 took 2.09 and 2.98 ns. The cause is HyperBridge's divide-by-zero check (patch 0011). The check splits the translated code before the division, so FEX no longer recognizes that the preceding `cqo` or `xor edx,edx` makes the upper half of the dividend predictable, and it emits a general division. Patch 0017, not yet in a release, gives divisions right after `cqo`, `cdq` or `xor edx,edx` the short path again; its speed has not been measured yet.
+**Division.** The division loops are slower in HyperBridge 0015 than in the engine of MacRunner 1.0.2. In a separate alternating series of the HyperBridge builds, the 1.0.2 engine took 0.86 ns (`div`) and 0.70 ns (`idiv`), and 0015 took 0.99 and 0.95 ns. With the division-exception switch `MACRUNNER_FEX_DIV_OVERFLOW_DE=1`, 0015 took 2.09 and 2.98 ns. The cause is HyperBridge's divide-by-zero check (patch 0011). The check splits the translated code before the division, so FEX no longer recognizes that the preceding `cqo` or `xor edx,edx` makes the upper half of the dividend predictable, and it emits a general division. Patch 0017 (engine 0019, switch `MACRUNNER_FEX_DIV_PROVEN_HIGH=1`) gives divisions directly after `cqo`, `cdq` or `xor edx,edx` the short path again: `cqo` + `idiv rcx` takes 0.78 ns instead of 0.97 (1.0.2 engine: 0.72). The `div ecx` loop is not covered, because a `mov eax` sits between `xor edx,edx` and the division.
 
 **x87.** FEX computes x87 arithmetic in software with the full 80-bit precision. With `FEX_X87REDUCEDPRECISION=1`, which computes in 64-bit doubles and is off in MacRunner, the HyperBridge loop took 3.7 ns in a single run. The accuracy of that mode has not been checked.
 
@@ -134,7 +134,7 @@ Probe programs divide by zero and make the quotient overflow with `DIV`/`IDIV`. 
 | Divisor 0 | `0xC0000094` at the `DIV` | No exception | `0xC0000094` at the `DIV` | `0xC0000094` at the `DIV` | No exception |
 | Quotient too large | `0xC0000095` at the `DIV` | No exception | No exception | Exception at the `DIV`, code `0xC0000094` | No exception |
 
-Prism gives the same codes to 64-bit programs and to 32-bit programs under WOW64. It reports a zero divisor as `0xC0000094` even when the quotient would also overflow. Where no exception is raised, the program continues with a wrong result. Real x86-64 Windows has not been measured here. HyperBridge patch 0018, not yet in a release, reports `0xC0000095` for the overflow case under the same switch. The switch is off by default.
+Prism gives the same codes to 64-bit programs and to 32-bit programs under WOW64. It reports a zero divisor as `0xC0000094` even when the quotient would also overflow. Where no exception is raised, the program continues with a wrong result. Real x86-64 Windows has not been measured here. HyperBridge engine 0019 (patch 0018) reports `0xC0000095` for the overflow case under the same switch: all 88 cases of Prism's probe then match Prism, including the registers at the fault. The switch is off by default.
 
 ### CPU features reported to programs
 
@@ -165,7 +165,7 @@ x86 programs rely on a stronger memory ordering (TSO) than Arm processors guaran
 2. **Hardware memory ordering**, once MacRunner has the Apple entitlement.
 3. **x87 arithmetic**: 16 times Prism's time per `fadd`.
 4. **Calls and returns**: 30–50 % more time per call than Prism, the same as CrossOver.
-5. **Division**: patches 0017 (speed) and 0018 (Windows' overflow code) are awaiting release.
+5. **Division**: engine 0019 carries 0017 (speed after `cqo`/`cdq`/`xor edx,edx`, still to be extended to an instruction in between) and 0018 (Windows' overflow code, equal to Prism in 88 of 88 probe cases), both behind switches.
 6. **`CPUID`**: report SSE4.2, AES, PCLMULQDQ and SHA through the Wine change already tested.
 7. **Floating-point exactness**: the sign of NaN in `ADDSUBPS`/`ADDSUBPD`, and the MXCSR exception flags.
 

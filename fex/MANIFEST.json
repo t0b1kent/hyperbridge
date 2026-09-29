@@ -42,18 +42,30 @@
     }
   },
   "series_head": {
-    "patches": "0001-0015",
+    "patches": "0001-0019",
     "sha256_build_sh": {
-      "xtajit64.dll": "c5f82c5569f8b3900044611d6a64c67f55f8d95d85717a186e666c9b1f64c7a2",
-      "xtajit.dll": "f998d84ef323c5cdf91472e7173d32cfe4f8bcf7be029efa89fde227ec0ad342",
+      "xtajit64.dll": "3d413809d3ed379cac63ec4e8183066fd9f2b50d969cc8111f141f7cc9109a89",
+      "xtajit.dll": "9bc5810dfb16a74de28732ccbfb238f34599eb4b7bf755fc30446b8f3708ec80",
       "xtajit64.so": "373e34d2b1756cb712d5aa8356edd02e8ab5efc7386ac227d182d989d29b4089",
       "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
     },
-    "note": "Patches 0014-0015 add two gated fixes, both default off. Two clean fex/build.sh builds (29 Sep 2026) in different directories are byte-identical, and the patched source tree equals the series head tree. The two unix libraries are byte-identical to the 0001-0013 head: 0014 and 0015 change FEXCore, which is linked only into the PE halves.",
-    "verification": "HB<->FEX oracle, 29 Sep 2026: 72 219 x86-64 cases, FEXCore built natively on macOS, product and native host-feature sets, one binary for all arms (gates off / SHLD / DIV / both). Gates off: no result changes against the 28 Sep baseline. MACRUNNER_FEX_DIV_OVERFLOW_DE=1: 26 of 26 quotient-overflow cases become x86-correct. MACRUNNER_FEX_SHLD16_CF=1: 3 of 3 SHLD-16 cases. No other result changes. Not run as xtajit64.dll under Wine.",
-    "game_check": "Not run on this build."
+    "note": "Patches 0016-0018 add gated fixes, all default off; 0019 stops the Darwin build from switching the whole context to hardware TSO after a one-thread probe. Two clean fex/build.sh builds (29 Sep 2026) in different directories are byte-identical. The unix libraries are byte-identical to the 0015 head: 0016-0018 change FEXCore and the PE frontend, and 0019 changes only a comment in the unix library.",
+    "verification": "HB<->FEX oracle, 29 Sep 2026: 72 219 x86-64 cases plus 133 division idioms, one binary per check: 0016 changes one case (push 0; ret -> guest fault at 0), 0017 changes none (counter fires on exactly the 240+2 predicted cases), 0018 changes none (the Windows code is outside the oracle). Under MacRunner's Wine, 64-bit probe of 88 DIV/IDIV cases (8-64 bits, register and memory): with MACRUNNER_FEX_DIV_OVERFLOW_DE=1 all 88 equal Microsoft Prism (0xC0000095 for 28 quotient overflows, 0xC0000094 for 40 zero divisors, 20 without exception, same RAX/RDX); without the gate the 28 overflows raise nothing, as before. The 32-bit probe cannot start under this Wine. xbench: cqo; idiv rcx 0.969 -> 0.783 ns with MACRUNNER_FEX_DIV_PROVEN_HIGH=1; div ecx loop unchanged (a mov sits between xor edx,edx and div).",
+    "game_check": "Hollow Knight 1.5.12620 to the main menu, three runs (29 Sep 2026, gates off): menu 38.5-43.1 s after launch, Unity 'Loaded All Assemblies' 2.14-2.36 s, as engine 0015 (2.16-2.39 s). Gameplay not run on this build."
   },
   "history": {
+    "series_0001_0015": {
+      "patches": "0001-0015",
+      "sha256_build_sh": {
+        "xtajit64.dll": "c5f82c5569f8b3900044611d6a64c67f55f8d95d85717a186e666c9b1f64c7a2",
+        "xtajit.dll": "f998d84ef323c5cdf91472e7173d32cfe4f8bcf7be029efa89fde227ec0ad342",
+        "xtajit64.so": "373e34d2b1756cb712d5aa8356edd02e8ab5efc7386ac227d182d989d29b4089",
+        "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
+      },
+      "note": "Patches 0014-0015 add two gated fixes, both default off. Two clean fex/build.sh builds (29 Sep 2026) in different directories are byte-identical, and the patched source tree equals the series head tree. The two unix libraries are byte-identical to the 0001-0013 head: 0014 and 0015 change FEXCore, which is linked only into the PE halves.",
+      "verification": "HB<->FEX oracle, 29 Sep 2026: 72 219 x86-64 cases, FEXCore built natively on macOS, product and native host-feature sets, one binary for all arms (gates off / SHLD / DIV / both). Gates off: no result changes against the 28 Sep baseline. MACRUNNER_FEX_DIV_OVERFLOW_DE=1: 26 of 26 quotient-overflow cases become x86-correct. MACRUNNER_FEX_SHLD16_CF=1: 3 of 3 SHLD-16 cases. No other result changes. Not run as xtajit64.dll under Wine.",
+      "game_check": "Hollow Knight 1.5.12620 (engine of MacRunner 1.0.3), 29 Sep 2026: King's Pass 112.7-116.8 FPS at the 120 Hz limit, 14.9-15.0 ms of game CPU time per frame (two runs); main menu 40-44 s after launch (three runs)."
+    },
     "series_0001_0013": {
       "patches": "0001-0013",
       "sha256_build_sh": {

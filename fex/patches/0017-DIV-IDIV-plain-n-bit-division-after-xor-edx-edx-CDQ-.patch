@@ -1,0 +1,262 @@
+From 9fae81b3791e440da0bb938f8d150028c32b6b9a Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 10:25:49 +1000
+Subject: [PATCH 17/19] DIV/IDIV: plain n-bit division after xor edx,edx / CDQ
+ / CQO (MACRUNNER_FEX_DIV_PROVEN_HIGH)
+
+Patch 0011 checks for a zero divisor in front of every DIV/IDIV and ends the block there. That
+defeats the upstream fold (TryPostRAMerge) that turns `cqo; idiv` into a 64-bit division when the
+sign extension is the IR node right before the division, so every IDIV r64 got a runtime check of
+the high half (sbfx/eor/cbz, with the LDIV helper behind it) and every DIV r32 built a 64-bit
+dividend. xbench on this Mac, ns per iteration: `xor edx,edx; div ecx` 0.861 (MacRunner 1.0.2)
+-> 0.986 (series 0001-0015), `cqo; idiv rcx` 0.702 -> 0.947; with MACRUNNER_FEX_DIV_OVERFLOW_DE=1
+2.090 and 2.980.
+
+With MACRUNNER_FEX_DIV_PROVEN_HIGH=1 (default off) a DIV r32/r64 that directly follows
+`xor edx, edx` / `xor rdx, rdx`, or an IDIV that directly follows CDQ/CQO of the same size, in
+the same block, is a plain n-bit UDIV/SDIV with no high half: the high half is known and nothing
+can change RAX/RDX in between (a jump target in between starts a new block, which clears the
+record). With MACRUNNER_FEX_DIV_OVERFLOW_DE=1 the #DE condition is then only "divisor 0", plus
+"INT_MIN / -1" for IDIV, taken as CLZ(x) >> log2(n) without compares or NZCV. Register-cache
+values cannot carry the proof: the cache is flushed before every instruction, so the record is
+the guest PC right after the idiom.
+
+MacRunnerDivProvenHighUsed counts such translations; a macrunner-fex-div-proven-high line is
+printed at 1, 2, 4, ... HB<->FEX oracle, one binary, four arms (no gate / PROVEN / OVERFLOW_DE /
+both), 72 219 cases of the earlier corpora plus 133 new idiom cases in product and native mode:
+no result changes from adding PROVEN_HIGH, with or without OVERFLOW_DE; the counter fires on
+exactly the 120 + 120 idiom cases and the 2 hbcorp cases the disassembler predicts, 0 elsewhere;
+with OVERFLOW_DE all 133 idiom cases match (including 10 quotient overflows), without it the
+same 10 diverge as before. Negative control (ADD + 1): the same 132 ADD cases turn red.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Interface/Core/OpcodeDispatcher.cpp       | 98 ++++++++++++++++++-
+ .../Source/Interface/Core/OpcodeDispatcher.h  | 21 ++++
+ 2 files changed, 115 insertions(+), 4 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 40828f745..c97ed0734 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -50,6 +50,23 @@ int MacRunnerDivOverflowMode() {
+   return Mode;
+ }
+ 
++// ★ MacRunner Claude 29.09.2026: MACRUNNER_FEX_DIV_PROVEN_HIGH=1 lets DIV/IDIV r32/r64 use the plain n-bit division
++// when the high half of the dividend is known: the DIV follows `xor edx, edx` / `xor rdx, rdx` directly, or the IDIV
++// follows CDQ/CQO of the same size directly, in the same block (the usual compiler idioms). Then the JIT needs neither
++// the 2n-bit dividend nor its runtime check (sbfx/eor/cbz or cbz, and the LDIV/LUDIV call behind it), and with
++// MACRUNNER_FEX_DIV_OVERFLOW_DE=1 the #DE condition is only "divisor 0", plus "INT_MIN / -1" for IDIV. Upstream folds
++// the same case only when the extension is the IR node right before the division (TryPostRAMerge), which the
++// zero-divisor branch in front of every DIV/IDIV prevents. Unset or any other value keeps the previous sequence.
++// MacRunnerDivProvenHighUsed counts such translations; a macrunner-fex-div-proven-high line is printed at 1, 2, 4, ...
++std::atomic<uint64_t> MacRunnerDivProvenHighUsed {0};
++int MacRunnerDivProvenHighMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_DIV_PROVEN_HIGH");
++    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++  }();
++  return Mode;
++}
++
+ namespace FEXCore::IR {
+ 
+ using X86Tables::OpToIndex;
+@@ -1147,6 +1164,13 @@ void OpDispatchBuilder::CQOOp(OpcodeArgs) {
+   Ref Upper = _Sbfe(std::max(OpSize::i32Bit, Size), 1, GetSrcBitSize(Op) - 1, Src);
+ 
+   StoreResultGPR(Op, Upper);
++
++  // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): EDX:EAX / RDX:RAX is now the sign extension of EAX / RAX. An IDIV of
++  // the same size that starts right after this instruction, in this block, divides a sign-extended dividend.
++  if (MacRunnerDivProvenHighMode() && Size >= OpSize::i32Bit) {
++    MacRunnerSignExtEnd = Op->PC + Op->InstSize;
++    MacRunnerSignExtSize = Size;
++  }
+ }
+ 
+ void OpDispatchBuilder::XCHGOp(OpcodeArgs) {
+@@ -3810,6 +3834,57 @@ Ref OpDispatchBuilder::DivideErrorCondition(FEXCore::X86Tables::DecodedOp Op, Re
+   return Fault;
+ }
+ 
++// ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1, see the top of this file): true when the high half of the r32/r64
++// dividend is known here: this DIV starts right after a `xor edx, edx` / `xor rdx, rdx`, or this IDIV right after a
++// CDQ/CQO of the same size, in the same block — nothing can change RAX/RDX in between. A jump target between them
++// starts a new block and clears the record. Counts and reports the translations it proves.
++bool OpDispatchBuilder::DivHighHalfProven(FEXCore::X86Tables::DecodedOp Op, bool Signed) {
++  const auto Size = OpSizeFromSrc(Op);
++  if (!MacRunnerDivProvenHighMode() || Size < OpSize::i32Bit) {
++    return false;
++  }
++
++  bool Proven = false;
++  if (Signed) {
++    Proven = MacRunnerSignExtEnd != 0 && MacRunnerSignExtEnd == Op->PC && MacRunnerSignExtSize == Size;
++  } else {
++    Proven = MacRunnerZeroRDXEnd != 0 && MacRunnerZeroRDXEnd == Op->PC;
++  }
++
++  if (Proven) {
++    const uint64_t Used = MacRunnerDivProvenHighUsed.fetch_add(1, std::memory_order_relaxed) + 1;
++    if ((Used & (Used - 1)) == 0) {
++      char Line[160];
++      const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-div-proven-high: used={} rip={:x} op={} size={}\n",
++                                           Used, Op->PC, Signed ? "idiv" : "div", unsigned {IR::OpSizeAsBits(Size)});
++      Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++      FEX::Windows::Logging::Raw(Line);
++    }
++  }
++  return Proven;
++}
++
++// ★ MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE=1 with a proven high half, DivHighHalfProven): the quotient can only
++// overflow for IDIV INT_MIN / -1, so #DE is due iff divisor == 0, or (IDIV) dividend == INT_MIN and divisor == -1.
++// x == 0 is taken as CLZ(x) >> log2(n): no compare, NZCV untouched, no 2n-bit arithmetic. Same result as
++// DivideErrorCondition for every proven dividend. Returns 1 when #DE is due, else 0.
++Ref OpDispatchBuilder::DivideErrorConditionProven(FEXCore::X86Tables::DecodedOp Op, Ref Divisor, bool Signed) {
++  const auto Size = OpSizeFromSrc(Op);
++  const uint64_t Log2Bits = Size == OpSize::i64Bit ? 6 : 5;
++  auto IsZero = [&](Ref Value) {
++    return _Lshr(OpSize::i64Bit, _CountLeadingZeroes(Size, Value), Constant(Log2Bits));
++  };
++
++  Ref Fault = IsZero(Divisor);
++  if (Signed) {
++    const uint64_t IntMin = uint64_t {1} << (IR::OpSizeAsBits(Size) - 1);
++    Ref NotIntMin = _Xor(Size, LoadGPRRegister(X86State::REG_RAX), Constant(IntMin));
++    Ref NotMinusOne = _Add(Size, Divisor, Constant(1));
++    Fault = _Or(OpSize::i64Bit, Fault, IsZero(_Or(Size, NotIntMin, NotMinusOne)));
++  }
++  return Fault;
++}
++
+ // MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE): the value a register keeps written back — the old one when #DE is due.
+ // Without a condition (the gate is off) the new value as is, and no IR is emitted.
+ Ref OpDispatchBuilder::KeepOnDivideError(Ref Fault, Ref Old, Ref New) {
+@@ -3859,12 +3934,14 @@ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+   // write-back stay in one block; the #DE branch follows the write-back, which keeps RAX/RDX when #DE is due. The path
+   // below reads a memory divisor again after its branch, so another thread can change it between check and division.
+   const bool OverflowDE = MacRunnerDivOverflowMode();
++  // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): decided before the zero-divisor branch below ends the block.
++  const bool ProvenHigh = DivHighHalfProven(Op, false);
+   Ref Divisor {};
+   Ref Fault {};
+   if (OverflowDE) {
+     CalculateDeferredFlags();
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+-    Fault = DivideErrorCondition(Op, Divisor, false);
++    Fault = ProvenHigh ? DivideErrorConditionProven(Op, Divisor, false) : DivideErrorCondition(Op, Divisor, false);
+     // Divide by 1 when the result is thrown away: the 128-bit helper must never see a zero divisor.
+     Divisor = _Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::NEQ, Fault, Constant(0), Constant(1), Divisor);
+   } else {
+@@ -3892,7 +3969,8 @@ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+     Ref Src1 = LoadGPRRegister(X86State::REG_RAX);
+     Ref Src2 = LoadGPRRegister(X86State::REG_RDX);
+ 
+-    _UDiv(Size, Src1, Src2, Divisor, Quotient, Remainder);
++    // A proven zero high half needs no 2n-bit dividend: plain UDIV/MSUB of the operand size, no runtime check.
++    _UDiv(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
+ 
+     if (Size == OpSize::i32Bit) {
+       Quotient = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Quotient);
+@@ -3922,12 +4000,14 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+   // ★ MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE=1): one read of the divisor, the #DE branch after the write-back — see
+   // DIVOp. The divide-by-1 substitute also keeps INT128_MIN / -1 away from the 128-bit helper.
+   const bool OverflowDE = MacRunnerDivOverflowMode();
++  // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): decided before the zero-divisor branch below ends the block.
++  const bool ProvenHigh = DivHighHalfProven(Op, true);
+   Ref Divisor {};
+   Ref Fault {};
+   if (OverflowDE) {
+     CalculateDeferredFlags();
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+-    Fault = DivideErrorCondition(Op, Divisor, true);
++    Fault = ProvenHigh ? DivideErrorConditionProven(Op, Divisor, true) : DivideErrorCondition(Op, Divisor, true);
+     Divisor = _Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::NEQ, Fault, Constant(0), Constant(1), Divisor);
+   } else {
+     // See RaiseDivideErrorIfZero: SDIV does not trap on a zero divisor either.
+@@ -3955,7 +4035,9 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+     Ref Src1 = LoadGPRRegister(X86State::REG_RAX);
+     Ref Src2 = LoadGPRRegister(X86State::REG_RDX);
+ 
+-    _Div(Size, Src1, Src2, Divisor, Quotient, Remainder);
++    // A proven sign-extended dividend needs no 2n-bit dividend: plain SDIV/MSUB of the operand size, no runtime check
++    // and no LDIV call. INT_MIN / -1 gives the same truncated quotient and a zero remainder either way.
++    _Div(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
+ 
+     if (Size == OpSize::i32Bit) {
+       Quotient = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Quotient);
+@@ -4825,6 +4907,7 @@ void OpDispatchBuilder::ResetWorkingList() {
+   CurrentCodeBlock = nullptr;
+   RegCache.Written = 0;
+   RegCache.Cached = 0;
++  ResetMacRunnerDivFacts();
+ }
+ 
+ void OpDispatchBuilder::UnhandledOp(OpcodeArgs) {
+@@ -4861,6 +4944,13 @@ void OpDispatchBuilder::ALUOp(OpcodeArgs, FEXCore::IR::IROps ALUIROp, FEXCore::I
+ 
+     // Move 0 into the register
+     StoreResultGPR(Op, Constant(0));
++
++    // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): `xor edx, edx` / `xor rdx, rdx` zeroes all of RDX. A DIV that
++    // starts right after it, in this block, divides a zero-extended dividend (DivHighHalfProven).
++    if (MacRunnerDivProvenHighMode() && Op->Dest.Data.GPR.GPR == X86State::REG_RDX && !Op->Dest.Data.GPR.HighBits &&
++        OpSizeFromDst(Op) >= OpSize::i32Bit) {
++      MacRunnerZeroRDXEnd = Op->PC + Op->InstSize;
++    }
+     return;
+   }
+ 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index 381488f67..cc4dcd9c7 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -153,6 +153,9 @@ public:
+ 
+     FlushRegisterCache();
+ 
++    // MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH): a CQO / xor-edx proof never crosses a block.
++    ResetMacRunnerDivFacts();
++
+     // Start block in X87 state.
+     // This is important to ensure that blocks always start with the same state independently of predecessors
+     // which allows independent compilation of blocks.
+@@ -459,6 +462,11 @@ public:
+   void RaiseDivideErrorIfZero(FEXCore::X86Tables::DecodedOp Op, Ref Divisor);
+   // MacRunner (MACRUNNER_FEX_DIV_OVERFLOW_DE=1): 1 when #DE is due (zero divisor or the quotient does not fit), else 0.
+   Ref DivideErrorCondition(FEXCore::X86Tables::DecodedOp Op, Ref Divisor, bool Signed);
++  // MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): the high half of an r32/r64 dividend is known — the instruction right
++  // before, in this block, is `xor edx, edx` / `xor rdx, rdx` (DIV) or CDQ/CQO of the same size (IDIV).
++  bool DivHighHalfProven(FEXCore::X86Tables::DecodedOp Op, bool Signed);
++  // MacRunner: DivideErrorCondition for a proven high half — divisor 0, or (IDIV) INT_MIN / -1.
++  Ref DivideErrorConditionProven(FEXCore::X86Tables::DecodedOp Op, Ref Divisor, bool Signed);
+   // MacRunner: the value a register keeps written back — Old when Fault is set; New when there is no condition.
+   Ref KeepOnDivideError(Ref Fault, Ref Old, Ref New);
+   // Raises #DE when Value <Cond> 0, then continues in a fresh block.
+@@ -1933,6 +1941,19 @@ private:
+     Ref Value[64];
+   } RegCache {};
+ 
++  // MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH): guest PC right after the last CWD/CDQ/CQO (and its operand size) and
++  // right after the last `xor edx, edx` / `xor rdx, rdx` translated in this block; 0 when there is none. A DIV/IDIV
++  // that starts exactly there follows it directly, with nothing in between (DivHighHalfProven). Register-cache values
++  // cannot carry the proof: the cache is flushed before every instruction (Core.cpp), so each one reloads RAX/RDX.
++  uint64_t MacRunnerSignExtEnd {};
++  IR::OpSize MacRunnerSignExtSize {IR::OpSize::iInvalid};
++  uint64_t MacRunnerZeroRDXEnd {};
++  void ResetMacRunnerDivFacts() {
++    MacRunnerSignExtEnd = 0;
++    MacRunnerSignExtSize = IR::OpSize::iInvalid;
++    MacRunnerZeroRDXEnd = 0;
++  }
++
+   void InvalidateReg(uint8_t Index) {
+     uint64_t Bit = (1ull << (uint64_t)Index);
+     RegCache.Cached &= ~Bit;
+-- 
+2.54.0 (Apple Git-157)
+

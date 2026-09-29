@@ -1,0 +1,73 @@
+From 88060f5c070791a3cab8a376793ca0aaa9b52eae Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 11:53:41 +1000
+Subject: [PATCH 19/19] Darwin: no process-wide hardware TSO from a
+ single-thread probe
+
+TSOHandlerConfig asks the unix library once per process to enable hardware TSO and, when that
+succeeds, turns off FEX's software TSO for the whole context (SetHardwareTSOSupport). That fits
+Linux, where the prctl covers the process. On macOS, thread_set_x86_64_compat switches only the
+calling thread, and new threads do not inherit the mode. With the entitlement, the probe would
+succeed on the initializing thread and every other thread would then run with neither hardware
+nor software ordering. Without the entitlement, as now, the call fails and nothing changes.
+
+On FEX_WINE_DARWIN builds the probe is no longer made: software TSO stays until every executing
+thread is admitted to the hardware mode (planned behind MACRUNNER_HB_HW_TSO). The comment of the
+Darwin unix handler named the wrong entitlement; CrossOver Preview's signed Wine loader
+(lib/wine/aarch64-unix/wine.app, with an embedded provisioning profile) carries
+com.apple.developer.cross-architecture-support.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Source/Windows/Common/TSOHandlerConfig.h |  7 +++++++
+ Source/Windows/UnixLib/FEXUnixLib.cpp    | 12 ++++++++----
+ 2 files changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/Source/Windows/Common/TSOHandlerConfig.h b/Source/Windows/Common/TSOHandlerConfig.h
+index f63478d79..e9be14f69 100644
+--- a/Source/Windows/Common/TSOHandlerConfig.h
++++ b/Source/Windows/Common/TSOHandlerConfig.h
+@@ -17,9 +17,16 @@ public:
+       UnalignedHandlerType = FEXCore::ArchHelpers::Arm64::UnalignedHandlerType::NonAtomic;
+     }
+ 
++#ifndef FEX_WINE_DARWIN
+     if (TSOEnabled() && FEX::Windows::UnixLib::TryEnableHardwareTSO()) {
+       CTX.SetHardwareTSOSupport(true);
+     }
++#else
++    // MacRunner (Darwin): the hardware x86 ordering mode (thread_set_x86_64_compat) belongs to one thread and new
++    // threads do not inherit it, unlike the Linux prctl, which covers the process. One successful probe here would
++    // turn off software TSO for every thread of the shared context while only this thread runs ordered. So the probe
++    // is not made; software TSO stays until each executing thread is admitted (planned: MACRUNNER_HB_HW_TSO).
++#endif
+ 
+     uint64_t Flags = (StrictInProcessSplitLocks() ? FEX_UNALIGN_ATOMIC_STRICT_SPLIT_LOCKS : 0) |
+                      (KernelUnalignedAtomicBackpatching() ? FEX_UNALIGN_ATOMIC_BACKPATCH : 0) | FEX_UNALIGN_ATOMIC_EMULATE;
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
+index 960f36704..e196d8ee7 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.cpp
++++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
+@@ -87,10 +87,14 @@ static uint64_t JITExecCount {};
+ 
+ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
+   // thread_set_x86_64_compat есть в libsystem (dlsym его находит), но включение требует
+-  // права com.apple.security.cs.x86-64-abi-version-2, которого у нас НЕТ: подпись
+-  // отказывает -413 "No matching profile found". Пока права нет, обработчик обязан вернуть
+-  // ненулевое, чтобы FEX честно ушёл на программные барьеры. Молча считать TSO включённым
+-  // НЕЛЬЗЯ — это порча модели памяти, а не потеря скорости.
++  // права com.apple.developer.cross-architecture-support (или -unmanaged) у исполняемого файла
++  // процесса вместе с профилем обеспечения; у CrossOver Preview оно стоит на подписанном
++  // загрузчике lib/wine/aarch64-unix/wine.app (проверено 29.09.2026). У нас права НЕТ, вызов
++  // отдаёт KERN_FAILURE. Пока права нет, обработчик обязан вернуть ненулевое, чтобы FEX
++  // честно ушёл на программные барьеры. Молча считать TSO включённым НЕЛЬЗЯ — это порча
++  // модели памяти, а не потеря скорости. Режим действует на ОДИН поток и не наследуется
++  // новыми: включать его можно только допуском каждого исполняющего потока, не одной пробой
++  // (TSOHandlerConfig.h под FEX_WINE_DARWIN пробу не делает).
+   //
+   // Символ берётся через dlsym, а не линковкой: он приватный, и его исчезновение в другой
+   // версии macOS не должно ломать ЗАГРУЗКУ клея целиком.
+-- 
+2.54.0 (Apple Git-157)
+

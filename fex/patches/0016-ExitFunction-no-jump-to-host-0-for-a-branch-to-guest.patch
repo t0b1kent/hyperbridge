@@ -1,0 +1,107 @@
+From 2cf32731a0b174af63e0800605b1708166f7ac42 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 10:14:57 +1000
+Subject: [PATCH 16/19] ExitFunction: no jump to host 0 for a branch to guest 0
+ (MACRUNNER_FEX_NULL_HOST)
+
+A block exit to a non-constant target (RET, RETF, IRET, JMP/CALL r/m, also POPF and SYSCALL) takes
+its host address from the call-ret stack or from the inline L1 lookup, and both match the guest
+address alone. An empty entry is {guest 0, host 0}, so a branch to guest 0 (`push 0; ret`) went to
+host address 0 and crashed the host (ESR 0x82000006) instead of giving the guest a page fault.
+With MACRUNNER_FEX_NULL_HOST=1 (default off) a zero host candidate takes the L1 miss path, i.e. the
+full lookup through the dispatcher, whose L2 lookup already rejects a zero host; a fetch at an
+unmapped 0 then becomes the guest's own fault. Guest 0 itself stays allowed (it may be mapped).
+Not covered: InvalidateCache keeps the HostCode of an L1 entry, so guest 0 can still match
+{0, old host}; the ARM64EC entry path in Dispatcher.cpp compares the call-ret stack top without
+this check.
+
+MacRunnerNullHostChecks counts exits translated with the check; a macrunner-fex-null-host line is
+printed at 1, 2, 4, ... HB<->FEX oracle (72 219 cases, product and native feature sets, one binary
+for both arms, ABBA order): exactly one result changes, `push 0; ret` (host fault -> x86-correct
+fetch fault at 0), no other result changes; the counter is non-zero on all 499 cases with a
+non-constant exit and zero elsewhere. ARM64EC and WOW64 builds compile; not run under Wine.
+
+Portions derived from FEX-Emu, Copyright (c) 2019 Ryan Houdek and FEX contributors, MIT License.
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Source/Interface/Core/JIT/BranchOps.cpp   | 57 +++++++++++++++++++
+ 1 file changed, 57 insertions(+)
+
+diff --git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+index d555e0648..be9b51517 100644
+--- a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+@@ -16,6 +16,52 @@ $end_info$
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include <FEXCore/HLE/SyscallHandler.h>
+ #include <FEXCore/Utils/MathUtils.h>
++#include <FEXCore/fextl/fmt.h>
++
++#include <algorithm>
++#include <atomic>
++#include <cstdlib>
++
++// FEX::Windows::Logging::Raw (__wine_dbg_output): fprintf in the PE part of FEX kills the process (see Core.cpp).
++namespace FEX::Windows::Logging {
++void Raw(const char* Message);
++}
++
++// ★ MacRunner Claude 29.09.2026: MACRUNNER_FEX_NULL_HOST=1 keeps a block exit to a non-constant target (RET, RETF,
++// IRET, JMP/CALL r/m, also POPF and SYSCALL, whose next RIP is not inline) from jumping to host 0. The call-ret stack
++// pop and the inline L1 lookup in ExitFunction match the guest address alone, and an empty entry is {guest 0, host 0}:
++// the call-ret stack is zeroed on invalidation (Core.cpp, JIT.cpp), a call without a known return block pushes {0, 0},
++// unused L1 entries are zero. A branch to guest 0 matched such an entry and went to host 0 (HB<->FEX oracle 28.09,
++// FEX-RET0: `push 0; ret`, ESR 0x82000006). The gate checks the host candidate instead of refusing guest 0 (which may
++// be mapped): host 0 takes the L1 miss path, i.e. the full lookup through the dispatcher, whose L2 lookup already
++// rejects a zero host (Dispatcher.cpp), so a fetch at an unmapped 0 becomes the guest's own fault. Not covered:
++// InvalidateCache keeps the HostCode of an L1 entry (LookupCache.h), so guest 0 can still match {0, old host} and run
++// that stale block. Unset or any other value keeps the upstream sequence. MacRunnerNullHostChecks counts such exits
++// translated with the check; a macrunner-fex-null-host line is printed when it reaches 1, 2, 4, 8, ...
++std::atomic<uint64_t> MacRunnerNullHostChecks {0};
++int MacRunnerNullHostMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_NULL_HOST");
++    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++  }();
++  return Mode;
++}
++
++namespace {
++void MacRunnerCountNullHostCheck(uint64_t Entry, FEXCore::IR::BranchHint Hint) {
++  const uint64_t Checks = MacRunnerNullHostChecks.fetch_add(1, std::memory_order_relaxed) + 1;
++  if ((Checks & (Checks - 1)) == 0) {
++    const char* HintName = Hint == FEXCore::IR::BranchHint::Call   ? "call" :
++                           Hint == FEXCore::IR::BranchHint::Return ? "ret" :
++                                                                     "jmp";
++    char Line[160];
++    const auto Result =
++      fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-null-host: checks={} entry={:x} hint={}\n", Checks, Entry, HintName);
++    Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  }
++}
++} // namespace
+ 
+ namespace FEXCore::CPU {
+ 
+@@ -213,6 +259,17 @@ DEF_OP(ExitFunction) {
+     str(RipReg.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
+ 
+     (void)Bind(&SkipFullLookup);
++    if (MacRunnerNullHostMode()) {
++      // ★ MacRunner (MACRUNNER_FEX_NULL_HOST=1, see the top of this file): TMP2 is the host target taken from the
++      // call-ret stack or from L1, or DispatcherLoopTop after an L1 miss. A matched empty entry gives 0: take the L1 miss
++      // path instead. Only STATE-relative loads/stores, no host addresses in the emitted code.
++      ARMEmitter::ForwardLabel ValidHost;
++      (void)cbnz(ARMEmitter::Size::i64Bit, TMP2, &ValidHost);
++      ldr(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.DispatcherLoopTop));
++      str(RipReg.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
++      (void)Bind(&ValidHost);
++      MacRunnerCountNullHostCheck(Entry, Op->Hint);
++    }
+     if (Op->Hint == IR::BranchHint::Call) {
+       ARMEmitter::ForwardLabel l_CallReturn;
+       if (!Op->CallReturnBlock.IsInvalid()) {
+-- 
+2.54.0 (Apple Git-157)
+
