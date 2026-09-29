@@ -20,6 +20,10 @@ Since 28 September 2026, HyperBridge has two parts:
 
 Experimental. The measurements below are from one machine (Apple M1 Pro, macOS 27).
 
+**[HyperBridge compared](COMPARISON.md)** (29 Sep 2026): engine 0015 against Microsoft Prism, the FEX build in
+CrossOver Preview and native macOS code: instruction loops, Hollow Knight, x86 exactness, `CPUID` and memory
+ordering.
+
 FEX-based engine (28 Sep 2026): Hollow Knight (Unity/Mono, x86-64) runs gameplay from a saved
 game at 113–119 FPS in seven runs, close to the 120 Hz display limit. The main menu appears
 37–42 s after launch. The full `fex/` series and the FEX in MacRunner 1.0.2 gave the same results. These results need a Wine fix for its address-space scan, the

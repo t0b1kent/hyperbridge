@@ -35,5 +35,4 @@ bench: name=empty          iters=224701020    ns_median=   0.691 ns_min=   0.674
 bench: end
 ```
 
-Results for HyperBridge, Prism and CrossOver Preview on an Apple M1 Pro:
-[MacRunner engine comparison](https://github.com/t0b1kent/macrunner-app/blob/main/COMPARISON.md).
+Results for HyperBridge, Prism and CrossOver Preview on an Apple M1 Pro: [HyperBridge compared](../../COMPARISON.md).
