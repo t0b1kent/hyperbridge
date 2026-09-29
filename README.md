@@ -16,13 +16,47 @@ Since 28 September 2026, HyperBridge has two parts:
   stays here as the research engine: its measured techniques, instruments and interpreter
   oracles are being carried over to the FEX-based engine behind switches.
 
+## How HyperBridge compares
+
+The same programs on one Mac (Apple M1 Pro, macOS 27), 29 September 2026: HyperBridge engine 0015 under
+MacRunner's Wine, **Microsoft Prism** (Windows 11 on Arm in a Parallels Desktop virtual machine), the **FEX build
+in CrossOver Preview**, and the **native macOS build** of a game. Loop times are nanoseconds per iteration, the
+median of three alternating runs of [`xbench`](bench/xbench/); lower is better, the best value is in bold.
+
+| | HyperBridge 0015 | Microsoft Prism | CrossOver Preview (FEX) | Native macOS |
+| --- | ---: | ---: | ---: | ---: |
+| `rep movsb`, 4 KB copy | **61** | 1 689 | 868 | — |
+| x87 `fadd` | 16.3 | **1.00** | 114 | — |
+| `cvttss2si` / `cvttsd2si` (float → integer) | **0.66 / 0.69** | 1.07 / 1.08 | 0.74 / 0.74 | — |
+| `addsubps` | **0.97** | 2.40 | 0.99 | — |
+| 10 other integer and SSE loops | same as CrossOver | 3–41 % slower | same as HyperBridge | — |
+| `div r32` / `idiv r64` | 1.01 / 0.97 | 1.06 / 1.97 | **0.89 / 0.73** | — |
+| `call`+`ret` / indirect `call` | 1.99 / 2.34 | **1.52 / 1.58** | 1.98 / 2.29 | — |
+| SSE results matching x86 hardware (of 74) | 12 ¹ | **38** | 16 | — |
+| SSE4.2, AES, PCLMULQDQ reported in `CPUID` | no ² | yes | yes | — |
+| Hardware x86 memory ordering (TSO) | no ³ | not examined | yes | not needed |
+| Hollow Knight, King's Pass: FPS · CPU time per frame | 110 · 14.7 ms | not measured | not measured | **113 · 6.7 ms** |
+
+¹ Measured on the engine of MacRunner 1.0.2. ² MacRunner's Wine does not yet pass the Arm cryptography
+features to the engine; a fix is tested behind `MACRUNNER_WINE_ID_REGS_CRYPTO=1`. ³ Needs an Apple
+entitlement; MacRunner's Apple Developer account is pending approval. CrossOver's Wine loader carries it.
+
+**Where HyperBridge is ahead.** `rep movsb` copies 14 times faster than in CrossOver's FEX and 28 times faster
+than in Prism. x87 arithmetic runs 7 times faster than in CrossOver's FEX. Float → integer conversions are
+7–11 % faster than in CrossOver's FEX. On the 13 simple integer and SSE loops, HyperBridge is as fast as
+CrossOver's FEX or faster, and faster than Prism on all 13, by 3 % up to 2.5 times.
+
+**Where it is behind.** HyperBridge needs 31–48 % more time per call and return than Prism, 16 times more per
+x87 `fadd`, and matches x86 floating-point results less often. CrossOver's FEX divides faster (patch 0017,
+not yet released, addresses it) and reports the Arm cryptography instructions to programs. In Hollow Knight,
+HyperBridge reaches nearly the native frame rate at the display limit, but needs 2.2 times the native CPU
+time per frame and a longer start.
+
+[Full results, conditions and limits →](COMPARISON.md)
+
 ## Status
 
 Experimental. The measurements below are from one machine (Apple M1 Pro, macOS 27).
-
-**[HyperBridge compared](COMPARISON.md)** (29 Sep 2026): engine 0015 against Microsoft Prism, the FEX build in
-CrossOver Preview and native macOS code: instruction loops, Hollow Knight, x86 exactness, `CPUID` and memory
-ordering.
 
 FEX-based engine (28 Sep 2026): Hollow Knight (Unity/Mono, x86-64) runs gameplay from a saved
 game at 113–119 FPS in seven runs, close to the 120 Hz display limit. The main menu appears
