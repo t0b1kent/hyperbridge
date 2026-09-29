@@ -28,24 +28,48 @@ Times are nanoseconds per loop iteration; lower is better. The best value in eac
 | **Division exceptions** | Divide by zero and quotient overflow, Windows codes | Divide by zero; overflow behind an off-by-default switch | None | — |
 | **SSE4.2, AES, PCLMULQDQ in `CPUID`** | Yes | No | Yes | — |
 | **Hardware x86 memory ordering** | Not examined | No: ordering in software | Yes | Not needed |
-| **Hollow Knight**, gameplay in King's Pass | Not measured | 110 FPS · 14.7 ms CPU per frame | Not measured | **113 FPS · 6.7 ms CPU per frame** |
+| **Hollow Knight start-up**: Unity's `Loaded All Assemblies` | 0.26 s | 2.22 s | 0.41 s | **0.17 s** |
+| **Hollow Knight in King's Pass**: FPS · CPU time per frame | Not comparable (virtual GPU) | 113–117 FPS · 14.9–15.0 ms | 113–119 FPS · 15.4–16.1 ms | **120 FPS · 6.4–6.8 ms** |
 
 ## Hollow Knight
 
-Hollow Knight 1.5.12620 (GOG): the Windows x86-64 build under HyperBridge 0015, and the native macOS build of the same version (arm64). Both use the same Unity version, 6000.0.61f1. Settings: 1280×720 window, V-Sync on, built-in 120 Hz display. Each run starts the game and loads the same save in King's Pass. Frames come from the Metal HUD log; CPU time of the game process comes from `ps`.
+Hollow Knight 1.5.12620 (GOG): the Windows x86-64 build under HyperBridge 0015, Prism and CrossOver Preview's FEX, and the native macOS build of the same version (arm64). All builds use Unity 6000.0.61f1. The game settings are the same everywhere: 1280×720 window, V-Sync on, English.
 
-| Measurement | HyperBridge 0015 | Native macOS build |
-| --- | ---: | ---: |
-| First frame · main menu · gameplay after launch | 23.6 s · 43.7 s · 58.4 s | **3.8 s · 16.3 s · 27.2 s** |
-| Frame rate in King's Pass (limit 120) | 110 FPS | **113 FPS** |
-| Median / 95th / 99th percentile frame time | 8.33 / 8.34 / 25.0 ms | 8.33 / 9.40 / 16.7 ms |
-| CPU time of the game process per frame | 14.7 ms (1.62 cores) | **6.7 ms (0.76 cores)** |
-| CPU time of `wineserver` per frame | 0.6 ms | — |
-| GPU time per frame (median) | 3.2 ms | **2.6 ms** |
-| Resident memory (median) | 1 189 MiB | **1 051 MiB** |
-| Gameplay sampled | 127 s | 57 s |
+### Start-up, timed by the game itself
 
-There was one run per build, and the Mac was in normal use during the runs. Both builds reach the display limit most of the time. HyperBridge uses 2.2 times the CPU time per frame and takes more than twice as long to reach gameplay. A second run on the exact MacRunner 1.0.3 bundle, with the Mac under extra load, gave 107 FPS and 15.4 ms per frame. A repeated series with alternating runs is planned. Prism and CrossOver have not been measured in this scene. Prism runs inside a virtual machine with virtualized graphics, so its frame rate would not be directly comparable.
+Each environment started the game three times and ran to the main menu. The runs alternated: Prism, native, HyperBridge, CrossOver, then the reverse order, then the first order again. The upper rows are durations that Unity measures itself and prints to its log. The lower rows are times from launch to lines of that log, polled every 0.25 s. Each cell is the median of three runs, with the range in brackets.
+
+| Unity reports | Prism | Native macOS | HyperBridge 0015 | CrossOver Preview (FEX) |
+| --- | ---: | ---: | ---: | ---: |
+| `Loaded All Assemblies` | 0.26 s [0.25–0.29] | **0.17 s** [0.16–0.19] | 2.22 s [2.16–2.39] | 0.41 s [0.41–0.49] |
+| `Finished resetting the current domain` | 6 ms | **3 ms** | 175 ms | 6 ms |
+| First `UnloadTime` | 1.2 ms | **0.33 ms** | 22.5 ms | 4.0 ms |
+| First garbage collection (`Total`) | 3.3 ms | **1.2 ms** | 31.3 ms | 10.3 ms |
+| **Time from launch to** | | | | |
+| Mono start (`Mono path`) | **0.4 s** | 0.8 s | 4.1 s | 4.1 s |
+| `Discovered supported languages` | 2.5 s | **1.6 s** | 16.3 s | 7.4 s |
+| Main menu ¹ | 21.9 s | **15.8 s** | 43.0 s | 23.8 s |
+
+¹ The main menu appears only after the game's GOG Galaxy sign-in has failed (there is no Galaxy service in these setups), so this time includes that wait.
+
+Wine starts just as fast under HyperBridge as under CrossOver: Mono starts after 4.1 s in both. After that, HyperBridge takes 5.4 times as long as CrossOver's FEX to load the game's assemblies, and 3 to 6 times as long for the first garbage collections, although both engines are FEX-based and equal on simple instruction loops. A diagnostic run with FEX's software memory ordering switched off (`FEX_TSOENABLED=0`; not usable for playing, because x86 memory ordering is then not kept) brought `Loaded All Assemblies` from 2.24–2.30 s down to 0.77–0.82 s (two runs each, alternating), the domain reset from 0.17–0.19 s to 0.01–0.02 s and the main menu from 42 s to 29–31 s; the first garbage collection did not change. So the software ordering accounts for about two thirds of the start-up gap to CrossOver, whose FEX can use Apple's hardware ordering (see Memory ordering below). The rest is not yet explained.
+
+### In King's Pass
+
+The game loads the same save and stands in King's Pass; each environment ran twice, alternating: CrossOver, HyperBridge, HyperBridge without software ordering, native, native, HyperBridge without software ordering, HyperBridge, CrossOver. Frames come from the Metal HUD log, CPU time of the game process from `ps`, measured over about 70–120 s of gameplay. Prism is not listed: in a virtual machine its graphics are virtualized, so the numbers would not be comparable.
+
+| Measurement (two runs) | Native macOS | HyperBridge 0015 | HyperBridge without software ordering ¹ | CrossOver Preview (FEX) |
+| --- | ---: | ---: | ---: | ---: |
+| Frame rate (limit 120) | **119.9 · 119.9 FPS** | 116.8 · 112.7 FPS | 118.5 · 118.9 FPS | 119.3 · 113.4 FPS |
+| 99th percentile frame time | **8.3 · 8.3 ms** | 16.7 · 16.7 ms | 8.3 · 8.3 ms | 8.3 · 33.3 ms |
+| CPU time of the game process per frame | **6.4 · 6.8 ms** | 14.9 · 15.0 ms | 11.2 · 11.0 ms | 16.1 · 15.4 ms |
+| CPU time of `wineserver` per frame | — | 0.2 · 0.2 ms | 0.2 · 0.2 ms | 0.4 · 0.4 ms |
+| GPU time per frame (median) | 2.2 · 2.2 ms | 3.5 · 3.5 ms | 3.5 · 3.5 ms | 6.0 · 2.0 ms |
+| Resident memory (median) | **1 045 · 1 046 MiB** | 1 441 · 1 988 MiB | 1 549 · 1 710 MiB | 1 149 · 1 255 MiB |
+
+¹ Diagnostic only: `FEX_TSOENABLED=0` drops x86 memory ordering, which programs rely on.
+
+In gameplay HyperBridge spends slightly less CPU time per frame than CrossOver's FEX (14.9–15.0 against 15.4–16.1 ms) and 2.2 times as much as the native build. Without software ordering the same scene needs 11.0–11.2 ms, about a quarter less; hardware ordering has its own cost, so this is an upper bound of what it can give here. The native build entered the game before the automatic key presses both times, so its start times are not comparable; its gameplay measurement is. Earlier single runs on the same engine gave 110 FPS (14.7 ms per frame) and, on the exact MacRunner 1.0.3 bundle under extra load, 107 FPS (15.4 ms).
 
 ## Instruction loops
 
