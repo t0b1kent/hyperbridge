@@ -50,6 +50,7 @@ C translator, measured facts as of 2026-09-26:
 ```
 fex/          FEX-based engine: patch series on upstream FEX-Emu, build script, manifest
 adapter/      Wine adapter: hyperbridge64.dll and hyperbridge64.so (partly LGPL)
+bench/        xbench: x64 Windows microbenchmark for comparing x86 emulators
 include/      public and internal headers
 src/          decoder, lifter, IR, interpreter, ARM64 code generator, JIT, runtime
 tests/        unit, regression and litmus tests (make test)
