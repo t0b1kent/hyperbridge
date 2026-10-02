@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "origin": "OWN_SYNTHETIC_SOURCE",
+  "source": "synthetic.asm",
+  "mode": 64,
+  "rip": 268435456,
+  "code_hex": "b80300000083c004",
+  "memory": "deterministic own seed 0; no captured pages",
+  "expected": {"rax": 7},
+  "boundary": "reference-only example, not a native FEX qualification"
+}

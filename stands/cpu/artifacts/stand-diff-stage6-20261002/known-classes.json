@@ -1,0 +1,9 @@
+{
+  "admission": "MANUAL_OWNER_ADJUDICATION_ONLY",
+  "classes": [{
+    "class": "MXCSR_STATUS_NOT_TRACKED",
+    "defect_owner": "ENGINE",
+    "rule": "Only independently produced sticky status flags may be missing. Added flags, lost baseline flags, control-bit changes and unsupported producers are never admitted. Repaired scalar conversion flags are protected when both repair gates are enabled.",
+    "boundary": "Architectural policy only; no captured states or private adjudication evidence are distributed. Exact-case registry is empty."
+  }]
+}
