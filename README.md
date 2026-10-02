@@ -112,8 +112,8 @@ As of October 2, three stands check bounded recorded inputs without starting gam
 
 Known defects and reference gaps remain explicit; PASS means no new unclassified difference within
 the checked scope. Our MIT CPU and 32-bit stand sources are in [`stands/`](stands/) in this
-repository. The graphics recorder/player changes are a DXMT modification under LGPL-2.1-or-later; their
-publication in [the DXMT fork](https://github.com/t0b1kent/dxmt) is being prepared. No game data or binaries are included.
+repository. The graphics recorder/player changes are a DXMT modification under LGPL-2.1-or-later and are
+published in [the DXMT fork](https://github.com/t0b1kent/dxmt/tree/macrunner-trace-stand/docs/trace-stand) (branch `macrunner-trace-stand`). No game data or binaries are included.
 [More results and limits →](https://github.com/t0b1kent/macrunner-app/blob/main/RELEASE_STATUS.md#how-we-test)
 
 FEX-based engine (28 Sep 2026): Hollow Knight (Unity/Mono, x86-64) runs gameplay from a saved
