@@ -6,6 +6,12 @@ This page compares HyperBridge, the x86 → ARM64 engine of [MacRunner](https://
 
 **Test Mac:** MacBook Pro, Apple M1 Pro (8-core CPU), 32 GB, macOS 27.0 (26A428). **Date:** September 29, 2026.
 
+**Status note, October 2:** all measurement numbers below remain the September 29 snapshot, primarily
+engine 0015; the floating-point column is explicitly the 1.0.2 engine. No new comparison was run.
+MacRunner 1.0.6 (October 1) uses patches 0001–0026. CPU-feature reporting was fixed in 1.0.5;
+DIV/IDIV exception correction and EFLAGS restoration are enabled in 1.0.6. The Apple entitlement
+probe now passes, but hardware-TSO integration is still in development and speed has not been measured.
+
 | Environment | What it is | Version measured |
 | --- | --- | --- |
 | **HyperBridge** | FEX-Emu with MacRunner's patch series ([`fex/`](fex/README.md)), under MacRunner's Wine | [engine 0015](https://github.com/t0b1kent/hyperbridge/releases/tag/engine-0015) (`xtajit64.dll` `c5f82c55…`), the engine of MacRunner 1.0.3. The floating-point checks used the engine of MacRunner 1.0.2 (`f718484b…`), as marked. |
@@ -26,10 +32,15 @@ Times are nanoseconds per loop iteration; lower is better. The best value in eac
 | **`rep movsb`**, 4 KB copy | 1 689 | **61** | 868 | — |
 | **SSE cases matching x86 hardware** (of 74) | **38** | 12 (1.0.2 engine) | 16 | — |
 | **Division exceptions** | Divide by zero and quotient overflow, Windows codes | Divide by zero; overflow behind an off-by-default switch | None | — |
-| **SSE4.2, AES, PCLMULQDQ in `CPUID`** | Yes | No | Yes | — |
-| **Hardware x86 memory ordering** | Not examined | No: ordering in software | Yes | Not needed |
+| **SSE4.2, AES, PCLMULQDQ in `CPUID`** | Yes | No ² | Yes | — |
+| **Hardware x86 memory ordering** | Not examined | No: ordering in software ³ | Yes | Not needed |
 | **Hollow Knight start-up**: Unity's `Loaded All Assemblies` | 0.26 s | 2.22 s | 0.41 s | **0.17 s** |
 | **Hollow Knight in King's Pass**: FPS · CPU time per frame | Not comparable (virtual GPU) | 113–117 FPS · 14.9–15.0 ms | 113–119 FPS · 15.4–16.1 ms | **120 FPS · 6.4–6.8 ms** |
+
+² Historical result. Fixed since 1.0.5 (September 30) with `FEX_HOSTFEATURES=enablecrypto`;
+SSE4.2, AES, PCLMULQDQ and SHA are advertised and execute. ³ Historical software-ordering build.
+As of October 2, our Developer ID provisioning profile carries Apple's cross-architecture-support entitlement, and a native probe succeeds. Integration continues,
+without a speed result. Neither footnote changes the measurements in this table.
 
 ## Hollow Knight
 
@@ -69,7 +80,7 @@ The game loads the same save and stands in King's Pass; each environment ran twi
 
 ¹ Diagnostic only: `FEX_TSOENABLED=0` drops x86 memory ordering, which programs rely on.
 
-In gameplay HyperBridge spends slightly less CPU time per frame than CrossOver's FEX (14.9–15.0 against 15.4–16.1 ms) and 2.2 times as much as the native build. Without software ordering the same scene needs 11.0–11.2 ms, about a quarter less; hardware ordering has its own cost, so this is an upper bound of what it can give here. The native build entered the game before the automatic key presses both times, so its start times are not comparable; its gameplay measurement is. Earlier single runs on the same engine gave 110 FPS (14.7 ms per frame) and, on the exact MacRunner 1.0.3 bundle under extra load, 107 FPS (15.4 ms).
+In gameplay HyperBridge spends slightly less CPU time per frame than CrossOver's FEX (14.9–15.0 against 15.4–16.1 ms) and 2.2 times as much as the native build. Without software ordering the same scene needs 11.0–11.2 ms, about a quarter less. That diagnostic drops required ordering and is not a hardware-TSO measurement; no hardware-mode speed result is established. The native build entered the game before the automatic key presses both times, so its start times are not comparable; its gameplay measurement is. Earlier single runs on the same engine gave 110 FPS (14.7 ms per frame) and, on the exact MacRunner 1.0.3 bundle under extra load, 107 FPS (15.4 ms).
 
 ## Instruction loops
 
@@ -134,7 +145,7 @@ Probe programs divide by zero and make the quotient overflow with `DIV`/`IDIV`. 
 | Divisor 0 | `0xC0000094` at the `DIV` | No exception | `0xC0000094` at the `DIV` | `0xC0000094` at the `DIV` | No exception |
 | Quotient too large | `0xC0000095` at the `DIV` | No exception | No exception | Exception at the `DIV`, code `0xC0000094` | No exception |
 
-Prism gives the same codes to 64-bit programs and to 32-bit programs under WOW64. It reports a zero divisor as `0xC0000094` even when the quotient would also overflow. Where no exception is raised, the program continues with a wrong result. Real x86-64 Windows has not been measured here. HyperBridge engine 0019 (patch 0018) reports `0xC0000095` for the overflow case under the same switch: all 88 cases of Prism's probe then match Prism, including the registers at the fault. The switch is off by default.
+Prism gives the same codes to 64-bit programs and to 32-bit programs under WOW64. It reports a zero divisor as `0xC0000094` even when the quotient would also overflow. Where no exception is raised, the program continues with a wrong result. Real x86-64 Windows has not been measured here. HyperBridge engine 0019 (patch 0018) reports `0xC0000095` for the overflow case under the same switch: all 88 cases of Prism's probe then match Prism, including the registers at the fault. The switch was off by default in that snapshot. **October 1 update:** it is enabled in released MacRunner 1.0.6; its packaged x64 probe matches all 88 reference cases. This does not update the historical timing tables or prove 32-bit startup in 1.0.6.
 
 ### CPU features reported to programs
 
@@ -149,24 +160,24 @@ What a Windows x64 program sees in `CPUID`:
 | AVX, AVX2, FMA, F16C, BMI1, BMI2 | Yes | Yes | Yes |
 | RDRAND | Yes | No | No |
 
-HyperBridge (FEX) builds the x86 `CPUID` result from the Arm feature registers that Wine reports. MacRunner's Wine on macOS does not yet report the Arm cryptography and CRC32 features. As a result, SSE4.2, AES, PCLMULQDQ and SHA stay hidden, although the M1 Pro has the matching Arm instructions. A Wine change behind `MACRUNNER_WINE_ID_REGS_CRYPTO=1` fills these features in. It was checked with the same probe: all four features are reported, and the instructions run. The change is not in the 1.0.3 bundle yet.
+HyperBridge (FEX) builds the x86 `CPUID` result from the Arm feature registers that Wine reports. In the measured 1.0.2/1.0.3 configurations, Wine omitted the Arm cryptography and CRC32 fields, hiding SSE4.2, AES, PCLMULQDQ and SHA. **September 30 update:** MacRunner 1.0.5 sets `FEX_HOSTFEATURES=enablecrypto` in its engine template. All four features are reported and execute; crypto known-answer checks pass 12 of 12. This is the released fix, retained in 1.0.6. The table above records the earlier builds.
 
 ## Memory ordering
 
-x86 programs rely on a stronger memory ordering (TSO) than Arm processors guarantee. Apple Silicon has a hardware mode that gives x86 ordering. macOS lets an application use it only with an entitlement granted by Apple.
+x86 programs rely on a stronger memory ordering (TSO) than Arm processors guarantee. Apple Silicon has a hardware mode that gives x86 ordering. On macOS, this requires the cross-architecture-support entitlement and a valid provisioning profile.
 
 - **CrossOver Preview** has it. Its Wine loader (`wine.app`, signed with CodeWeavers' Developer ID) carries the `com.apple.developer.cross-architecture-support` entitlement and an embedded provisioning profile. Its FEX libraries (`libarm64ecfex.so`, `libwow64fex.so`) call `thread_set_x86_64_compat` from a handler named `SetHardwareTSOControl`.
-- **HyperBridge in MacRunner** orders memory in software, using FEX's TSO emulation (ordered loads and stores). In a process without the entitlement, `thread_set_x86_64_compat` fails on this Mac with `KERN_FAILURE`. MacRunner's Apple Developer account is pending approval.
+- **HyperBridge in the measured MacRunner build** orders memory in software, using FEX's TSO emulation (ordered loads and stores). In a process without the entitlement, `thread_set_x86_64_compat` fails on this Mac with `KERN_FAILURE`. **October 2 update:** the developer account was approved on October 1. Our Developer ID provisioning profile carries Apple's cross-architecture-support entitlement, and a native probe succeeds. Our Wine loader is Developer ID-signed; Apple accepted a trial notarization on October 2. Hardware-TSO integration into the engine continues. Released 1.0.6 remains signed ad hoc, and these preparation results do not change its distribution status or the measured engine here.
 - The loops above barely touch memory, so they do not show this difference. How much of HyperBridge's CPU time in games the hardware mode would remove has not been measured.
 
 ## What this points to in HyperBridge
 
 1. **CPU time per frame in games.** In Hollow Knight it is 2.2 times that of the native build. This is the main performance target.
-2. **Hardware memory ordering**, once MacRunner has the Apple entitlement.
+2. **Hardware memory ordering**: the entitlement probe now passes; complete engine integration and measurement remain open (October 2).
 3. **x87 arithmetic**: 16 times Prism's time per `fadd`.
 4. **Calls and returns**: 30–50 % more time per call than Prism, the same as CrossOver.
-5. **Division**: engine 0019 carries 0017 (speed after `cqo`/`cdq`/`xor edx,edx`, still to be extended to an instruction in between) and 0018 (Windows' overflow code, equal to Prism in 88 of 88 probe cases), both behind switches.
-6. **`CPUID`**: report SSE4.2, AES, PCLMULQDQ and SHA through the Wine change already tested.
+5. **Division**: the historical engine 0019 work remains recorded above. The exception correction is enabled in 1.0.6; no new division timing is claimed.
+6. **`CPUID`**: fixed since 1.0.5 through the translator's `enablecrypto` option.
 7. **Floating-point exactness**: the sign of NaN in `ADDSUBPS`/`ADDSUBPD`, and the MXCSR exception flags.
 
 Microbenchmarks measure single instruction patterns, not whole programs, and one Mac is not every Mac. The numbers on this page describe the builds and conditions listed above.

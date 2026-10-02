@@ -38,9 +38,11 @@ median of three alternating runs of [`xbench`](bench/xbench/); lower is better, 
 | Hollow Knight start-up: Unity's own `Loaded All Assemblies` time | 2.22 s | 0.26 s | 0.41 s | **0.17 s** |
 | Hollow Knight in King's Pass: FPS · CPU time per frame | 113–117 · 14.9–15.0 ms | not comparable (virtual GPU) | 113–119 · 15.4–16.1 ms | **120 · 6.4–6.8 ms** |
 
-¹ Measured on the engine of MacRunner 1.0.2. ² MacRunner's Wine does not yet pass the Arm cryptography
-features to the engine; a fix is tested behind `MACRUNNER_WINE_ID_REGS_CRYPTO=1`. ³ Needs an Apple
-entitlement; MacRunner's Apple Developer account is pending approval. CrossOver's Wine loader carries it.
+¹ Measured on the engine of MacRunner 1.0.2. The table is the September 29 snapshot, primarily engine 0015.
+² Fixed since MacRunner 1.0.5 (September 30): `FEX_HOSTFEATURES=enablecrypto` exposes SSE4.2, AES,
+PCLMULQDQ and SHA; the old table records the earlier build. ³ As of October 2, our Developer ID
+provisioning profile carries Apple's cross-architecture-support entitlement, and a native probe succeeds. Hardware TSO
+integration is in progress; speed has not been measured. The table used software ordering.
 
 **Where HyperBridge is ahead.** `rep movsb` copies 14 times faster than in CrossOver's FEX and 28 times faster
 than in Prism. x87 arithmetic runs 7 times faster than in CrossOver's FEX. Float → integer conversions are
@@ -50,17 +52,69 @@ it spends slightly less CPU time per frame than CrossOver's FEX.
 
 **Where it is behind.** Hollow Knight starts much slower: Unity's assembly loading takes 2.2 s against 0.41 s
 under CrossOver's FEX, and about four fifths of that gap is FEX's software memory ordering, which CrossOver can
-replace with Apple's hardware mode (HyperBridge needs an Apple entitlement for that). In gameplay, HyperBridge
+replace with Apple's hardware mode (HyperBridge had no enabled hardware path in that measured build). In gameplay, HyperBridge
 needs 2.2 times the native CPU time per frame and has more frame-time spikes. Prism needs 31–48 % less time per
 call and return and 16 times less per x87 `fadd`, and matches x86 floating-point results more often.
 CrossOver's FEX divides faster (engine 0019 closes most of the gap for `cqo; idiv` behind a switch) and reports
-the Arm cryptography instructions to programs.
+the Arm cryptography instructions to programs. These comparisons describe the September 29 builds;
+they do not measure MacRunner 1.0.6 or the hardware-TSO work.
 
 [Full results, conditions and limits →](COMPARISON.md)
 
 ## Status
 
 Experimental. The measurements below are from one machine (Apple M1 Pro, macOS 27).
+
+**Updated October 2, 2026.** The ordinary MacRunner development preview is **1.0.6**, released October 1,
+with the FEX recipe 0001–0026. Since 1.0.3: 1.0.4 fixes Wine's server shared-memory mapping;
+1.0.5 exposes crypto CPU features and fixes L3 reporting and unaligned shared-section loading;
+1.0.6 enables x18 ABI trust, corrected DIV/IDIV exceptions and pre-exception EFLAGS restoration,
+and adds an OpenGL profile for Hedon. The packaged x64 division probe matches all 88 Windows-on-ARM
+reference cases. Floating-point and alias/W^X failures remain; this is not full x86 equivalence.
+
+The Apple Developer account was approved on October 1. Our Wine loader is Developer ID-signed,
+and Apple accepted a trial notarization on October 2. These changes are being prepared for the next
+release; **released 1.0.6 remains signed ad hoc and not notarized**. Heroes III reached its main menu
+on the signed loader on October 1, with a rare post-menu crash still open: **unreleased 32-bit
+development**, not a compatibility claim for 1.0.6. Hardware TSO entitlement probes pass; integration
+continues, without a speed claim.
+
+A separate **1.0.6-indiana** experimental preview, released October 1, adds the GOG version of
+Indiana Jones and the Great Circle through MoltenVK. Its notes report about 10–12 FPS at minimum
+settings on M1 Pro, rendering issues and a GPU hang/session restart when firing a weapon.
+**Ray tracing is experimental, not released.** [Release details and dated game checks →](https://github.com/t0b1kent/macrunner-app/blob/main/RELEASE_STATUS.md)
+
+## How we test
+
+As of October 2, three stands check bounded recorded inputs without starting games:
+
+- **CPU, stages 4–6 (October 1–2):** 540,861 states from five titles. Stage 4 checked 499,487,
+  found nine differing pairs and detected all six code-generation mutations. Stage 5 checked
+  500,595 with six known engine mismatches and zero new ones after correcting two VEX reference
+  gaps. Stage 6 adds independent MXCSR status rules, checked against 7,168 hardware-reference
+  pairs / 14,336 executions with zero errors. The accepted-engine run has 651 known states
+  (650 in the missing-status-flags class), zero new ones and matching full-repeat results.
+  Block coverage is 59.9–96.9% by title, not full execution coverage. No EC/native ABI,
+  SMC/aliases, cache lifetime, x87, unmasked #XM, flag writes to memory or FPS validation;
+  19 reference gaps and 602 mapping failures remain. Recorded upper YMM halves are all zero.
+- **32-bit, stage 1 (October 1):** 616 states from four titles, replayed at zero and a shifted
+  8 TiB base; 296/296 PE probes equal at each base. Unicorn32 plus independent integer x87
+  rules check 80-bit state and memory. Five mutations and six guards detected; the stand found
+  pop-tag (22), sticky-invalid (4) and saved-tag (32) cases. Empty-slot bytes remain disputed.
+  Coverage is small (105–194 blocks per title); this is not Wine startup, ABI, GPU or gameplay
+  validation. The first-stage gate returns failure for known defects; a wall-clock timeout is retained.
+- **Graphics (October 2):** native DXMT trace replay without Wine, 300 Hollow Knight / 191 Divinity /
+  248 ABZU frames, three repeats per series. Two full series after the macOS 27.0.1 update gave
+  4,434 exact comparisons against 27.0 truth; ten identity and six negative controls behaved as
+  expected. One earlier Divinity frame differed in four RGB samples by ±1 (0.00027%); six later
+  repeats did not reproduce it, and the cause is open. This checks selected D3D11 frames, not
+  whole-game FPS, DirectX 12, Vulkan or ray tracing.
+
+Known defects and reference gaps remain explicit; PASS means no new unclassified difference within
+the checked scope. Our MIT CPU and 32-bit stand sources are in [`stands/`](stands/) in this
+repository. The graphics recorder/player changes are a DXMT modification under LGPL-2.1-or-later; their
+publication in [the DXMT fork](https://github.com/t0b1kent/dxmt) is being prepared. No game data or binaries are included.
+[More results and limits →](https://github.com/t0b1kent/macrunner-app/blob/main/RELEASE_STATUS.md#how-we-test)
 
 FEX-based engine (28 Sep 2026): Hollow Knight (Unity/Mono, x86-64) runs gameplay from a saved
 game at 113–119 FPS in seven runs, close to the 120 Hz display limit. The main menu appears
@@ -125,7 +179,7 @@ with MacRunner's ntdll changes, which is not part of this repository.
 
 ## License
 
-The original HyperBridge code is released under the [MIT License](LICENSE),
+The original HyperBridge code is released under the [MIT License](LICENSE).
 Copyright (c) 2026 Timur Ravilov.
 
 Third-party components keep their own licenses and notices:
