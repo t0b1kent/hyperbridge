@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+# External dependencies, installed rather than redistributed.
+unicorn==2.1.4
+capstone==5.0.7

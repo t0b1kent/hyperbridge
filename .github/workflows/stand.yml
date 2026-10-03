@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: synthetic-stand
+
+on:
+  push:
+    paths: ['fex/**', 'stands/synthetic/**', '.github/workflows/stand.yml']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: synthetic-stand-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stand:
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      LC_ALL: C
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify ARM64 and install build dependencies
+        run: |
+          test "$(uname -m)" = arm64
+          brew install cmake ninja ccache
+          python3 -m venv build/stand-venv
+          build/stand-venv/bin/python -m pip install -r stands/synthetic/requirements.txt
+      - name: Pinned llvm-mingw
+        run: python3 stands/synthetic/download_toolchain.py
+      - name: Build the published FEX patch series
+        run: |
+          export LLVM_MINGW="$PWD/build/llvm-mingw-20260505-ucrt-macos-universal"
+          nice -n 20 bash fex/build.sh build/stand-fex
+      - name: Build native FEXCore runner
+        run: nice -n 20 python3 stands/synthetic/build.py
+      - name: Two deterministic runs and negative control
+        run: |
+          nice -n 20 build/stand-venv/bin/python stands/synthetic/verify.py --runner build/stand-native/cmake/Bin/stand_runner --out build/stand-reports
+      - name: Keep reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-stand-report
+          path: build/stand-reports/
+          if-no-files-found: warn

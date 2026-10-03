@@ -110,6 +110,10 @@ As of October 2, three stands check bounded recorded inputs without starting gam
   repeats did not reproduce it, and the cause is open. This checks selected D3D11 frames, not
   whole-game FPS, DirectX 12, Vulkan or ray tracing.
 
+- **Synthetic CPU stand in CI (October 3):** 408 generated x86-64 cells, built from the published
+  `fex/patches` on GitHub's Apple silicon runners and compared with Unicorn on every change to the patch series
+  ([stands/synthetic](stands/synthetic/README.md)); two byte-identical runs and a negative control are required.
+
 Known defects and reference gaps remain explicit; PASS means no new unclassified difference within
 the checked scope. Our MIT CPU and 32-bit stand sources are in [`stands/`](stands/) in this
 repository. The graphics recorder/player changes are a DXMT modification under LGPL-2.1-or-later and are
