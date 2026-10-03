@@ -2,10 +2,16 @@ name: ci
 
 # Builds the HyperBridge library and runs its unit tests on GitHub's Apple silicon runners,
 # and checks that the published FEX patch series still applies to the pinned upstream commit.
+# Runs on every push to main and on pull requests (documentation-only changes skip it), and by hand.
 # The optional FEX build (manual start only) rebuilds the engine with the toolchain named in
 # fex/MANIFEST.json and prints the SHA-256 of every output for comparison with the manifest.
 
 on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
     inputs:
       fex_build:
