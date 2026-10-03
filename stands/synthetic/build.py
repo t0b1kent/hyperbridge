@@ -50,7 +50,7 @@ def main():
             text = text.replace('#ifndef _WIN32',
                                 '#if !defined(_WIN32) && !defined(HB_REPLAY_WIN_TABLES)')
             path.write_text(text)
-    command = ['cmake', '-S', 'stand', '-B', str(build / 'cmake'), '-G', 'Ninja',
+    command = ['cmake', '-S', 'stands/synthetic', '-B', str(build / 'cmake'), '-G', 'Ninja',
                '-DFEXSRC=' + str(native), '-DCMAKE_BUILD_TYPE=Release',
                '-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0']
     if shutil.which('ccache'):
