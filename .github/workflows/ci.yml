@@ -1,0 +1,87 @@
+name: ci
+
+# Builds the HyperBridge library and runs its unit tests on GitHub's Apple silicon runners,
+# and checks that the published FEX patch series still applies to the pinned upstream commit.
+# The optional FEX build (manual start only) rebuilds the engine with the toolchain named in
+# fex/MANIFEST.json and prints the SHA-256 of every output for comparison with the manifest.
+
+on:
+  workflow_dispatch:
+    inputs:
+      fex_build:
+        description: "Also build FEX from fex/patches (slow)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lib:
+    name: library and unit tests (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Machine
+        run: |
+          sysctl -n machdep.cpu.brand_string
+          sw_vers -productVersion
+          clang --version | head -1
+      - name: Build
+        run: make -j"$(sysctl -n hw.ncpu)" all
+      - name: Unit tests
+        run: make test 2>&1 | tee test.log
+      - name: Keep the test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ matrix.runner }}
+          path: test.log
+          if-no-files-found: ignore
+
+  fex-patches:
+    name: FEX patch series applies to the pinned upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply every patch in order
+        run: |
+          base=$(python3 -c 'import json;print(json.load(open("fex/MANIFEST.json"))["upstream"]["commit"])')
+          git clone -q --no-checkout https://github.com/FEX-Emu/FEX.git fex-src
+          git -C fex-src checkout -q --detach "$base"
+          n=0
+          for p in fex/patches/*.patch; do
+            git -C fex-src apply --check "../$p" || { echo "DOES NOT APPLY: $p"; exit 1; }
+            git -C fex-src apply "../$p"
+            n=$((n + 1))
+          done
+          echo "applied $n patches on $base"
+
+  fex-build:
+    name: FEX build from the patch series
+    if: ${{ inputs.fex_build }}
+    needs: fex-patches
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: llvm-mingw toolchain
+        run: |
+          v=20260505
+          curl -fsSL -o llvm-mingw.tar.xz "https://github.com/mstorsjo/llvm-mingw/releases/download/$v/llvm-mingw-$v-ucrt-macos-universal.tar.xz"
+          tar -xf llvm-mingw.tar.xz
+          echo "LLVM_MINGW=$PWD/llvm-mingw-$v-ucrt-macos-universal" >> "$GITHUB_ENV"
+      - name: Build
+        run: bash fex/build.sh "$RUNNER_TEMP/fex-work"
+      - name: Output hashes
+        run: cat "$RUNNER_TEMP/fex-work/out/SHA256SUMS"
