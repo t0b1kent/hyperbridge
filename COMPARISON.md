@@ -6,11 +6,48 @@ This page compares HyperBridge, the x86 → ARM64 engine of [MacRunner](https://
 
 **Test Mac:** MacBook Pro, Apple M1 Pro (8-core CPU), 32 GB, macOS 27.0 (26A428). **Date:** September 29, 2026.
 
-**Status note, October 2:** all measurement numbers below remain the September 29 snapshot, primarily
-engine 0015; the floating-point column is explicitly the 1.0.2 engine. No new comparison was run.
-MacRunner 1.0.6 (October 1) uses patches 0001–0026. CPU-feature reporting was fixed in 1.0.5;
-DIV/IDIV exception correction and EFLAGS restoration are enabled in 1.0.6. The Apple entitlement
-probe now passes, but hardware-TSO integration is still in development and speed has not been measured.
+**Status note, October 3:** the loop table in the next section is new (October 3, the engine of the published MacRunner
+1.0.7). Everything below it is the September 29 snapshot, primarily engine 0015; the floating-point column there is the
+1.0.2 engine. Hardware TSO is ready for 1.0.8: 25–26 % less CPU time per frame in Hollow Knight's menu (alternating
+series, control spread 0.6 %), about 20 % less in ABZU (one series); Hollow Knight start-up and King's Pass have not been
+re-measured with it yet.
+
+## October 3, 2026: instruction loops on MacRunner 1.0.7
+
+Same Mac; one session, 10:13–10:18 local time; nine alternating runs in the order Prism, HyperBridge, CrossOver,
+CrossOver, HyperBridge, Prism, Prism, HyperBridge, CrossOver; the same `xbench.exe` (SHA-256 `cc743db6…`) everywhere.
+HyperBridge is the engine shipped in MacRunner 1.0.7 (`xtajit64.dll` `ac3735d6…`), under its own Wine. Prism is
+Windows 11 on Arm build 26200 in Parallels Desktop. CrossOver Preview 20260821 (`xtajit64.dll` `fc0f0a37…`), arm64
+bottle. Values are the median of three runs, in ns per iteration; the spread is (max − min) / median.
+
+| Loop | Prism | spread | HyperBridge 1.0.7 | spread | CrossOver | spread |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| empty loop (`dec`/`jnz`) | 0.739 | 5 % | 0.693 | 5 % | **0.688** | 3 % |
+| `add` | 0.737 | 7 % | 0.684 | 5 % | **0.679** | 2 % |
+| `imul` | **0.959** | 12 % | 0.981 | 4 % | 0.976 | 4 % |
+| `cvttss2si` | 1.023 | 22 % | **0.674** | 5 % | 0.725 | 2 % |
+| `cvtss2si` | 1.031 | 24 % | 0.757 | 5 % | **0.726** | 3 % |
+| `cvttsd2si` (64-bit) | 1.021 | 20 % | **0.671** | 13 % | 0.725 | 3 % |
+| `cvttps2dq` | 0.750 | 7 % | **0.680** | 3 % | 0.685 | 3 % |
+| `cvtdq2ps` | 0.967 | 11 % | **0.938** | 6 % | 0.961 | 3 % |
+| `addsubps` | 2.260 | 6 % | **0.952** | 4 % | 0.963 | 3 % |
+| `addss` (dependent chain) | 1.613 | 10 % | **1.584** | 3 % | 1.601 | 3 % |
+| `mulps` | 1.293 | 10 % | **1.266** | 4 % | 1.280 | 4 % |
+| `pshufb` | 0.759 | 15 % | 0.688 | 3 % | **0.686** | 2 % |
+| `xor edx,edx` + `div ecx` | 1.056 | 16 % | 2.077 | 4 % | **0.878** | 1 % |
+| `cqo` + `idiv rcx` | 1.882 | 7 % | 3.011 | 8 % | **0.716** | 3 % |
+| `crc32` | 0.941 | 13 % | **0.939** | 9 % | 0.960 | 3 % |
+| `popcnt` | 1.002 | 11 % | **0.789** | 92 % | 0.810 | 8 % |
+| `lock xadd` | **7.038** | 12 % | 7.132 | 76 % | 7.255 | 9 % |
+| `call` / `ret` | **1.455** | 66 % | 1.909 | 69 % | 1.929 | 8 % |
+| `call r11` (indirect) | **1.478** | 24 % | 2.235 | 97 % | 2.247 | 2 % |
+| `rep movsb`, 4 KB copy | 1 572 | 18 % | **51.3** | 96 % | 855 | 3 % |
+| x87 `fadd` | **0.940** | 28 % | 15.94 | 22 % | 111.4 | 3 % |
+
+The large HyperBridge spreads in five rows come from one of its three runs, disturbed by background load (one-minute load
+average 2.5–6 during the session); with three runs the median is not affected. Compared with the September 29 table,
+HyperBridge is unchanged within noise except for division, which is slower (`div` 2.08 against 1.01 ns, `idiv` 3.01 against
+0.97 ns); the prime suspect is the exact overflow check added in 1.0.6, and this is being investigated.
 
 | Environment | What it is | Version measured |
 | --- | --- | --- |

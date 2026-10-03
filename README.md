@@ -18,46 +18,47 @@ Since 28 September 2026, HyperBridge has two parts:
 
 ## How HyperBridge compares
 
-The same programs on one Mac (Apple M1 Pro, macOS 27), 29 September 2026: HyperBridge engine 0015 under
-MacRunner's Wine, **Microsoft Prism** (Windows 11 on Arm in a Parallels Desktop virtual machine), the **FEX build
-in CrossOver Preview**, and the **native macOS build** of a game. Loop times are nanoseconds per iteration, the
-median of three alternating runs of [`xbench`](bench/xbench/); lower is better, the best value is in bold.
+The same programs on one Mac (Apple M1 Pro, macOS 27). Loop rows: **3 October 2026**, the engine of the published
+[MacRunner 1.0.7](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.7), **Microsoft Prism** (Windows 11 on Arm
+in a Parallels Desktop virtual machine) and the **FEX build in CrossOver Preview**, measured in one session. Loop times
+are nanoseconds per iteration, the median of three alternating runs of [`xbench`](bench/xbench/) (the same binary in all
+three); lower is better, the best value is in bold. Hollow Knight rows are still the September 29 measurement.
 
-| | HyperBridge 0015 | Microsoft Prism | CrossOver Preview (FEX) | Native macOS |
+| | HyperBridge (MacRunner 1.0.7) | Microsoft Prism | CrossOver Preview (FEX) | Native macOS |
 | --- | ---: | ---: | ---: | ---: |
-| `rep movsb`, 4 KB copy | **61** | 1 689 | 868 | — |
-| x87 `fadd` | 16.3 | **1.00** | 114 | — |
-| `cvttss2si` / `cvttsd2si` (float → integer) | **0.66 / 0.69** | 1.07 / 1.08 | 0.74 / 0.74 | — |
-| `addsubps` | **0.97** | 2.40 | 0.99 | — |
-| 10 other integer and SSE loops | same as CrossOver | 3–41 % slower | same as HyperBridge | — |
-| `div r32` / `idiv r64` | 1.01 / 0.97 | 1.06 / 1.97 | **0.89 / 0.73** | — |
-| `call`+`ret` / indirect `call` | 1.99 / 2.34 | **1.52 / 1.58** | 1.98 / 2.29 | — |
-| SSE results matching x86 hardware (of 74) | 12 ¹ | **38** | 16 | — |
-| SSE4.2, AES, PCLMULQDQ reported in `CPUID` | no ² | yes | yes | — |
-| Hardware x86 memory ordering (TSO) | no ³ | not examined | yes | not needed |
-| Hollow Knight start-up: Unity's own `Loaded All Assemblies` time | 2.22 s | 0.26 s | 0.41 s | **0.17 s** |
-| Hollow Knight in King's Pass: FPS · CPU time per frame | 113–117 · 14.9–15.0 ms | not comparable (virtual GPU) | 113–119 · 15.4–16.1 ms | **120 · 6.4–6.8 ms** |
+| `rep movsb`, 4 KB copy | **51** | 1 572 | 855 | — |
+| x87 `fadd` | 15.9 | **0.94** | 111 | — |
+| `cvttss2si` / `cvttsd2si` (float → integer) | **0.67 / 0.67** | 1.02 / 1.02 | 0.72 / 0.72 | — |
+| `addsubps` | **0.95** | 2.26 | 0.96 | — |
+| 12 other integer and SSE loops | same as CrossOver (within 4 %) | 2 % faster to 36 % slower | same as HyperBridge | — |
+| `div r32` / `idiv r64` | 2.08 / 3.01 ¹ | 1.06 / 1.88 | **0.88 / 0.72** | — |
+| `call`+`ret` / indirect `call` | 1.91 / 2.23 | **1.46 / 1.48** | 1.93 / 2.25 | — |
+| SSE results matching x86 hardware (of 74) | 12 ² | **38** | 16 | — |
+| SSE4.2, AES, PCLMULQDQ reported in `CPUID` | yes (since 1.0.5) | yes | yes | — |
+| Hardware x86 memory ordering (TSO) | ready, planned on by default in 1.0.8 ³ | not examined | yes | not needed |
+| Hollow Knight start-up: Unity's own `Loaded All Assemblies` time | 2.22 s ⁴ | 0.26 s | 0.41 s | **0.17 s** |
+| Hollow Knight in King's Pass: FPS · CPU time per frame | 113–117 · 14.9–15.0 ms ⁴ | not comparable (virtual GPU) | 113–119 · 15.4–16.1 ms | **120 · 6.4–6.8 ms** |
 
-¹ Measured on the engine of MacRunner 1.0.2. The table is the September 29 snapshot, primarily engine 0015.
-² Fixed since MacRunner 1.0.5 (September 30): `FEX_HOSTFEATURES=enablecrypto` exposes SSE4.2, AES,
-PCLMULQDQ and SHA; the old table records the earlier build. ³ As of October 2, our Developer ID
-provisioning profile carries Apple's cross-architecture-support entitlement, and a native probe succeeds. Hardware TSO
-integration is in progress; speed has not been measured. The table used software ordering.
+¹ Slower than in the September 29 build (1.01 / 0.97). The prime suspect is the exact overflow check added in 1.0.6,
+so that a division overflow raises the same exception as on Windows; this is being investigated.
+² Measured on the engine of MacRunner 1.0.2; not re-measured for 1.0.7. A switchable exact mode exists; it stays off by
+default because it costs about 3 ns per SSE instruction.
+³ Measured on MacRunner 1.0.7 with hardware TSO switched on: Hollow Knight's main menu needs 25–26 % less CPU time per
+frame (alternating series, control spread 0.6 %), ABZU about 20 % less (one series). `MACRUNNER_FEX_HW_TSO=0` turns it off.
+⁴ September 29, engine 0015, software memory ordering. Re-measurement on 1.0.7 with hardware TSO is scheduled.
 
-**Where HyperBridge is ahead.** `rep movsb` copies 14 times faster than in CrossOver's FEX and 28 times faster
-than in Prism. x87 arithmetic runs 7 times faster than in CrossOver's FEX. Float → integer conversions are
-7–11 % faster than in CrossOver's FEX. On the 13 simple integer and SSE loops, HyperBridge is as fast as
-CrossOver's FEX or faster, and faster than Prism on all 13, by 3 % up to 2.5 times. In Hollow Knight's gameplay
-it spends slightly less CPU time per frame than CrossOver's FEX.
+**Where HyperBridge is ahead.** `rep movsb` copies 17 times faster than in CrossOver's FEX and 31 times faster than in
+Prism. x87 arithmetic runs 7 times faster than in CrossOver's FEX. Float → integer conversions are 7 % faster than in
+CrossOver's FEX and 1.5 times faster than in Prism; `addsubps` is 2.4 times faster than in Prism. On the 12 other simple
+loops HyperBridge matches CrossOver's FEX within 4 % and is faster than Prism on 9 of them, by up to 36 %.
 
-**Where it is behind.** Hollow Knight starts much slower: Unity's assembly loading takes 2.2 s against 0.41 s
-under CrossOver's FEX, and about four fifths of that gap is FEX's software memory ordering, which CrossOver can
-replace with Apple's hardware mode (HyperBridge had no enabled hardware path in that measured build). In gameplay, HyperBridge
-needs 2.2 times the native CPU time per frame and has more frame-time spikes. Prism needs 31–48 % less time per
-call and return and 16 times less per x87 `fadd`, and matches x86 floating-point results more often.
-CrossOver's FEX divides faster (engine 0019 closes most of the gap for `cqo; idiv` behind a switch) and reports
-the Arm cryptography instructions to programs. These comparisons describe the September 29 builds;
-they do not measure MacRunner 1.0.6 or the hardware-TSO work.
+**Where it is behind.** Prism needs 17 times less time per x87 `fadd`, 24 % less per call and return and 34 % less per
+indirect call, and matches x86 floating-point results more often. CrossOver's FEX divides 2.4 times (`div r32`) and
+4.2 times (`idiv r64`) faster. In the September 29 measurement Hollow Knight started much slower (2.2 s against 0.41 s);
+most of that gap was software memory ordering, which the hardware TSO mode now replaces.
+
+In five loop rows one of the three HyperBridge runs was disturbed by background load (spread 68–97 %); the medians above
+are not affected. Per-run values and spreads are in the full results.
 
 [Full results, conditions and limits →](COMPARISON.md)
 
@@ -65,19 +66,17 @@ they do not measure MacRunner 1.0.6 or the hardware-TSO work.
 
 Experimental. The measurements below are from one machine (Apple M1 Pro, macOS 27).
 
-**Updated October 2, 2026.** The ordinary MacRunner development preview is **1.0.6**, released October 1,
-with the FEX recipe 0001–0026. Since 1.0.3: 1.0.4 fixes Wine's server shared-memory mapping;
-1.0.5 exposes crypto CPU features and fixes L3 reporting and unaligned shared-section loading;
-1.0.6 enables x18 ABI trust, corrected DIV/IDIV exceptions and pre-exception EFLAGS restoration,
-and adds an OpenGL profile for Hedon. The packaged x64 division probe matches all 88 Windows-on-ARM
-reference cases. Floating-point and alias/W^X failures remain; this is not full x86 equivalence.
+**Updated October 3, 2026.** The current MacRunner development preview is
+**[1.0.7](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.7)**, released October 3: the first release signed
+with a Developer ID and notarized by Apple. 32-bit Windows programs start (experimental): one Wine runtime and one signed
+loader serve both 64-bit and 32-bit programs, and Heroes of Might and Magic III reaches its main menu (without sound, with
+a shifted picture). .NET 6 games can start: Stardew Valley reaches its main menu. 16-bit `SHLD`/`SHRD` now set the carry
+flag as hardware does. Floating-point and alias/W^X failures remain; this is not full x86 equivalence.
 
-The Apple Developer account was approved on October 1. Our Wine loader is Developer ID-signed,
-and Apple accepted a trial notarization on October 2. These changes are being prepared for the next
-release; **released 1.0.6 remains signed ad hoc and not notarized**. Heroes III reached its main menu
-on the signed loader on October 1, with a rare post-menu crash still open: **unreleased 32-bit
-development**, not a compatibility claim for 1.0.6. Hardware TSO entitlement probes pass; integration
-continues, without a speed claim.
+Ready for the next release: **hardware x86 memory ordering (TSO)**, measured at 25–26 % less CPU time per frame in
+Hollow Knight's menu and about 20 % less in ABZU, with Hollow Knight, Stardew Valley, ABZU, Divinity: Original Sin and
+Heroes III reaching their menus on it; and a fix for 256-bit AVX register halves lost when translated code is restarted
+after a self-modification check (it broke a .NET runtime check and a plain `memcpy`).
 
 A separate **1.0.6-indiana** experimental preview, released October 1, adds the GOG version of
 Indiana Jones and the Great Circle through MoltenVK. Its notes report about 10–12 FPS at minimum
