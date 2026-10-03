@@ -1,0 +1,201 @@
+From f87d60bb9b1c91face31d6db9cba4d8129e36af4 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 23:12:28 +1000
+Subject: [PATCH 42/46] EXPERIMENT: import gated PE32 x87 FIP/CS metadata from
+ GUEST32-BASE
+
+Origin: curator handoff FEX-DIRTY.diff SHA386457d86cf32d34e492fc3906b8e8e1c91d79aaf9f69d4714de91086e63f993, source HEAD0bd1d0ce8e6d68069e5d1beaff0a688e6cda300c. Existing F03 consuming-pop and F06 full-tag mechanisms agree with this handoff; imported the missing metadata path, under a separate default-OFF gate.
+
+Family: protected-mode PE32 x87 last-instruction metadata.
+Members: computational D8..DF, FNSTENV/FNSAVE16/32, FLDENV/FRSTOR16/32, FNINIT. Control operations preserve the computational FIP; init clears the ABI reserve. More than 30 computational instructions share central tracking; semantics remain separate from metadata.
+Coverage: existing 8-byte CPUState reserve aliases IP/CS without changing size or following offsets (static assertions). Every metadata read/write and tracking operation requires MACRUNNER_HB_X87_FIX_FIP_CS32=1.
+Not applicable to this batch: PE64 tracking, FOP/FDP/DS and FXSAVE metadata remain separate unimplemented work; no success claim for these fields.
+Regression: own native shifted corpus45, all four fixes ON gives EQUAL43 plus two unchanged native CALL-address adapter faults; the nine directed F03 FNSTENV witnesses now strict EQUAL, pop control has KNOWN9. Sticky-IE control KNOWN2, tag control KNOWN16. Curator zero-restore siblings52/52 strict EQUAL. Original two-base game replay and Wine acceptance NOT_ENABLED pending low32 signing. Micro-cost manifest queued in timing FIFO, price NOT_MEASURED.
+Audit completed: yes for imported metadata batch; product acceptance incomplete, no GOAL claim.
+---
+ FEXCore/Source/Interface/Core/Core.cpp        |  3 ++
+ .../Source/Interface/Core/HBX87StateGates.h   |  4 ++
+ .../Source/Interface/Core/OpcodeDispatcher.h  |  2 +
+ .../Interface/Core/OpcodeDispatcher/X87.cpp   | 52 +++++++++++++++++--
+ FEXCore/include/FEXCore/Core/CoreState.h      | 12 ++++-
+ 5 files changed, 68 insertions(+), 5 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index d331d791d..1491698fb 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -1101,6 +1101,9 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+           }
+ 
+           Thread->OpDispatcher->SetForceTSO(ForceTSO);
++          if (GPRSize == IR::OpSize::i32Bit && DecodedInfo->OPRaw >= 0xD8 && DecodedInfo->OPRaw <= 0xDF) {
++            Thread->OpDispatcher->TrackX87Instruction32(DecodedInfo);
++          }
+           std::invoke(Fn, Thread->OpDispatcher, DecodedInfo);
+           if (Thread->OpDispatcher->HadDecodeFailure()) {
+             HadDispatchError = true;
+diff --git a/FEXCore/Source/Interface/Core/HBX87StateGates.h b/FEXCore/Source/Interface/Core/HBX87StateGates.h
+index ee7669375..2634a2df3 100644
+--- a/FEXCore/Source/Interface/Core/HBX87StateGates.h
++++ b/FEXCore/Source/Interface/Core/HBX87StateGates.h
+@@ -20,4 +20,8 @@ inline bool EnvTags() {
+   static const bool Enabled = ReadGate("MACRUNNER_HB_X87_FIX_ENV_TAGS");
+   return Enabled;
+ }
++inline bool InstructionPointers32() {
++  static const bool Enabled = ReadGate("MACRUNNER_HB_X87_FIX_FIP_CS32");
++  return Enabled;
++}
+ }
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index 9a4b7d038..45df2aa28 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -349,6 +349,8 @@ public:
+   // Dispatch builder functions
+ #define OpcodeArgs [[maybe_unused]] FEXCore::X86Tables::DecodedOp Op
+ 
++  void TrackX87Instruction32(OpcodeArgs);
++
+   /**
+    * Binds a sequence of compile-time constants as arguments to another member function.
+    * This allows to construct OpDispatchPtrs that are specialized for the given set of arguments.
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+index ccf451fc6..452b816ab 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+@@ -336,6 +336,27 @@ void OpDispatchBuilder::FSUB(OpcodeArgs, IR::OpSize Width, bool Integer, bool Re
+   }
+ }
+ 
++void OpDispatchBuilder::TrackX87Instruction32(OpcodeArgs) {
++  if (!FEXCore::HBX87::StateFix::InstructionPointers32()) {
++    return;
++  }
++  // Imported from GUEST32-BASE 386457d86cf32d34: control instructions
++  // preserve the last computational x87 instruction in protected mode.
++  const uint8_t Escape = Op->OPRaw;
++  const uint8_t ModRM = Op->ModRM;
++  const uint8_t Group = (ModRM >> 3) & 7;
++  if ((Escape == 0xD9 && ModRM < 0xC0 && Group >= 4) ||
++      (Escape == 0xDD && ModRM < 0xC0 && Group >= 4) ||
++      (Escape == 0xDB && ModRM >= 0xE0 && ModRM <= 0xE4) ||
++      (Escape == 0xDF && ModRM == 0xE0)) {
++    return;
++  }
++  _StoreContextGPR(OpSize::i32Bit, Constant(static_cast<uint32_t>(Op->PC)),
++                  offsetof(FEXCore::Core::CPUState, X87LastInstruction32.IP));
++  Ref CS = _LoadContextGPR(OpSize::i16Bit, offsetof(FEXCore::Core::CPUState, cs_idx));
++  _StoreContextGPR(OpSize::i16Bit, CS, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.CS));
++}
++
+ Ref OpDispatchBuilder::GetX87FTW_Helper() {
+   if (FEXCore::HBX87::StateFix::EnvTags()) {
+     // MM slots and abridged FTW bits are PHYSICAL indices. Empty wins
+@@ -444,12 +465,16 @@ void OpDispatchBuilder::X87FNSTENV(OpcodeArgs) {
+ 
+   {
+     // Instruction Offset
+-    _StoreMemGPR(Size, ZeroConst, Mem, Constant(IR::OpSizeToSize(Size) * 3), Size, MemOffsetType::SXTX, 1);
++    Ref IP = GetGPROpSize() == OpSize::i32Bit && FEXCore::HBX87::StateFix::InstructionPointers32() ?
++      _LoadContextGPR(OpSize::i32Bit, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.IP)) : ZeroConst;
++    _StoreMemGPR(Size, IP, Mem, Constant(IR::OpSizeToSize(Size) * 3), Size, MemOffsetType::SXTX, 1);
+   }
+ 
+   {
+     // Instruction CS selector (+ Opcode)
+-    _StoreMemGPR(Size, ZeroConst, Mem, Constant(IR::OpSizeToSize(Size) * 4), Size, MemOffsetType::SXTX, 1);
++    Ref CS = GetGPROpSize() == OpSize::i32Bit && FEXCore::HBX87::StateFix::InstructionPointers32() ?
++      _LoadContextGPR(OpSize::i16Bit, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.CS)) : ZeroConst;
++    _StoreMemGPR(Size, CS, Mem, Constant(IR::OpSizeToSize(Size) * 4), Size, MemOffsetType::SXTX, 1);
+   }
+ 
+   {
+@@ -502,6 +527,12 @@ void OpDispatchBuilder::X87LDENV(OpcodeArgs) {
+     Ref MemLocation = Add(OpSize::i64Bit, Mem, IR::OpSizeToSize(Size) * 2);
+     SetX87FTW(_LoadMemGPR(Size, MemLocation, Size));
+   }
++  if (GetGPROpSize() == OpSize::i32Bit && FEXCore::HBX87::StateFix::InstructionPointers32()) {
++    Ref IP = _LoadMemGPR(Size, Mem, Constant(IR::OpSizeToSize(Size) * 3), Size, MemOffsetType::SXTX, 1);
++    Ref CS = _LoadMemGPR(OpSize::i16Bit, Mem, Constant(IR::OpSizeToSize(Size) * 4), OpSize::i16Bit, MemOffsetType::SXTX, 1);
++    _StoreContextGPR(OpSize::i32Bit, IP, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.IP));
++    _StoreContextGPR(OpSize::i16Bit, CS, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.CS));
++  }
+ }
+ 
+ void OpDispatchBuilder::X87FNSAVE(OpcodeArgs) {
+@@ -544,12 +575,16 @@ void OpDispatchBuilder::X87FNSAVE(OpcodeArgs) {
+ 
+   {
+     // Instruction Offset
+-    _StoreMemGPR(Size, ZeroConst, Mem, Constant(IR::OpSizeToSize(Size) * 3), Size, MemOffsetType::SXTX, 1);
++    Ref IP = GetGPROpSize() == OpSize::i32Bit && FEXCore::HBX87::StateFix::InstructionPointers32() ?
++      _LoadContextGPR(OpSize::i32Bit, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.IP)) : ZeroConst;
++    _StoreMemGPR(Size, IP, Mem, Constant(IR::OpSizeToSize(Size) * 3), Size, MemOffsetType::SXTX, 1);
+   }
+ 
+   {
+     // Instruction CS selector (+ Opcode)
+-    _StoreMemGPR(Size, ZeroConst, Mem, Constant(IR::OpSizeToSize(Size) * 4), Size, MemOffsetType::SXTX, 1);
++    Ref CS = GetGPROpSize() == OpSize::i32Bit && FEXCore::HBX87::StateFix::InstructionPointers32() ?
++      _LoadContextGPR(OpSize::i16Bit, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.CS)) : ZeroConst;
++    _StoreMemGPR(Size, CS, Mem, Constant(IR::OpSizeToSize(Size) * 4), Size, MemOffsetType::SXTX, 1);
+   }
+ 
+   {
+@@ -613,6 +648,12 @@ void OpDispatchBuilder::X87FRSTOR(OpcodeArgs) {
+     // FTW
+     SetX87FTW(_LoadMemGPR(Size, Mem, Constant(IR::OpSizeToSize(Size) * 2), Size, MemOffsetType::SXTX, 1));
+   }
++  if (GetGPROpSize() == OpSize::i32Bit && FEXCore::HBX87::StateFix::InstructionPointers32()) {
++    Ref IP = _LoadMemGPR(Size, Mem, Constant(IR::OpSizeToSize(Size) * 3), Size, MemOffsetType::SXTX, 1);
++    Ref CS = _LoadMemGPR(OpSize::i16Bit, Mem, Constant(IR::OpSizeToSize(Size) * 4), OpSize::i16Bit, MemOffsetType::SXTX, 1);
++    _StoreContextGPR(OpSize::i32Bit, IP, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.IP));
++    _StoreContextGPR(OpSize::i16Bit, CS, offsetof(FEXCore::Core::CPUState, X87LastInstruction32.CS));
++  }
+ 
+   auto SevenConst = Constant(7);
+   auto low = Constant(~0ULL);
+@@ -831,6 +872,9 @@ void OpDispatchBuilder::FNCLEX(OpcodeArgs) {
+ 
+ void OpDispatchBuilder::FNINIT(OpcodeArgs) {
+   _SyncStackToSlow(); // Invalidate x87 register caches
++  if (GetGPROpSize() == OpSize::i32Bit && FEXCore::HBX87::StateFix::InstructionPointers32()) {
++    _StoreContextGPR(OpSize::i64Bit, Constant(0), offsetof(FEXCore::Core::CPUState, _pad1));
++  }
+ 
+   auto Zero = Constant(0);
+ 
+diff --git a/FEXCore/include/FEXCore/Core/CoreState.h b/FEXCore/include/FEXCore/Core/CoreState.h
+index 7c64dd83c..46208f005 100644
+--- a/FEXCore/include/FEXCore/Core/CoreState.h
++++ b/FEXCore/include/FEXCore/Core/CoreState.h
+@@ -107,7 +107,15 @@ struct alignas(64) CPUState {
+   uint64_t L1Pointer {};
+   uint64_t L1Mask {};
+   uint64_t callret_sp {};
+-  uint64_t _pad1 {};
++  union {
++    uint64_t _pad1 {};
++    // GUEST32-BASE handoff: reuse the existing reserve without changing ABI.
++    struct {
++      uint32_t IP;
++      uint16_t CS;
++      uint16_t Reserved;
++    } X87LastInstruction32;
++  };
+ 
+   // Cacheline: 1,2,3,4
+   // The high 128-bits of AVX registers when not being emulated by SVE256.
+@@ -259,6 +267,8 @@ static_assert(offsetof(CPUState, gregs[15]) <= 504, "gregs maximum offset must b
+ static_assert(offsetof(CPUState, DeferredSignalRefCount) % 8 == 0, "Needs to be 8-byte aligned");
+ static_assert(offsetof(CPUState, L1Pointer) <= 504, "This needs to be <= 504 for ldp");
+ static_assert(offsetof(CPUState, L1Mask) == (offsetof(CPUState, L1Pointer) + 8), "These two variables are paired");
++static_assert(offsetof(CPUState, X87LastInstruction32) == offsetof(CPUState, _pad1));
++static_assert(sizeof(CPUState::X87LastInstruction32) == sizeof(uint64_t));
+ static_assert(offsetof(CPUState, pf_raw) <= 252, "pf_raw must be within ldp imm offset range");
+ static_assert((offsetof(CPUState, pf_raw) + 4) == offsetof(CPUState, af_raw), "pf_raw and af_raw must be sequential");
+ 
+-- 
+2.54.0 (Apple Git-157)
+

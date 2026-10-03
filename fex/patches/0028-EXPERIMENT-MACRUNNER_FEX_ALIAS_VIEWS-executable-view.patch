@@ -1,0 +1,279 @@
+From 4b63958d241e25868446be1339c5921449061aa4 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 04:57:36 +1000
+Subject: [PATCH] EXPERIMENT: MACRUNNER_FEX_ALIAS_VIEWS - executable views of
+ non-image sections (lazy discovery + validate-only intervals)
+
+An executable view of an ordinary (non-image) section - the RX half of a W^X double mapping (.NET 7+, V8) - reaches none of the hooks
+that fill XIntervals: NotifyMemoryAlloc/NotifyMemoryProtect see only allocations and protection changes, HandleImageMap only images,
+and Wine's notify_map_view_of_section drops non-image sections. QueryExecutableRange answers "not executable" and the guest gets
+"page fault on execute access" in every validation mode. Even when the view is registered (VirtualProtect), it is not writable
+code for FEX, so a write through the RW view is never validated and runs stale code unless the guest flushes.
+
+MACRUNNER_FEX_ALIAS_VIEWS=1 (default 0 = previous code):
+- layer B: on a QueryExecutableRange miss ask NtQueryVirtualMemory; MEM_COMMIT + MEM_MAPPED + executable protection -> the run of pages
+  goes into XIntervals and the query is repeated once. No invalidation: the query runs from the decoder under the SHARED
+  CodeInvalidationMutex and InvalidateIntervalInternal takes it exclusively (self-deadlock). Safe because the miss is the first fetch.
+- layer C (MACRUNNER_FEX_ALIAS_VALIDATE=0 switches it off): such views are validate-only. AliasIntervals answers Writable = NoTrap =
+  true, pages are NOT protected (a write through another view is invisible to this view's protection). HandleMemoryProtectionNotification
+  marks them too (the VirtualProtect path), and every place that drops X/RWX intervals drops the alias intervals.
+Answers for neighbouring addresses of the same X interval stop in front of an alias interval, like in front of the next RWX interval,
+and an RWX answer starts at the queried address when an alias interval lies behind it inside the same RWX interval (the decoder caches
+the answer and reuses it for neighbouring instructions, so it must not cover addresses of another class; checked against a brute-force
+page model on 64720 random addresses, gate off == previous code on 4000 random layouts).
+
+Gate off: QueryExecutableRange returns exactly what it returned before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Source/Windows/Common/InvalidationTracker.cpp | 146 +++++++++++++++++-
+ Source/Windows/Common/InvalidationTracker.h   |  12 ++
+ 2 files changed, 155 insertions(+), 3 deletions(-)
+
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index b62159362..bdc6bc9b2 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -39,6 +39,34 @@ int MacRunnerProtKeepMode() {
+   return Mode;
+ }
+ 
++// ★ MacRunner (30.09.2026) — MACRUNNER_FEX_ALIAS_VIEWS: исполняемые виды НЕ-образных секций (двойное отображение W^X: один вид секции RW
++//   пишет код, другой RX его исполняет; .NET 7+, V8). Ни NotifyMemoryAlloc, ни NotifyMemoryProtect, ни HandleImageMap такой вид не
++//   приносят, и QueryExecutableRange отвечает «не исполняемо» -> «page fault on execute access» в любом режиме проверки.
++//   0 (по умолчанию) — как было. 1 — Б: ленивое открытие вида на промахе QueryExecutableRange (см. DiscoverExecutableView) и В: такие
++//   виды помечаются «только проверять» (AliasIntervals: Writable = NoTrap = true, страницы не защищаются).
++//   MACRUNNER_FEX_ALIAS_VALIDATE=0 внутри ALIAS_VIEWS=1 оставляет только Б (вид исполняется, но правка через другой вид ловится лишь по
++//   FlushInstructionCache) — для раздельной проверки слоёв.
++extern std::atomic<uint64_t> MacRunnerAliasFound, MacRunnerAliasMarked, MacRunnerAliasAnswered; // Core.cpp
++namespace {
++bool MRAliasViewsOn() {
++  static const bool On = [] {
++    const char* Value = getenv("MACRUNNER_FEX_ALIAS_VIEWS");
++    return Value && Value[0] == '1' && !Value[1];
++  }();
++  return On;
++}
++bool MRAliasValidateOn() {
++  static const bool On = [] {
++    if (!MRAliasViewsOn()) {
++      return false;
++    }
++    const char* Value = getenv("MACRUNNER_FEX_ALIAS_VALIDATE");
++    return !(Value && Value[0] == '0' && !Value[1]);
++  }();
++  return On;
++}
++} // namespace
++
+ namespace FEX::Windows {
+ InvalidationTracker::InvalidationTracker(FEXCore::Context::Context& CTX, const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads)
+   : CTX {CTX}
+@@ -80,6 +108,12 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
+   MacRunnerProtKeep::Plan Plan;
+   bool InvalidateAll = false;
+ 
++  // ★ MacRunner (30.09.2026, ALIAS_VIEWS, слой В): исполняемые виды секций в этом диапазоне. Спрашиваем ядро ДО IntervalsLock.
++  FEXCore::IntervalList<uint64_t> AliasFound;
++  if (MRAliasValidateOn() && ProtHasExec(Prot)) {
++    CollectMappedExecutableRegions(AlignedBase, AlignedSize, AliasFound);
++  }
++
+   const bool NeedsInvalidate = [&]() {
+     std::unique_lock Lock(IntervalsLock);
+ 
+@@ -100,6 +134,14 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
+       }
+ 
+       XIntervals.Insert(ProtInterval);
++      if (MRAliasValidateOn()) {
++        // Набор «только проверять» для этого диапазона — ровно его исполняемые виды секций.
++        AliasIntervals.Remove(ProtInterval);
++        if (!AliasFound.Empty()) {
++          AliasIntervals.Insert(AliasFound);
++          MacRunnerAliasMarked.fetch_add(1, std::memory_order_relaxed);
++        }
++      }
+       if (EffectiveRWX) {
+         LogMan::Msg::DFmt("Add SMC interval: {:X} - {:X}", AlignedBase, AlignedBase + AlignedSize);
+         RWXIntervals.Insert(ProtInterval);
+@@ -111,6 +153,9 @@ void InvalidationTracker::HandleMemoryProtectionNotification(uint64_t Address, u
+     } else if (XIntervals.Intersect(ProtInterval)) {
+       XIntervals.Remove(ProtInterval);
+       RWXIntervals.Remove(ProtInterval);
++      if (MRAliasValidateOn()) {
++        AliasIntervals.Remove(ProtInterval);
++      }
+       if (DEPDisabled) {
+         DEPPromotedIntervals.Remove(ProtInterval);
+       }
+@@ -253,6 +298,9 @@ InvalidationTracker::InvalidateContainingSectionResult InvalidationTracker::Inva
+     std::unique_lock Lock(IntervalsLock);
+     XIntervals.Remove({SectionBase, SectionBase + SectionSize});
+     RWXIntervals.Remove({SectionBase, SectionBase + SectionSize});
++    if (MRAliasValidateOn()) {
++      AliasIntervals.Remove({SectionBase, SectionBase + SectionSize});
++    }
+   }
+ 
+   return {SectionBase, SectionSize};
+@@ -273,6 +321,9 @@ void InvalidationTracker::InvalidateAlignedInterval(uint64_t Address, uint64_t S
+     std::unique_lock Lock(IntervalsLock);
+     XIntervals.Remove({AlignedBase, AlignedBase + AlignedSize});
+     RWXIntervals.Remove({AlignedBase, AlignedBase + AlignedSize});
++    if (MRAliasValidateOn()) {
++      AliasIntervals.Remove({AlignedBase, AlignedBase + AlignedSize});
++    }
+   }
+ }
+ 
+@@ -314,24 +365,113 @@ bool InvalidationTracker::BeginUntrackedWriteLocked(uint64_t Address, uint64_t S
+ }
+ 
+ FEXCore::HLE::ExecutableRangeInfo InvalidationTracker::QueryExecutableRange(uint64_t Address) {
++  auto Info = QueryExecutableRangeInternal(Address);
++  // ★ MacRunner (30.09.2026, ALIAS_VIEWS, слой Б): промах — единственное место, где виден исполняемый вид секции, не пришедший ни через
++  //   хук выделения, ни через смену прав, ни через образ. Запрос идёт ПОД разделяемой CodeInvalidationMutex компиляции.
++  if (!Info.Size && MRAliasViewsOn() && DiscoverExecutableView(Address)) {
++    Info = QueryExecutableRangeInternal(Address);
++  }
++  return Info;
++}
++
++FEXCore::HLE::ExecutableRangeInfo InvalidationTracker::QueryExecutableRangeInternal(uint64_t Address) {
+   std::shared_lock Lock(IntervalsLock);
+   const auto XResult = XIntervals.Query(Address);
+   if (!XResult.Enclosed) {
+     return {};
+   }
+   const auto RWXResult = RWXIntervals.Query(Address);
++  // ★ MacRunner (30.09.2026, ALIAS_VIEWS, слой В): вид секции «только проверять» — всегда записываемый и БЕЗ ловушки; ответы для соседних
++  //   адресов того же X-интервала обрываются перед его началом (как перед следующим RWX-интервалом).
++  uint64_t AliasAhead = std::numeric_limits<uint64_t>::max();
++  if (MRAliasValidateOn()) {
++    const auto AliasResult = AliasIntervals.Query(Address);
++    if (AliasResult.Enclosed) {
++      const uint64_t Begin = std::max(AliasResult.Interval.Offset, XResult.Interval.Offset);
++      const uint64_t End = std::min(AliasResult.Interval.End, XResult.Interval.End);
++      MacRunnerAliasAnswered.fetch_add(1, std::memory_order_relaxed);
++      return {Begin, End - Begin, true, true};
++    }
++    if (AliasResult.Size) {
++      AliasAhead = AliasResult.Interval.Offset;
++    }
++  }
+   if (RWXResult.Enclosed) {
+-    return {RWXResult.Interval.Offset, RWXResult.Interval.End - RWXResult.Interval.Offset, true};
++    uint64_t Begin = RWXResult.Interval.Offset;
++    if (MRAliasValidateOn() && Begin < Address) {
++      // Вид «только проверять» ПОЗАДИ адреса внутри этого же RWX-интервала: ответ объявил бы его «под ловушкой» (NoTrap = false), а декодер
++      // запоминает ответ и берёт его для соседних команд (и MACRUNNER_FEX_RANGE_CACHE тоже) — ответ не должен накрывать адреса другого класса.
++      const auto Behind = AliasIntervals.Query(Begin);
++      if ((Behind.Enclosed || Behind.Size) && Behind.Interval.Offset < Address) {
++        Begin = Address;
++      }
++    }
++    return {Begin, std::min(RWXResult.Interval.End, AliasAhead) - Begin, true};
+   }
+   // ★ MacRunner (Claude, 29.09.2026): незаписываемый ответ начинается с САМОГО адреса, а не с начала X-интервала.
+   //   RWX-интервал может лежать в том же X-интервале ДО адреса (Stardew/CoreCLR: страница RWX 4 КБ внутри образа
+   //   0x14af01000+0x3c9000); прежний ответ [начало X, следующий RWX) объявлял его незаписываемым, и кеш диапазона
+   //   декодера (а с ним MACRUNNER_FEX_RANGE_CACHE и решения Mono в Frontend.cpp) снимал проверку записываемого кода:
+   //   на стенде 4 перевода из 6 655 выпущены без проверки. Про адреса ниже запроса ответ ничего не утверждает.
++  uint64_t End = XResult.Interval.End;
+   if (RWXResult.Size && RWXResult.Size < XResult.Size) {
+-    return {Address, RWXResult.Interval.Offset - Address, false};
++    End = RWXResult.Interval.Offset;
++  }
++  return {Address, std::min(End, AliasAhead) - Address, false};
++}
++
++// ★ MacRunner (30.09.2026, ALIAS_VIEWS, слой Б). Вызывается на промахе QueryExecutableRange, то есть из декодера, под разделяемой
++// CodeInvalidationMutex. Поэтому НИКАКОЙ инвалидации здесь (InvalidateIntervalInternal берёт эту мьютекс исключительно — самоблокировка), только
++// IntervalsLock, тот же порядок, что у HandleProcessExecuteFlagsChange (CodeInvalidationMutex -> IntervalsLock). Без инвалидации безопасно:
++// вид, которого здесь не знали, не мог получить перевода, а заглушка NOEXEC для этого адреса — та самая компиляция, что сейчас идёт.
++// Берём ТОЛЬКО исполняемые виды секций (MEM_MAPPED): образы приходят через HandleImageMap, частная память — через NotifyMemoryAlloc/Protect.
++bool InvalidationTracker::DiscoverExecutableView(uint64_t Address) {
++  MEMORY_BASIC_INFORMATION Info;
++  if (NtQueryVirtualMemory(NtCurrentProcess(), reinterpret_cast<void*>(Address), MemoryBasicInformation, &Info, sizeof(Info), nullptr)) {
++    return false;
++  }
++  if (Info.State != MEM_COMMIT || Info.Type != MEM_MAPPED || !ProtHasExec(Info.Protect)) {
++    return false;
++  }
++
++  // NtQueryVirtualMemory: BaseAddress — страница запрошенного адреса, RegionSize — серия страниц ДАЛЬШЕ с теми же свойствами.
++  const uint64_t Base = reinterpret_cast<uint64_t>(Info.BaseAddress) & FEXCore::Utils::FEX_PAGE_MASK;
++  const uint64_t End = (reinterpret_cast<uint64_t>(Info.BaseAddress) + Info.RegionSize + FEXCore::Utils::FEX_PAGE_SIZE - 1) & FEXCore::Utils::FEX_PAGE_MASK;
++  const FEXCore::IntervalList<uint64_t>::Interval View {Base, End};
++
++  std::unique_lock Lock(IntervalsLock);
++  if (XIntervals.Query(Address).Enclosed) {
++    return true; // другой поток успел
++  }
++  XIntervals.Insert(View);
++  if (MRAliasValidateOn()) {
++    AliasIntervals.Insert(View);
++  } else if (ProtIsWritable(Info.Protect)) {
++    RWXIntervals.Insert(View); // ловушку взведёт MarkGuestExecutableRange после компиляции, как для любого RWX
++  }
++  MacRunnerAliasFound.fetch_add(1, std::memory_order_relaxed);
++  return true;
++}
++
++// ★ MacRunner (30.09.2026, ALIAS_VIEWS, слой В): подобласти [Base, Base+Size), которые СЕЙЧАС являются исполняемыми видами секций.
++void InvalidationTracker::CollectMappedExecutableRegions(uint64_t Base, uint64_t Size, FEXCore::IntervalList<uint64_t>& Out) {
++  const uint64_t End = Base + Size;
++  uint64_t Address = Base;
++  while (Address < End) {
++    MEMORY_BASIC_INFORMATION Info;
++    if (NtQueryVirtualMemory(NtCurrentProcess(), reinterpret_cast<void*>(Address), MemoryBasicInformation, &Info, sizeof(Info), nullptr)) {
++      break;
++    }
++    const uint64_t RegionBase = reinterpret_cast<uint64_t>(Info.BaseAddress);
++    const uint64_t RegionEnd = RegionBase + Info.RegionSize;
++    if (Info.State == MEM_COMMIT && Info.Type == MEM_MAPPED && ProtHasExec(Info.Protect)) {
++      Out.Insert({std::max(Address, RegionBase), std::min(End, RegionEnd)});
++    }
++    if (RegionEnd <= Address) {
++      break;
++    }
++    Address = RegionEnd;
+   }
+-  return {Address, XResult.Interval.End - Address, false};
+ }
+ 
+ void InvalidationTracker::DetectMonoBackpatcherBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPc) {
+diff --git a/Source/Windows/Common/InvalidationTracker.h b/Source/Windows/Common/InvalidationTracker.h
+index 3e5311590..dee1b3307 100644
+--- a/Source/Windows/Common/InvalidationTracker.h
++++ b/Source/Windows/Common/InvalidationTracker.h
+@@ -46,6 +46,17 @@ public:
+   void InvalidateCallTargetPatch(uint64_t Address, uint64_t Size);
+ 
+ private:
++  // ★ MacRunner (30.09.2026) — MACRUNNER_FEX_ALIAS_VIEWS: исполняемые виды НЕ-образных секций (двойное отображение W^X, .NET 7+).
++  //   Их не приносит ни один хук выделения/смены прав/отображения образа: виден только сам вид.
++  //   Б (ALIAS_VIEWS=1): на промахе QueryExecutableRange — NtQueryVirtualMemory; MEM_COMMIT + MEM_MAPPED + исполняемые права ->
++  //     вид попадает в XIntervals, запрос повторяется ОДИН раз. БЕЗ инвалидации: запрос идёт под разделяемой CodeInvalidationMutex
++  //     компиляции, а инвалидация берёт её исключительно (самоблокировка); безопасно, потому что промах и есть первая выборка.
++  //   В (ALIAS_VALIDATE, по умолчанию 1 внутри ALIAS_VIEWS=1): такие виды — «только проверять»: AliasIntervals, ответ
++  //     Writable = NoTrap = true, страницы НЕ защищаются (запись идёт через другой вид, защита этого вида её не видит).
++  FEXCore::HLE::ExecutableRangeInfo QueryExecutableRangeInternal(uint64_t Address);
++  bool DiscoverExecutableView(uint64_t Address);
++  void CollectMappedExecutableRegions(uint64_t Base, uint64_t Size, FEXCore::IntervalList<uint64_t>& Out);
++
+   void DetectMonoBackpatcherBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC);
+   void DisableSMCDetection();
+   void InvalidateIntervalInternal(uint64_t Address, uint64_t Size);
+@@ -64,6 +75,7 @@ private:
+ 
+   FEXCore::IntervalList<uint64_t> XIntervals;
+   FEXCore::IntervalList<uint64_t> RWXIntervals;
++  FEXCore::IntervalList<uint64_t> AliasIntervals; // Protected by IntervalsLock; always a subset of XIntervals; empty unless ALIAS_VALIDATE
+   std::shared_mutex IntervalsLock;
+   FEXCore::Context::Context& CTX;
+   const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads;
+-- 
+2.54.0 (Apple Git-157)
+

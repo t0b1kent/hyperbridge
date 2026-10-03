@@ -1,0 +1,61 @@
+From 3aeb95f51b942b90bc5d4f2ddd945ab55d87911d Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 22:14:05 +1000
+Subject: [PATCH 39/46] EXPERIMENT: gate preservation of sticky x87 invalid
+ status (default off)
+
+Family: x87 IE status accumulation
+Members: FCOM/FCOMP/FCOMPP/FICOM/FICOMP/FCOMI/FUCOMI via shared dispatcher, FTST, FIST16; FNCLEX/FNINIT/FRSTOR/FLDENV retain explicit clear/restore semantics.
+Trigger: captured Heroes III states188/202, IE=1 before ordered FCOMP and IE=0 after.
+Coverage: all three overwriting IE sites now OR the incoming status under MACRUNNER_HB_X87_FIX_STICKY_IE. Existing SoftFloat/stack exception sites already accumulate IE. Restore/reset sites intentionally excluded.
+Regression: real188/202 strict EQUAL2/2 under gate, OFF architectural bytes match pre-fix baseline. Directed FTST/FCOM/FIST16 and clear/overflow siblings are recorded in stage4/f04-siblings*. Native two-base/Wine acceptance incomplete pending low32 signing/stand adapter; no GOAL claim.
+Audit completed: yes (implementation family); acceptance limits stated.
+---
+ FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+index 6c9161005..b1bac6813 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+@@ -7,6 +7,7 @@ $end_info$
+ */
+ 
+ #include "Interface/Core/OpcodeDispatcher.h"
++#include "Interface/Core/HBX87StateGates.h"
+ #include "Interface/Core/X86Tables/X86Tables.h"
+ #include "Interface/IR/IR.h"
+ #include "Interface/Core/Addressing.h"
+@@ -173,6 +174,9 @@ void OpDispatchBuilder::FIST(OpcodeArgs, bool Truncate) {
+ 
+     // Set Invalid Operation flag if overflow or special value
+     Ref InvalidFlag = _Or(OpSize::i64Bit, IsSpecial, IsOverflow);
++    if (FEXCore::HBX87::StateFix::StickyIE()) {
++      InvalidFlag = _Or(OpSize::i64Bit, GetRFLAG(FEXCore::X86State::X87FLAG_IE_LOC), InvalidFlag);
++    }
+     SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(InvalidFlag);
+   }
+ 
+@@ -680,6 +684,9 @@ void OpDispatchBuilder::FCOMI(OpcodeArgs, IR::OpSize Width, bool Integer, OpDisp
+   }
+ 
+   // Set Invalid Operation flag when unordered (NaN comparison)
++  if (FEXCore::HBX87::StateFix::StickyIE()) {
++    HostFlag_Unordered = _Or(OpSize::i64Bit, GetRFLAG(FEXCore::X86State::X87FLAG_IE_LOC), HostFlag_Unordered);
++  }
+   SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(HostFlag_Unordered);
+ 
+   if (PopTwice) {
+@@ -705,6 +712,9 @@ void OpDispatchBuilder::FTST(OpcodeArgs) {
+   SetRFLAG<FEXCore::X86State::X87FLAG_C3_LOC>(HostFlag_ZF);
+ 
+   // Set Invalid Operation flag when unordered (NaN comparison)
++  if (FEXCore::HBX87::StateFix::StickyIE()) {
++    HostFlag_Unordered = _Or(OpSize::i64Bit, GetRFLAG(FEXCore::X86State::X87FLAG_IE_LOC), HostFlag_Unordered);
++  }
+   SetRFLAG<FEXCore::X86State::X87FLAG_IE_LOC>(HostFlag_Unordered);
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

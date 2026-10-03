@@ -1,0 +1,100 @@
+From 3ca2add40b7721ef1220436883ced95ca2a359ac Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 16:35:47 +1000
+Subject: [PATCH 23/80] EXPERIMENT: MACRUNNER_FEX_RANGE_CACHE=1 answers the
+ writable-code query from the decoder's cached range
+
+HK capture: 7.8 million QueryGuestExecutableRange calls, one per x86 instruction, from the writable-code check
+in GenerateIR; IR in the game 5.0 s against 3.5 s on the replay stand. Counters range_queries/range_cached.
+
+Svod-Origin: exp-inv-20260929 c851b15a3 (0031 of fexbuild-0019s)
+Svod-Note: reordered before the capture patches: the decoder accessor MRGetCachedRange comes with this patch (0022 later adds the capture fields next to it); no capture of the answers here
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Core/Core.cpp   | 29 ++++++++++++++++++++++--
+ FEXCore/Source/Interface/Core/Frontend.h |  8 +++++++
+ 2 files changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 6f29fe3ae..a42bd4169 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -113,6 +113,19 @@ int MRWritableValidationMode() {
+   }();
+   return Mode;
+ }
++// ★ MacRunner (Claude, 29.09.2026) — MACRUNNER_FEX_RANGE_CACHE=1: при проверке записываемого кода (GenerateIR) брать
++//   ответ из диапазона, который декодер потока уже запомнил (ExecutableRangeBase/End/Writable), если команда в нём
++//   целиком, вместо QueryGuestExecutableRange на КАЖДУЮ команду. Запись HK до меню: 7.8 млн таких запросов, IR в игре
++//   5.0 с против 3.5 с на стенде, где ответ — просмотр вектора (гипотеза: разница — цена запроса в игре). Запомненный
++//   диапазон сбрасывается инвалидацией потока (InvalidateThreadCachedCodeRange), тем же, чем живёт сам декодер.
++bool MRRangeCacheOn() {
++  static const bool On = [] {
++    const char* Value = getenv("MACRUNNER_FEX_RANGE_CACHE");
++    return Value && Value[0] == '1' && !Value[1];
++  }();
++  return On;
++}
++std::atomic<uint64_t> MRRangeQueries {0}, MRRangeCached {0};
+ int MRProtKeepModeForReport() {
+   const char* Value = getenv("MACRUNNER_FEX_PROT_KEEP");
+   return (Value && Value[0] >= '0' && Value[0] <= '2' && !Value[1]) ? Value[0] - '0' : 0;
+@@ -275,7 +288,8 @@ void MRReport(uint64_t Compiles) {
+     "inv_calls={} inv_mb={} remove={} validated={} writable_skipped={} wv_mode={} "
+     "prot_calls={} prot_inv_mb={} prot_kept_mb={} prot_trap_mb={} prot_keep={} "
+     "revived={} revive_hash_miss={} revive_skip={} revive_registered={} revive_unstable={} revive={} codebuf_max={} "
+-    "callret_clears={} callret_ms={} bp_writes={} revive_bp={} revive_bp_drops={} revive_keep_bp={}\n",
++    "callret_clears={} callret_ms={} range_queries={} range_cached={} bp_writes={} revive_bp={} revive_bp_drops={} "
++    "revive_keep_bp={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+     MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
+     MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+@@ -291,6 +305,7 @@ void MRReport(uint64_t Compiles) {
+     MRReviveSkip.load(std::memory_order_relaxed), MRReviveRegistered.load(std::memory_order_relaxed),
+     MRReviveUnstable.load(std::memory_order_relaxed), MRReviveMode(), MRCodeBufMaxForReport(),
+     MRCallRetClears.load(std::memory_order_relaxed), MRCallRetTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
++    MRRangeQueries.load(std::memory_order_relaxed), MRRangeCached.load(std::memory_order_relaxed),
+     MRBackpatchWrites.load(std::memory_order_relaxed), MRReviveBp.load(std::memory_order_relaxed),
+     MRReviveBpDrops.load(std::memory_order_relaxed), MRReviveKeepBp());
+   Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+@@ -884,7 +899,17 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+         if (Config.SMCChecks == FEXCore::Config::CONFIG_SMC_MTRACK) {
+           const int ValidationMode = MRWritableValidationMode();
+           if (ValidationMode) {
+-            const auto Range = SyscallHandler->QueryGuestExecutableRange(Thread, InstAddress);
++            FEXCore::HLE::ExecutableRangeInfo Range;
++            uint64_t MRCached[3];
++            Thread->FrontendDecoder->MRGetCachedRange(MRCached);
++            if (MRRangeCacheOn() && MRCached[1] > MRCached[0] && InstAddress >= MRCached[0] &&
++                InstAddress + std::max<uint64_t>(DecodedInfo->InstSize, 1) <= MRCached[1]) {
++              Range = {MRCached[0], MRCached[1] - MRCached[0], MRCached[2] != 0};
++              MRRangeCached.fetch_add(1, std::memory_order_relaxed);
++            } else {
++              Range = SyscallHandler->QueryGuestExecutableRange(Thread, InstAddress);
++              MRRangeQueries.fetch_add(1, std::memory_order_relaxed);
++            }
+             if (Range.Writable) {
+               ValidateWritableCode = true;
+               if (ValidationMode >= 2) {
+diff --git a/FEXCore/Source/Interface/Core/Frontend.h b/FEXCore/Source/Interface/Core/Frontend.h
+index f668d2b9c..cebc2807b 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.h
++++ b/FEXCore/Source/Interface/Core/Frontend.h
+@@ -78,6 +78,14 @@ public:
+     ExecutableRangeBase = ExecutableRangeEnd = 0;
+   }
+ 
++  // ★ MacRunner (Claude, 29.09.2026) — MACRUNNER_FEX_RANGE_CACHE: диапазон, запомненный декодером (ответ QueryGuestExecutableRange),
++  //   для проверки записываемого кода в GenerateIR без повторного запроса на каждую команду.
++  void MRGetCachedRange(uint64_t* Out) const {
++    Out[0] = ExecutableRangeBase;
++    Out[1] = ExecutableRangeEnd;
++    Out[2] = ExecutableRangeWritable;
++  }
++
+ private:
+   // To pass any information from instruction prefixes
+   // down into the actual instruction handling machinery.
+-- 
+2.54.0 (Apple Git-157)
+

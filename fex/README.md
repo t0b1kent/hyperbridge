@@ -8,7 +8,8 @@ Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earl
 
 - Upstream: `https://github.com/FEX-Emu/FEX`, commit `fd141ed6d721d03062619e4702bca1a0c93b6dd9`
   (6 Aug 2026, right after the FEX-2608 release).
-- Series: `patches/0001-…` to `patches/0019-…`, applied in order with `git am`.
+- Series: `patches/0001-…` to `patches/0049-…`, applied in file-name order. MacRunner 1.0.7 ships all 49;
+  the patches after 0019 marked EXPERIMENT are behind switches that are off by default.
 - Build: `fex/build.sh <work-dir> [patch-count]` (llvm-mingw for the Windows halves, Xcode
   clang for the unix libraries). `MANIFEST.json` lists the expected output hashes.
 
@@ -35,6 +36,13 @@ Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earl
 | 0017 | `MACRUNNER_FEX_DIV_PROVEN_HIGH` (default off): DIV/IDIV right after `xor edx,edx`, CDQ or CQO is a plain n-bit division; with 0014 the #DE test is only "divisor 0" (and INT_MIN / -1 for IDIV) | no |
 | 0018 | With `MACRUNNER_FEX_DIV_OVERFLOW_DE`: Windows programs get `STATUS_INTEGER_OVERFLOW` (0xC0000095) for a quotient overflow and `STATUS_INTEGER_DIVIDE_BY_ZERO` (0xC0000094) for a zero divisor, as under Prism | no |
 | 0019 | Darwin: no process-wide hardware TSO from a one-thread probe (the macOS mode is per thread and not inherited); software TSO stays until every thread is admitted | no |
+| 0020–0025 | Translation reuse and invalidation experiments: REVIVE must not return stale translations, executable-range tracking, pre-exception PF/AF/DF kept across an exception, `MACRUNNER_FEX_RANGE_CACHE`, precise invalidation for Mono call targets (switches) | no |
+| 0026 | `MACRUNNER_FEX_RA_NO_X16` for ARM64EC (Indiana Jones work; switch) | no |
+| 0027–0031 | Code written through a second mapping (.NET): `ExecutableRangeInfo::NoTrap` and validation modes, `MACRUNNER_FEX_ALIAS_VIEWS`, `MACRUNNER_FEX_HOOK_GUARD` (switches) | no |
+| 0032 | FEX diagnostic output works without Wine's buffer | no |
+| 0033–0047 | Guarded x87: fast arithmetic through the host's double with a fall-back to the exact path, x87 tag/status/FIP handling, guarded subnormal loads, FST/FSTP stores and FSCALE; 0036–0037 are tests (all off by default) | no |
+| 0048 | Floating-point switches default off; ARM64EC integer-width correction | no |
+| 0049 | Hook and alias correctness switched on automatically when the .NET runtime (`coreclr.dll`, `clrjit.dll`) is mapped | no |
 
 0014–0018 were checked with the HB<->FEX oracle (72 219 x86-64 cases plus 133 division idioms, FEXCore
 built natively on macOS, one binary with the gates off and on): only the targeted cases change —
@@ -46,6 +54,10 @@ without gates, 0.783 ns with `MACRUNNER_FEX_DIV_PROVEN_HIGH=1` (the engine of Ma
 and 3.05 → 2.01 ns together with `MACRUNNER_FEX_DIV_OVERFLOW_DE=1`. The `div ecx` loop does not speed up
 (1.01 ns): a `mov eax` sits between `xor edx,edx` and the division, and 0017 only recognizes the idiom
 directly before it. Loops without division are unchanged by 0016–0019 (within 1 %).
+Patches 0033 and 0035 carry a development-time label "not for publication"; they are published because the
+MacRunner 1.0.7 binary contains them (off by default). For 1.0.7 the exact patched source is in the release's
+source archive; binary reproduction from the series is not promised (hashes in `MANIFEST.json`).
+
 Two clean `build.sh` builds of 0001–0019 are byte-identical (hashes in `MANIFEST.json`). The 0001–0015 build
 is the engine of MacRunner 1.0.3.
 

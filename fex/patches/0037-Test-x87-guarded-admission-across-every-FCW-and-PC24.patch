@@ -1,0 +1,61 @@
+From 311a0c9b538323fdeab059a2be73f383e495e587 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 17:04:01 +1000
+Subject: [PATCH 37/46] Test x87 guarded admission across every FCW and PC24
+ gate
+
+Exhaustively check 655360 control cases over F80ADD/SUB/MUL/DIV/SQRT. Assert rejection of directed rounding, PC64, and unmasked exceptions even when arithmetic would be exact. Existing native SoftFloat corpus remains at zero value and flag mismatches; all control checks pass. This is native guard coverage, not guest JIT or game performance validation.
+---
+ unittests/x87_guarded_native.cpp | 24 +++++++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/unittests/x87_guarded_native.cpp b/unittests/x87_guarded_native.cpp
+index 5710bfc47..c7fe7eb36 100644
+--- a/unittests/x87_guarded_native.cpp
++++ b/unittests/x87_guarded_native.cpp
+@@ -39,6 +39,26 @@ template<class T> static T operation(T a,T b,unsigned op) {
+   }
+ }
+ static uint64_t accepted[2][5]{},input_reject[5]{},range_reject[5]{},bad=0,flags_bad=0;
++// Rejected control modes must actually reject: comparing only accepted arithmetic
++// would miss an accidental admission of directed rounding or unmasked exceptions.
++static uint64_t control_contract() {
++  uint64_t failures=0;
++  const F80 one{UINT64_C(1)<<63,0x3fff};
++  for(unsigned cw=0;cw<65536;++cw) for(unsigned op=0;op<5;++op)
++    for(bool pc24: {false,true}) {
++      Numeric n;
++      uint64_t cls=Guard(n,uint64_t(cw),one.sig,uint64_t(one.se),
++                        one.sig,uint64_t(one.se),Kind(op),pc24);
++      unsigned env=cw&0x0f3f;
++      unsigned expected=env==0x023f?1:pc24&&env==0x003f?2:0;
++      if((cls&3)!=expected) {
++        if(failures<8) std::printf("CONTROL_FAIL cw=%04x op=%u pc24=%u cls=%" PRIu64 " expected=%u\n",
++                                  cw,op,unsigned(pc24),cls,expected);
++        ++failures;
++      }
++    }
++  return failures;
++}
+ static void check(F80 a,F80 b,unsigned op,unsigned cw,bool pc24) {
+   Numeric n;uint64_t cls=Guard(n,uint64_t(cw),a.sig,uint64_t(a.se),b.sig,uint64_t(b.se),Kind(op),pc24);
+   if(!(cls&3)) {++input_reject[op];return;}
+@@ -62,6 +82,7 @@ static void check(F80 a,F80 b,unsigned op,unsigned cw,bool pc24) {
+ int main(int argc,char**argv) {
+   uint64_t fpcr;asm volatile("mrs %0, fpcr":"=r"(fpcr));
+   if(!FPCR_OK(fpcr)){std::printf("FPCR_REJECT=%" PRIx64 "\n",fpcr);return 2;}
++  uint64_t control_bad=control_contract();
+   unsigned count=argc>1?std::strtoul(argv[1],nullptr,10):2000000;
+   // Boundaries, zeros, NaN, unsupported encodings, denormals and extra precision bits.
+   F80 edges[]={{0,0},{0,0x8000},{1,0},{UINT64_C(1)<<63,0},
+@@ -87,5 +108,6 @@ int main(int argc,char**argv) {
+   for(unsigned op=0;op<5;++op)std::printf("op=%u pc53=%" PRIu64 " pc24=%" PRIu64 " input_reject=%" PRIu64 " range_reject=%" PRIu64 "\n",
+     op,accepted[0][op],accepted[1][op],input_reject[op],range_reject[op]);
+   std::printf("value_mismatches=%" PRIu64 " softfloat_flag_mismatches=%" PRIu64 "\n",bad,flags_bad);
+-  return bad||flags_bad?1:0;
++  std::printf("control_cases=655360 control_mismatches=%" PRIu64 "\n",control_bad);
++  return bad||flags_bad||control_bad?1:0;
+ }
+-- 
+2.54.0 (Apple Git-157)
+

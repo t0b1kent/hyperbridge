@@ -1,0 +1,165 @@
+From 25603b3f38d5e8d3ed015aae1304d7be156fe931 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 04:57:26 +1000
+Subject: [PATCH] EXPERIMENT: ExecutableRangeInfo::NoTrap; validation modes 2/3
+ and the range cache honour it; alias_* counters and JIT_REPORT_EVERY
+
+FEXCore half of MACRUNNER_FEX_ALIAS_VIEWS (the tracker half is the next patch). A writable-code range can be one that page
+protection cannot watch: an executable view of a section whose bytes change through ANOTHER view of the same pages (the RX half of
+a W^X double mapping). ExecutableRangeInfo gets NoTrap (default false, every existing initializer is unchanged). When it is set:
+- validation modes 2/3 do not skip the instruction as "whole host pages under the write trap" (Core.cpp), the trap does not see the write;
+- the decoder remembers it next to Writable and MACRUNNER_FEX_RANGE_CACHE does not use the cached answer for such a range (Frontend.*).
+Nothing sets NoTrap in this patch, so the emitted code is unchanged.
+
+Diagnostics only: alias_found / alias_marked / alias_answered in the macrunner-fex-jit line, and MACRUNNER_FEX_JIT_REPORT_EVERY=<n>
+(period of that line, default 4096) because the alias probes compile only a few dozen blocks and never reach 4096; the line buffer
+grows to 1536 bytes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Core/Core.cpp       | 28 +++++++++++++++-----
+ FEXCore/Source/Interface/Core/Frontend.cpp   |  1 +
+ FEXCore/Source/Interface/Core/Frontend.h     |  7 +++++
+ FEXCore/include/FEXCore/HLE/SyscallHandler.h |  5 ++++
+ 4 files changed, 35 insertions(+), 6 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 03b93a0e4..c31bdedcd 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -93,6 +93,10 @@ int MacRunnerBlockWalkMode();
+ std::atomic<uint64_t> MacRunnerJitSMC {0}; // Module.cpp: HandleRWXAccessViolation == true
+ // ★ MacRunner (Claude, 23.09.2026) — сбросы от смены прав (InvalidationTracker.cpp, MACRUNNER_FEX_PROT_KEEP).
+ std::atomic<uint64_t> MacRunnerProtCalls {0}, MacRunnerProtInvBytes {0}, MacRunnerProtKeptBytes {0}, MacRunnerProtTrapBytes {0};
++// ★ MacRunner (30.09.2026) — MACRUNNER_FEX_ALIAS_VIEWS (InvalidationTracker.cpp): исполняемые виды секций (двойное отображение W^X).
++//   found — виды, найденные лениво на промахе QueryExecutableRange (слой Б); marked — интервалы, помеченные «только проверять»
++//   при смене прав (слой В); answered — ответы QueryExecutableRange из такого интервала (Writable = NoTrap = true).
++std::atomic<uint64_t> MacRunnerAliasFound {0}, MacRunnerAliasMarked {0}, MacRunnerAliasAnswered {0};
+ namespace {
+ std::atomic<uint64_t> MRCompiles {0}, MRInsts {0}, MRRepeats {0}, MRRaced {0}, MRIrTicks {0}, MRCgTicks {0}, MRMaxInsts {0};
+ // Откуда повторы: полная очистка кэша (буфер кода заполнен), частичная, одиночные компиляции,
+@@ -338,11 +342,18 @@ void MRMaybeDump(uint64_t Rip, uint64_t Insts, const uint8_t* Code, uint64_t Cod
+   MRHexLines("arm", Rip, Code, std::min<uint64_t>(CodeSize, 4096));
+ }
+ void MRReport(uint64_t Compiles) {
+-  if (Compiles % 4096) {
++  // ★ MacRunner (30.09.2026): MACRUNNER_FEX_JIT_REPORT_EVERY=<n> — период строки macrunner-fex-jit (по умолчанию 4096 переводов).
++  //   Короткие пробы (десятки переводов) иначе не печатают её вовсе; процессы прогонов убивают, деструктор не срабатывает.
++  static const uint64_t Every = [] {
++    const char* Value = getenv("MACRUNNER_FEX_JIT_REPORT_EVERY");
++    const uint64_t N = Value ? strtoull(Value, nullptr, 10) : 0;
++    return N ? N : uint64_t {4096};
++  }();
++  if (Compiles % Every) {
+     return;
+   }
+   const uint64_t Frequency = MRFrequency();
+-  char Line[1024];
++  char Line[1536]; // 1024 before the alias_* fields (30.09.2026)
+   const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
+     "macrunner-fex-jit: compiles={} repeats={} raced={} guest_insts={} max_insts={} ir_ms={} codegen_ms={} "
+     "walk_calls={} walk_steps={} walk_mismatch={} walk_mode={} smc={} flush_new={} flush_l12={} single={} code_mb={} "
+@@ -350,7 +361,8 @@ void MRReport(uint64_t Compiles) {
+     "prot_calls={} prot_inv_mb={} prot_kept_mb={} prot_trap_mb={} prot_keep={} "
+     "revived={} revive_hash_miss={} revive_skip={} revive_registered={} revive_unstable={} revive={} codebuf_max={} "
+     "callret_clears={} callret_ms={} range_queries={} range_cached={} bp_writes={} revive_bp={} revive_bp_drops={} "
+-    "revive_keep_bp={} bp_precise={} bp_precise_erased={} bp_fallback={} bp_precise_on={} bp_across={} bp_across_unread={}\n",
++    "revive_keep_bp={} bp_precise={} bp_precise_erased={} bp_fallback={} bp_precise_on={} bp_across={} bp_across_unread={} "
++    "alias_found={} alias_marked={} alias_answered={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+     MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
+     MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+@@ -370,7 +382,9 @@ void MRReport(uint64_t Compiles) {
+     MRBackpatchWrites.load(std::memory_order_relaxed), MRReviveBp.load(std::memory_order_relaxed),
+     MRReviveBpDrops.load(std::memory_order_relaxed), MRReviveKeepBp(), MRBpPrecise.load(std::memory_order_relaxed),
+     MRBpPreciseErased.load(std::memory_order_relaxed), MRBpFallback.load(std::memory_order_relaxed), MRMonoBpPrecise(),
+-    MRBpAcross.load(std::memory_order_relaxed), MRBpAcrossUnread.load(std::memory_order_relaxed));
++    MRBpAcross.load(std::memory_order_relaxed), MRBpAcrossUnread.load(std::memory_order_relaxed),
++    MacRunnerAliasFound.load(std::memory_order_relaxed), MacRunnerAliasMarked.load(std::memory_order_relaxed),
++    MacRunnerAliasAnswered.load(std::memory_order_relaxed));
+   Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+   FEX::Windows::Logging::Raw(Line);
+ }
+@@ -966,7 +980,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+             uint64_t MRCached[3];
+             Thread->FrontendDecoder->MRGetCachedRange(MRCached);
+             if (MRRangeCacheOn() && MRCached[1] > MRCached[0] && InstAddress >= MRCached[0] &&
+-                InstAddress + std::max<uint64_t>(DecodedInfo->InstSize, 1) <= MRCached[1]) {
++                InstAddress + std::max<uint64_t>(DecodedInfo->InstSize, 1) <= MRCached[1] && !Thread->FrontendDecoder->MRCachedNoTrap()) {
+               Range = {MRCached[0], MRCached[1] - MRCached[0], MRCached[2] != 0};
+               MRRangeCached.fetch_add(1, std::memory_order_relaxed);
+             } else {
+@@ -975,7 +989,9 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+             }
+             if (Range.Writable) {
+               ValidateWritableCode = true;
+-              if (ValidationMode >= 2) {
++              // ★ MacRunner (30.09.2026, ALIAS_VIEWS): NoTrap — страница защищена от записи ЭТИМ видом, а байты меняются через ДРУГОЙ вид
++              //   тех же страниц; ловушка этого не видит, поэтому пропуск «целые страницы хоста под ловушкой» здесь неверен.
++              if (ValidationMode >= 2 && !Range.NoTrap) {
+                 constexpr uint64_t HostPage = 0x4000;
+                 const uint64_t First = InstAddress & ~(HostPage - 1);
+                 const uint64_t Last = (InstAddress + std::max<uint64_t>(DecodedInfo->InstSize, 1) - 1) & ~(HostPage - 1);
+diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
+index b2e7ee1bd..6f83fc69f 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.cpp
++++ b/FEXCore/Source/Interface/Core/Frontend.cpp
+@@ -94,6 +94,7 @@ bool Decoder::CheckRangeExecutable(uint64_t Address, uint64_t Size) {
+     ExecutableRangeBase = RangeInfo.Base;
+     ExecutableRangeEnd = RangeInfo.Base + RangeInfo.Size;
+     ExecutableRangeWritable = RangeInfo.Writable;
++    ExecutableRangeNoTrap = RangeInfo.NoTrap;
+ 
+     if (RangeInfo.Size == 0) {
+       return false;
+diff --git a/FEXCore/Source/Interface/Core/Frontend.h b/FEXCore/Source/Interface/Core/Frontend.h
+index cebc2807b..5019a0b09 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.h
++++ b/FEXCore/Source/Interface/Core/Frontend.h
+@@ -76,6 +76,7 @@ public:
+ 
+   void ResetExecutableRangeCache() {
+     ExecutableRangeBase = ExecutableRangeEnd = 0;
++    ExecutableRangeNoTrap = false;
+   }
+ 
+   // ★ MacRunner (Claude, 29.09.2026) — MACRUNNER_FEX_RANGE_CACHE: диапазон, запомненный декодером (ответ QueryGuestExecutableRange),
+@@ -85,6 +86,11 @@ public:
+     Out[1] = ExecutableRangeEnd;
+     Out[2] = ExecutableRangeWritable;
+   }
++  // ★ MacRunner (30.09.2026, MACRUNNER_FEX_ALIAS_VIEWS): the cached range is an alias view (ExecutableRangeInfo::NoTrap); Core.cpp then
++  //   asks the tracker for every instruction instead of using the cached answer.
++  bool MRCachedNoTrap() const {
++    return ExecutableRangeNoTrap;
++  }
+ 
+ private:
+   // To pass any information from instruction prefixes
+@@ -133,6 +139,7 @@ private:
+   uint64_t ExecutableRangeBase {};
+   uint64_t ExecutableRangeEnd {};
+   bool ExecutableRangeWritable {};
++  bool ExecutableRangeNoTrap {};
+   bool HitNonExecutableRange {};
+   bool HitBadRelocation {};
+ 
+diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+index d3c90aa7b..789134b12 100644
+--- a/FEXCore/include/FEXCore/HLE/SyscallHandler.h
++++ b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+@@ -44,6 +44,11 @@ struct ExecutableRangeInfo {
+   uint64_t Base;
+   uint64_t Size;
+   bool Writable;
++  // ★ MacRunner (30.09.2026, MACRUNNER_FEX_ALIAS_VIEWS): writable code that page protection CANNOT watch — an executable view of a
++  //   section (the RX half of a W^X double mapping). Its bytes change through ANOTHER view of the same pages, which neither the
++  //   protection of this view nor a write fault can see, so the range must be validated always: validation modes 2/3 must not skip
++  //   it as "whole host pages under the write trap", and the decoder's cached range (MACRUNNER_FEX_RANGE_CACHE) must not carry it.
++  bool NoTrap = false;
+ };
+ 
+ class SyscallHandler;
+-- 
+2.54.0 (Apple Git-157)
+

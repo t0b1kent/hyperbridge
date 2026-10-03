@@ -1,0 +1,49 @@
+From 9d03556432a38c9a38354c3e55c8084d87e07e92 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 20:39:41 +1000
+Subject: [PATCH 21/80] EXPERIMENT: non-writable executable range starts at the
+ queried address
+
+InvalidationTracker::QueryExecutableRange answered a non-writable address with
+[start of the X interval, next RWX interval). An RWX interval can lie inside
+the same X interval before the address (Stardew/CoreCLR: a 4 KiB RWX page
+inside a 3.7 MiB image range), and the answer declared it non-writable. The
+decoder caches the answer, so MACRUNNER_FEX_RANGE_CACHE (and the Mono
+decisions in Frontend.cpp that read the cached writability) dropped the
+writable-code check: on the replay stand 4 of 6 655 Stardew translations were
+emitted without it. The answer now starts at the queried address and says
+nothing about addresses below it; every caller checks Base <= Address.
+
+Svod-Origin: exp-inv-20260929 cd11f0907 (0038 of fexbuild-0019s)
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ Source/Windows/Common/InvalidationTracker.cpp | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index e20dbec11..ffd33171a 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -322,10 +322,16 @@ FEXCore::HLE::ExecutableRangeInfo InvalidationTracker::QueryExecutableRange(uint
+   const auto RWXResult = RWXIntervals.Query(Address);
+   if (RWXResult.Enclosed) {
+     return {RWXResult.Interval.Offset, RWXResult.Interval.End - RWXResult.Interval.Offset, true};
+-  } else if (RWXResult.Size && RWXResult.Size < XResult.Size) {
+-    return {XResult.Interval.Offset, RWXResult.Interval.Offset - XResult.Interval.Offset, false};
+   }
+-  return {XResult.Interval.Offset, XResult.Interval.End - XResult.Interval.Offset, false};
++  // ★ MacRunner (Claude, 29.09.2026): незаписываемый ответ начинается с САМОГО адреса, а не с начала X-интервала.
++  //   RWX-интервал может лежать в том же X-интервале ДО адреса (Stardew/CoreCLR: страница RWX 4 КБ внутри образа
++  //   0x14af01000+0x3c9000); прежний ответ [начало X, следующий RWX) объявлял его незаписываемым, и кеш диапазона
++  //   декодера (а с ним MACRUNNER_FEX_RANGE_CACHE и решения Mono в Frontend.cpp) снимал проверку записываемого кода:
++  //   на стенде 4 перевода из 6 655 выпущены без проверки. Про адреса ниже запроса ответ ничего не утверждает.
++  if (RWXResult.Size && RWXResult.Size < XResult.Size) {
++    return {Address, RWXResult.Interval.Offset - Address, false};
++  }
++  return {Address, XResult.Interval.End - Address, false};
+ }
+ 
+ void InvalidationTracker::DetectMonoBackpatcherBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPc) {
+-- 
+2.54.0 (Apple Git-157)
+

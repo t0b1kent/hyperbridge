@@ -1,0 +1,293 @@
+From f0c3b6ddb9623eb7433cd3b868767e5778044cab Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 10:28:23 +1000
+Subject: [PATCH] EXPERIMENT: MACRUNNER_FEX_HOOK_GUARD - compile and
+ code-buffer-change paths (HG2, on top of HG1)
+
+Same class as HG1, other lock mode: CompileBlock / CompileSingleStep hold CodeInvalidationMutex SHARED, and inside them the FEX allocator frees/allocates memory
+(end-of-compile locals: DebugData, CodePages, IR; JIT.cpp:1125 CTX->ClearCodeCache -> SharedCodeBufferManager::AllocateNew/~CodeBuffer = VirtualAlloc/VirtualFree).
+A NotifyMemory* hook fired by that then asks for the EXCLUSIVE mutex under the thread's own shared one (upgrade) - the same self-deadlock. Candidate for the
+ER-CODEBUF hang (MACRUNNER_FEX_CODEBUF_MAX=1).
+
+FEXCore cannot see the Windows HookGuard, so SyscallHandler gets EnterRuntimeSection/LeaveRuntimeSection (Compile, ClearCodeCache; no-ops by default) like PreCompile;
+Core.cpp raises them right after the shared lock in CompileBlock/CompileSingleStep and at the start of ClearCodeCache. The ARM64EC and WOW64 handlers map them to
+HookGuard::Enter/Leave. The per-thread depth becomes three bytes (invalidation, compile, code-buffer change) so the counters can be split by path:
+hg_scopes_inv/compile/clear (scope entries) and hs_path_inv/compile/clear (suppressed notifications attributed to the innermost path). Same gate as HG1.
+---
+ FEXCore/Source/Interface/Core/Core.cpp       | 37 +++++++++++++++-
+ FEXCore/include/FEXCore/HLE/SyscallHandler.h |  7 +++
+ Source/Windows/ARM64EC/Module.cpp            |  8 ++++
+ Source/Windows/Common/Allocator.cpp          | 45 ++++++++++++++++----
+ Source/Windows/Common/Allocator.h            | 20 +++++----
+ Source/Windows/WOW64/Module.cpp              |  8 ++++
+ 6 files changed, 106 insertions(+), 19 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 4cf3d9934..08aaa0b21 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -100,7 +100,29 @@ std::atomic<uint64_t> MacRunnerAliasFound {0}, MacRunnerAliasMarked {0}, MacRunn
+ // ★ MacRunner (30.09.2026) — MACRUNNER_FEX_HOOK_GUARD (Source/Windows/Common/Allocator.h): пропущенные оповещения хуков памяти ПО ВИДАМ
+ //   (0 Free, 1 Alloc, 2 Protect, 3 Map, 4 Unmap) и наибольшая глубина вложенных областей. Пропуск = FEX внутри инвалидации трогал СВОЮ память.
+ std::atomic<uint64_t> MacRunnerHookSuppressed[5] {}, MacRunnerHookMaxDepth {0};
++// HG2: по путям (0 инвалидация, 1 компиляция, 2 смена буфера кода): входы в область и пропущенные оповещения, отнесённые к самому вложенному пути.
++std::atomic<uint64_t> MacRunnerHookGuardScopes[3] {}, MacRunnerHookSuppressedByPath[3] {};
+ namespace {
++// ★ MacRunner (HG2, 30.09.2026): область среды выполнения на время компиляции / смены буфера кода (см. SyscallHandler::EnterRuntimeSection).
++struct MRRuntimeSectionGuard {
++  FEXCore::HLE::SyscallHandler* Handler;
++  FEXCore::HLE::SyscallHandler::RuntimeSection Section;
++  MRRuntimeSectionGuard(FEXCore::HLE::SyscallHandler* H, FEXCore::HLE::SyscallHandler::RuntimeSection S)
++    : Handler {H}
++    , Section {S} {
++    if (Handler) {
++      Handler->EnterRuntimeSection(Section);
++    }
++  }
++  ~MRRuntimeSectionGuard() {
++    if (Handler) {
++      Handler->LeaveRuntimeSection(Section);
++    }
++  }
++  MRRuntimeSectionGuard(const MRRuntimeSectionGuard&) = delete;
++  MRRuntimeSectionGuard& operator=(const MRRuntimeSectionGuard&) = delete;
++};
++
+ std::atomic<uint64_t> MRCompiles {0}, MRInsts {0}, MRRepeats {0}, MRRaced {0}, MRIrTicks {0}, MRCgTicks {0}, MRMaxInsts {0};
+ // Откуда повторы: полная очистка кэша (буфер кода заполнен), частичная, одиночные компиляции,
+ // инвалидация диапазонов (VirtualProtect/Free/FlushInstructionCache), точечное удаление блока.
+@@ -378,7 +400,8 @@ void MRReport(uint64_t Compiles) {
+     "callret_clears={} callret_ms={} range_queries={} range_cached={} bp_writes={} revive_bp={} revive_bp_drops={} "
+     "revive_keep_bp={} bp_precise={} bp_precise_erased={} bp_fallback={} bp_precise_on={} bp_across={} bp_across_unread={} "
+     "alias_found={} alias_marked={} alias_answered={} "
+-    "hook_guard={} hook_suppressed={} hs_free={} hs_alloc={} hs_protect={} hs_map={} hs_unmap={} hs_depth_max={}\n",
++    "hook_guard={} hook_suppressed={} hs_free={} hs_alloc={} hs_protect={} hs_map={} hs_unmap={} hs_depth_max={} "
++    "hg_scopes_inv={} hg_scopes_compile={} hg_scopes_clear={} hs_path_inv={} hs_path_compile={} hs_path_clear={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+     MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
+     MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+@@ -404,7 +427,10 @@ void MRReport(uint64_t Compiles) {
+     MRHookGuardForReport(), MRHookSuppressedTotal(), MacRunnerHookSuppressed[0].load(std::memory_order_relaxed),
+     MacRunnerHookSuppressed[1].load(std::memory_order_relaxed), MacRunnerHookSuppressed[2].load(std::memory_order_relaxed),
+     MacRunnerHookSuppressed[3].load(std::memory_order_relaxed), MacRunnerHookSuppressed[4].load(std::memory_order_relaxed),
+-    MacRunnerHookMaxDepth.load(std::memory_order_relaxed));
++    MacRunnerHookMaxDepth.load(std::memory_order_relaxed),
++    MacRunnerHookGuardScopes[0].load(std::memory_order_relaxed), MacRunnerHookGuardScopes[1].load(std::memory_order_relaxed),
++    MacRunnerHookGuardScopes[2].load(std::memory_order_relaxed), MacRunnerHookSuppressedByPath[0].load(std::memory_order_relaxed),
++    MacRunnerHookSuppressedByPath[1].load(std::memory_order_relaxed), MacRunnerHookSuppressedByPath[2].load(std::memory_order_relaxed));
+   Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+   FEX::Windows::Logging::Raw(Line);
+ }
+@@ -839,6 +865,9 @@ void ContextImpl::OnCodeBufferAllocated(const fextl::shared_ptr<CPU::CodeBuffer>
+ 
+ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
+   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
++  // ★ MacRunner (HG2, MACRUNNER_FEX_HOOK_GUARD): новый буфер кода (VirtualAlloc исполняемой памяти) и освобождение прежнего (VirtualFree) идут через хуки NotifyMemoryAlloc/Free
++  //   на замке компиляции; кандидат на ДОЛГ ER-CODEBUF-ЗАВИСАНИЕ.
++  MRRuntimeSectionGuard MRSectionGuard {SyscallHandler, FEXCore::HLE::SyscallHandler::RuntimeSection::ClearCodeCache};
+   (NewCodeBuffer ? MRFlushNew : MRFlushL12).fetch_add(1, std::memory_order_relaxed);
+   // Возврат перевода: весь прежний код и записи связей уходят — таблица больше не годится.
+   MRReviveEpoch.fetch_add(1, std::memory_order_relaxed);
+@@ -1259,6 +1288,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+ 
+   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
+   auto lk = GuardSignalDeferringSection<std::shared_lock>(CodeInvalidationMutex, Thread);
++  // ★ MacRunner (HG2, MACRUNNER_FEX_HOOK_GUARD): освобождения в конце компиляции и смена буфера кода — под РАЗДЕЛЯЕМЫМ замком; хук NotifyMemory* от аллокатора FEX просил бы
++  //   эксклюзивный (повышение). Объявлена ПОСЛЕ lk, значит снимается ДО него: локальные объекты, умирающие в конце функции, тоже под областью.
++  MRRuntimeSectionGuard MRSectionGuard {SyscallHandler, FEXCore::HLE::SyscallHandler::RuntimeSection::Compile};
+ 
+   // Is the code in the cache?
+   // The backends only check L1 and L2, not L3
+@@ -1465,6 +1497,7 @@ uintptr_t ContextImpl::CompileSingleStep(FEXCore::Core::CpuStateFrame* Frame, ui
+ 
+   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
+   auto lk = GuardSignalDeferringSection<std::shared_lock>(CodeInvalidationMutex, Thread);
++  MRRuntimeSectionGuard MRSectionGuard {SyscallHandler, FEXCore::HLE::SyscallHandler::RuntimeSection::Compile}; // HG2, см. CompileBlock
+ 
+   auto [CompiledCode, DebugData, StartAddr, Length, _] = CompileCode(Thread, GuestRIP, 1);
+   auto CodePtr = CompiledCode.EntryPoints[GuestRIP];
+diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+index 789134b12..94274c577 100644
+--- a/FEXCore/include/FEXCore/HLE/SyscallHandler.h
++++ b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+@@ -77,6 +77,13 @@ public:
+ 
+   virtual void PreCompile() {}
+ 
++  // ★ MacRunner (HG2, 30.09.2026, MACRUNNER_FEX_HOOK_GUARD): области среды выполнения FEX, внутри которых поток держит CodeInvalidationMutex (ЭТИМ или общим) и выделяет
++  //   и освобождает СВОЮ память: компиляция блока/одиночного шага и смена буфера кода. Windows-обработчики поднимают на них HookGuard (Source/Windows/Common/Allocator.h):
++  //   иначе хук NotifyMemory* из аллокатора FEX просит ЭКСКЛЮЗИВНЫЙ замок под своим же общим (повышение) — та же самоблокировка, что у инвалидации. По умолчанию ничего не делают.
++  enum class RuntimeSection : uint32_t { Compile, ClearCodeCache };
++  virtual void EnterRuntimeSection(RuntimeSection Section) {}
++  virtual void LeaveRuntimeSection(RuntimeSection Section) {}
++
+   virtual SourcecodeResolver* GetSourcecodeResolver() {
+     return nullptr;
+   }
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index c58bfbc04..7e192a209 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -673,6 +673,14 @@ public:
+   void PreCompile() override {
+     ProcessPendingCrossProcessEmulatorWork();
+   }
++
++  // ★ MacRunner (HG2, MACRUNNER_FEX_HOOK_GUARD): области компиляции и смены буфера кода (Core.cpp); при выключенном гейте Enter/Leave возвращаются сразу.
++  void EnterRuntimeSection(RuntimeSection Section) override {
++    FEX::Windows::HookGuard::Enter(Section == RuntimeSection::Compile ? FEX::Windows::HookGuard::Path::Compile : FEX::Windows::HookGuard::Path::ClearCodeCache);
++  }
++  void LeaveRuntimeSection(RuntimeSection Section) override {
++    FEX::Windows::HookGuard::Leave(Section == RuntimeSection::Compile ? FEX::Windows::HookGuard::Path::Compile : FEX::Windows::HookGuard::Path::ClearCodeCache);
++  }
+ };
+ } // namespace Exception
+ 
+diff --git a/Source/Windows/Common/Allocator.cpp b/Source/Windows/Common/Allocator.cpp
+index 38b8689c5..014d9974b 100644
+--- a/Source/Windows/Common/Allocator.cpp
++++ b/Source/Windows/Common/Allocator.cpp
+@@ -29,7 +29,8 @@
+ // Кодирование значения слота выбрано так, чтобы НОЛЬ (что видит новый поток по умолчанию)
+ // означал «поток скобку ещё не проходил»: бит 0 — признак пройденного ThreadInit,
+ // остальные биты — глубина вложенности.
+-extern std::atomic<uint64_t> MacRunnerHookSuppressed[5], MacRunnerHookMaxDepth; // Core.cpp (HookGuard)
++extern std::atomic<uint64_t> MacRunnerHookSuppressed[5], MacRunnerHookMaxDepth;                         // Core.cpp (HookGuard)
++extern std::atomic<uint64_t> MacRunnerHookGuardScopes[3], MacRunnerHookSuppressedByPath[3];          // Core.cpp (HookGuard, HG2)
+ 
+ namespace {
+ constexpr uintptr_t JITWriteReadyBit = 1;
+@@ -99,32 +100,58 @@ uintptr_t Depth() {
+   return reinterpret_cast<uintptr_t>(TlsGetValue(HookGuardTlsIndex));
+ }
+ 
+-void Enter() {
++namespace {
++constexpr uintptr_t PathByteMask = 0xFF;
++uintptr_t PathDepth(uintptr_t Value, unsigned P) {
++  return (Value >> (8 * P)) & PathByteMask;
++}
++uintptr_t TotalDepth(uintptr_t Value) {
++  return PathDepth(Value, 0) + PathDepth(Value, 1) + PathDepth(Value, 2);
++}
++} // namespace
++
++void Enter(Path P) {
+   if (HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
+     return;
+   }
+-  const uintptr_t Value = Depth() + 1;
++  const unsigned Index = static_cast<unsigned>(P);
++  uintptr_t Value = Depth();
++  if (PathDepth(Value, Index) == PathByteMask) {
++    return; // байт полон: вложенность 255 недостижима; счёт не ломаем
++  }
++  Value += (uintptr_t {1} << (8 * Index));
+   TlsSetValue(HookGuardTlsIndex, reinterpret_cast<LPVOID>(Value));
++  MacRunnerHookGuardScopes[Index].fetch_add(1, std::memory_order_relaxed);
++  const uint64_t Total = TotalDepth(Value);
+   for (uint64_t Max = MacRunnerHookMaxDepth.load(std::memory_order_relaxed);
+-       Value > Max && !MacRunnerHookMaxDepth.compare_exchange_weak(Max, Value, std::memory_order_relaxed);) {
++       Total > Max && !MacRunnerHookMaxDepth.compare_exchange_weak(Max, Total, std::memory_order_relaxed);) {
+   }
+ }
+ 
+-void Leave() {
++void Leave(Path P) {
+   if (HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
+     return;
+   }
+-  const uintptr_t Value = Depth();
+-  if (Value) {
+-    TlsSetValue(HookGuardTlsIndex, reinterpret_cast<LPVOID>(Value - 1));
++  const unsigned Index = static_cast<unsigned>(P);
++  uintptr_t Value = Depth();
++  if (PathDepth(Value, Index)) {
++    Value -= (uintptr_t {1} << (8 * Index));
++    TlsSetValue(HookGuardTlsIndex, reinterpret_cast<LPVOID>(Value));
+   }
+ }
+ 
+ bool Suppress(Kind K) {
+-  if (!HookGuardOn || !Depth()) {
++  if (!HookGuardOn) {
++    return false;
++  }
++  const uintptr_t Value = Depth();
++  if (!Value) {
+     return false;
+   }
+   MacRunnerHookSuppressed[static_cast<unsigned>(K)].fetch_add(1, std::memory_order_relaxed);
++  // К самому вложенному пути: смена буфера кода живёт внутри компиляции, та — отдельно от инвалидации.
++  const unsigned Attributed = PathDepth(Value, 2) ? 2u : (PathDepth(Value, 1) ? 1u : 0u);
++  MacRunnerHookSuppressedByPath[Attributed].fetch_add(1, std::memory_order_relaxed);
+   return true;
+ }
+ } // namespace FEX::Windows::HookGuard
+diff --git a/Source/Windows/Common/Allocator.h b/Source/Windows/Common/Allocator.h
+index ca6e367bb..98eef4034 100644
+--- a/Source/Windows/Common/Allocator.h
++++ b/Source/Windows/Common/Allocator.h
+@@ -19,22 +19,25 @@ void SetupHooks(HMODULE ntdll);
+ //   Счётчики пропусков по видам хука и наибольшая глубина — в строке macrunner-fex-jit (hs_free/hs_alloc/hs_protect/hs_map/hs_unmap/hs_depth_max).
+ namespace FEX::Windows::HookGuard {
+ enum class Kind : unsigned { Free, Alloc, Protect, Map, Unmap, Count };
+-bool Enabled();              // MACRUNNER_FEX_HOOK_GUARD=1, читается один раз
+-uintptr_t Depth();           // глубина областей ЭТОГО потока (0 при выключенном гейте)
+-void Enter();
+-void Leave();
+-bool Suppress(Kind K);       // истина (и счёт по виду), если поток внутри области: оповещение пропустить целиком
++// HG2: путь, на котором поднята область (для счётчиков): инвалидация (трекер), компиляция и смена буфера кода (Core.cpp через SyscallHandler::EnterRuntimeSection).
++// Глубина по путям — три байта одного значения слота TLS: биты 0-7 инвалидация, 8-15 компиляция, 16-23 смена буфера кода.
++enum class Path : unsigned { Invalidation, Compile, ClearCodeCache, Count };
++bool Enabled();              // MACRUNNER_FEX_HOOK_GUARD=1, читается ОДИН раз в SetupHooks (не лениво: хук стреляет раньше, чем готова среда CRT)
++uintptr_t Depth();           // суммарная глубина областей ЭТОГО потока (0 при выключенном гейте)
++void Enter(Path P = Path::Invalidation);
++void Leave(Path P = Path::Invalidation);
++bool Suppress(Kind K);       // истина (и счёт по виду и по самому вложенному пути), если поток внутри области: оповещение пропустить целиком
+ 
+ class Scope {
+ public:
+-  Scope() : Active {Enabled()} {
++  explicit Scope(Path P = Path::Invalidation) : Active {Enabled()}, ScopePath {P} {
+     if (Active) {
+-      Enter();
++      Enter(ScopePath);
+     }
+   }
+   ~Scope() {
+     if (Active) {
+-      Leave();
++      Leave(ScopePath);
+     }
+   }
+   Scope(const Scope&) = delete;
+@@ -42,5 +45,6 @@ public:
+ 
+ private:
+   bool Active;
++  Path ScopePath;
+ };
+ } // namespace FEX::Windows::HookGuard
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+index 94a75f086..5302a7c0f 100644
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -515,6 +515,14 @@ public:
+   void PreCompile() override {
+     Wow64ProcessPendingCrossProcessItems();
+   }
++
++  // ★ MacRunner (HG2, MACRUNNER_FEX_HOOK_GUARD): области компиляции и смены буфера кода (Core.cpp); при выключенном гейте Enter/Leave возвращаются сразу.
++  void EnterRuntimeSection(RuntimeSection Section) override {
++    FEX::Windows::HookGuard::Enter(Section == RuntimeSection::Compile ? FEX::Windows::HookGuard::Path::Compile : FEX::Windows::HookGuard::Path::ClearCodeCache);
++  }
++  void LeaveRuntimeSection(RuntimeSection Section) override {
++    FEX::Windows::HookGuard::Leave(Section == RuntimeSection::Compile ? FEX::Windows::HookGuard::Path::Compile : FEX::Windows::HookGuard::Path::ClearCodeCache);
++  }
+ };
+ 
+ // ★★★ MacRunner N2b — БЕЗУСЛОВНЫЙ ЗОНД ПО ШАГАМ BTCpuProcessInit.
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,118 @@
+From 740a45602c1378033da2719362996b60e27fc74d Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 09:59:33 +1000
+Subject: [PATCH 45/46] EXPERIMENT: guarded full80 RNE FST/FSTP m32/m64 stores
+ (default off)
+
+Family: FST/FSTP m32/m64, D9 /2 /3 and DD /2 /3.
+Coverage: integer single-round RNE conversion, PC24/PC53 RN masked; exact slow fallback.
+Regression: both widths, ties/even, carry, signs, range/PC/RC/mask fallback; OFF/ON 896 diff0.
+Audit completed: yes. Gate FAST_STORE_ROUND additionally requires FAST and FAST_STORE.
+---
+ .../Source/Interface/Core/HBX87StoreEmit.inl  | 61 ++++++++++++++++---
+ 1 file changed, 54 insertions(+), 7 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl b/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+index 2ba2f85dc..c79ac24c6 100644
+--- a/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+@@ -9,17 +9,30 @@ if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STO
+   const unsigned Fraction = D ? 52 : 23, Shift = D ? 11 : 40;
+   const unsigned MinExp = 16383 - (D ? 1022 : 126), MaxExp = 16383 + (D ? 1023 : 127);
+   const uint64_t LowMask = (UINT64_C(1) << Shift) - 1;
++  const bool Round = FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STORE_ROUND");
++  const bool Stats = FEXCore::HBX87::Stats::Enabled();
+   ForwardLabel Slow, Input, Zero, Pack, Done;
++  ForwardLabel PC64Slow, RCSlow, UnmaskedSlow, PCSlow, DomainSlow, RangeSlow, RoundingSlow;
+   ldrh(TMP1, STATE, offsetof(FEXCore::Core::CPUState, FCW));
++  if (Stats) {
++    and_(Size::i64Bit,TMP2,TMP1,0x300);
++    eor(Size::i64Bit,TMP2,TMP2,0x300);
++    (void)cbz(Size::i64Bit,TMP2,&PC64Slow);
++    and_(Size::i64Bit,TMP2,TMP1,0xc00);
++    (void)cbnz(Size::i64Bit,TMP2,&RCSlow);
++    and_(Size::i64Bit,TMP2,TMP1,0x3f);
++    sub(Size::i64Bit,TMP2,TMP2,0x3f);
++    (void)cbnz(Size::i64Bit,TMP2,&UnmaskedSlow);
++  }
+   LoadConstant(Size::i64Bit, TMP4, 0xf3f);
+   and_(Size::i64Bit, TMP1, TMP1, TMP4);
+   sub(Size::i64Bit, TMP1, TMP1, 0x23f);
+   (void)cbz(Size::i64Bit, TMP1, &Input);
+   if (FEXCore::HBX87::PC24()) {
+     add(Size::i64Bit, TMP1, TMP1, 0x200);
+-    (void)cbnz(Size::i64Bit, TMP1, &Slow);
++    (void)cbnz(Size::i64Bit, TMP1, Stats?&PCSlow:&Slow);
+   } else {
+-    (void)b(&Slow);
++    (void)b(Stats?&PCSlow:&Slow);
+   }
+   (void)Bind(&Input);
+   umov<SubRegSize::i64Bit>(TMP2, Src, 0);
+@@ -27,16 +40,37 @@ if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STO
+   and_(Size::i64Bit, TMP3, TMP1, 0x7fff);
+   orr(Size::i64Bit, TMP4, TMP3, TMP2);
+   (void)cbz(Size::i64Bit, TMP4, &Zero);
+-  (void)tbz(TMP2, 63, &Slow); // zero exponent/denormal/unnormal are not admitted
++  (void)tbz(TMP2, 63, Stats?&DomainSlow:&Slow); // no unnormal/denormal
+   LoadConstant(Size::i64Bit, TMP4, MinExp);
+   sub(Size::i64Bit, TMP4, TMP3, TMP4);
+-  (void)tbnz(TMP4, 63, &Slow);
++  (void)tbnz(TMP4, 63, Stats?&RangeSlow:&Slow);
+   LoadConstant(Size::i64Bit, TMP4, MaxExp);
+   sub(Size::i64Bit, TMP4, TMP4, TMP3);
+-  (void)tbnz(TMP4, 63, &Slow); // includes NaN, infinity, overflow
++  (void)tbnz(TMP4, 63, Stats?&RangeSlow:&Slow); // includes NaN, infinity, overflow
+   and_(Size::i64Bit, TMP4, TMP2, LowMask);
+-  (void)cbnz(Size::i64Bit, TMP4, &Slow); // any rounding needs exact SoftFloat
+-  lsr(Size::i64Bit, TMP2, TMP2, Shift);
++  if (Round) {
++    // Integer round-to-nearest/even of a finite normal F80 significand.
++    // No host FP, FPSR or NZCV changes; no double rounding.
++    ForwardLabel Rounded, Up, Normal;
++    lsr(Size::i64Bit,TMP2,TMP2,Shift);
++    (void)tbz(TMP4,Shift-1,&Rounded);
++    and_(Size::i64Bit,TMP4,TMP4,(UINT64_C(1)<<(Shift-1))-1);
++    (void)cbnz(Size::i64Bit,TMP4,&Up);
++    (void)tbz(TMP2,0,&Rounded); // exact half: retain even result
++    (void)Bind(&Up);
++    add(Size::i64Bit,TMP2,TMP2,1);
++    (void)Bind(&Rounded);
++    (void)tbz(TMP2,Fraction+1,&Normal);
++    lsr(Size::i64Bit,TMP2,TMP2,1);
++    add(Size::i64Bit,TMP3,TMP3,1);
++    LoadConstant(Size::i64Bit,TMP4,MaxExp);
++    sub(Size::i64Bit,TMP4,TMP4,TMP3);
++    (void)tbnz(TMP4,63,Stats?&RangeSlow:&Slow); // rounding overflow
++    (void)Bind(&Normal);
++  } else {
++    (void)cbnz(Size::i64Bit,TMP4,Stats?&RoundingSlow:&Slow);
++    lsr(Size::i64Bit,TMP2,TMP2,Shift);
++  }
+   and_(Size::i64Bit, TMP2, TMP2, (UINT64_C(1) << Fraction) - 1);
+   LoadConstant(Size::i64Bit, TMP4, 16383 - (D ? 1023 : 127));
+   sub(Size::i64Bit, TMP3, TMP3, TMP4);
+@@ -51,7 +85,20 @@ if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STO
+   orr(Size::i64Bit, TMP2, TMP2, TMP1);
+   if (D) fmov(Size::i64Bit, Dst.D(), TMP2);
+   else fmov(Size::i32Bit, Dst.S(), TMP2);
++  HBStats(D?FEXCore::HBX87::Stats::Store64Hit:FEXCore::HBX87::Stats::Store32Hit);
+   (void)b(&Done);
++  if (Stats) {
++    auto Reject = [&](ForwardLabel& Label,unsigned Reason) {
++      (void)Bind(&Label); HBStats(Reason); (void)b(&Slow);
++    };
++    Reject(PC64Slow,FEXCore::HBX87::Stats::StorePC64);
++    Reject(RCSlow,FEXCore::HBX87::Stats::StoreRC);
++    Reject(UnmaskedSlow,FEXCore::HBX87::Stats::StoreUnmasked);
++    Reject(PCSlow,FEXCore::HBX87::Stats::StorePC);
++    Reject(DomainSlow,FEXCore::HBX87::Stats::StoreDomain);
++    Reject(RangeSlow,FEXCore::HBX87::Stats::StoreRange);
++    Reject(RoundingSlow,FEXCore::HBX87::Stats::StoreRounding);
++  }
+   (void)Bind(&Slow);
+   // Original ABI and original source, loaded once before admission.
+   FallbackInfo Info {};
+-- 
+2.54.0 (Apple Git-157)
+

@@ -41,6 +41,24 @@
       "note": "Linked with the macOS 26.5 SDK and ld 1267. A rebuild with SDK 27.0 has the same exports (__fex_darwin_unixlib_abi, __wine_unix_call_funcs), the same 9 functions and the same 9 imports, but is not byte-identical."
     }
   },
+  "macrunner_1_0_7": {
+    "released": "2026-10-03, MacRunner 1.0.7 (https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.7)",
+    "patches": "0001-0049, applied in file-name order (fex/patches); all patches after 0019 that are marked EXPERIMENT are behind switches that are off by default",
+    "source": "The exact patched source of these outputs is in MacRunner-1.0.7-sources.tar (hyperbridge/fex/src, with SOURCE-EXPORT.json). Binary reproduction from the patch series is not promised.",
+    "build_outputs_sha256": {
+      "xtajit64.dll": "2c13abf24f6acf9a3d4212f9fd452d44d867918626202574c586894c279970dd",
+      "xtajit.dll": "e42d9724e080f66d7464c21f1d852703ac695f9bbe5a292e7f3d93030a0babfc",
+      "xtajit64.so": "373e34d2b1756cb712d5aa8356edd02e8ab5efc7386ac227d182d989d29b4089",
+      "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
+    },
+    "shipped_sha256": {
+      "engine/fex/aarch64-windows/xtajit64.dll": "ac3735d68c24845960ec46511f1d3a52a8f08b09168f0f258c72d4cb8432db23",
+      "engine/fex/aarch64-windows/xtajit.dll": "8a58ead034377bbeb5612eccacdac857cc8c15aa10387e250fe13e00c4113a8e",
+      "engine/fex/aarch64-unix/libarm64ecfex.so": "f7964bb9f1676e3b43f8a07aa7e1b053725822f1fe076b4b83462bac3001963a",
+      "engine/fex/aarch64-unix/libwow64fex.so": "456480dabb0b30a5a7608928eca3b16dc788c26989786360b3d724b84c2241c5"
+    },
+    "note": "Shipped files differ from the build outputs: the Windows halves are stripped, and the host libraries are renamed and signed with the app's Developer ID."
+  },
   "series_head": {
     "patches": "0001-0019",
     "sha256_build_sh": {

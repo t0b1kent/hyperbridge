@@ -1,0 +1,370 @@
+From 1ae0220db5ca9170012e89a75dcce81fb3838e85 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 10:17:18 +1000
+Subject: [PATCH] EXPERIMENT: MACRUNNER_FEX_HOOK_GUARD - no memory-hook
+ notifications for FEX-internal memory inside invalidation
+
+The r3 no-flush churn probe hung deterministically (wx-r3-noflush, 4/4 runs; span snapshot wxh-spans-r3-m1):
+InvalidateGuestCodeRange -> InvalidateIntervalInternal (takes CodeInvalidationMutex exclusively) -> InvalidateThreadCachedCodeRange ->
+LookupCache::InvalidateCacheRange -> the FEX allocator (rpmalloc) returns a 60 KiB span to the OS -> NtFreeVirtualMemory -> NotifyMemoryFree ->
+InvalidateAlignedInterval(Free) -> InvalidateIntervalInternal -> the same mutex, held by the same thread (WritePriorityMutex is not recursive).
+The ARM64EC ntdll wrapper only suppresses NESTED hooks (InSyscallCallback); calls made by emulator code outside a hook pass through.
+
+Fix (default OFF; MACRUNNER_FEX_HOOK_GUARD=1): a per-thread depth counter in a Win32 TLS slot (thread_local is unusable in the FEX PE modules: empty TLS directory)
+raised by HookGuard::Scope in InvalidateIntervalInternalLocked, InvalidateCallTargetPatch and DiscoverExecutableView; the Notify* hooks of that thread return at once.
+Other threads notify as before. Counters by hook kind and the deepest nesting go into the macrunner-fex-jit line (hook_guard, hook_suppressed, hs_*).
+The compile path (shared CodeInvalidationMutex in CompileBlock/CompileSingleStep) is NOT covered: the same class (upgrade instead of self-lock) is open there.
+---
+ FEXCore/Source/Interface/Core/Core.cpp        | 24 +++++++-
+ Source/Windows/ARM64EC/Module.cpp             | 15 +++++
+ Source/Windows/Common/Allocator.cpp           | 59 +++++++++++++++++++
+ Source/Windows/Common/Allocator.h             | 39 ++++++++++++
+ Source/Windows/Common/InvalidationTracker.cpp |  8 +++
+ Source/Windows/WOW64/Module.cpp               | 15 +++++
+ 6 files changed, 158 insertions(+), 2 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index c31bdedcd..4cf3d9934 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -97,6 +97,9 @@ std::atomic<uint64_t> MacRunnerProtCalls {0}, MacRunnerProtInvBytes {0}, MacRunn
+ //   found — виды, найденные лениво на промахе QueryExecutableRange (слой Б); marked — интервалы, помеченные «только проверять»
+ //   при смене прав (слой В); answered — ответы QueryExecutableRange из такого интервала (Writable = NoTrap = true).
+ std::atomic<uint64_t> MacRunnerAliasFound {0}, MacRunnerAliasMarked {0}, MacRunnerAliasAnswered {0};
++// ★ MacRunner (30.09.2026) — MACRUNNER_FEX_HOOK_GUARD (Source/Windows/Common/Allocator.h): пропущенные оповещения хуков памяти ПО ВИДАМ
++//   (0 Free, 1 Alloc, 2 Protect, 3 Map, 4 Unmap) и наибольшая глубина вложенных областей. Пропуск = FEX внутри инвалидации трогал СВОЮ память.
++std::atomic<uint64_t> MacRunnerHookSuppressed[5] {}, MacRunnerHookMaxDepth {0};
+ namespace {
+ std::atomic<uint64_t> MRCompiles {0}, MRInsts {0}, MRRepeats {0}, MRRaced {0}, MRIrTicks {0}, MRCgTicks {0}, MRMaxInsts {0};
+ // Откуда повторы: полная очистка кэша (буфер кода заполнен), частичная, одиночные компиляции,
+@@ -130,6 +133,18 @@ bool MRRangeCacheOn() {
+   return On;
+ }
+ std::atomic<uint64_t> MRRangeQueries {0}, MRRangeCached {0};
++// ★ MacRunner (30.09.2026): состояние гейта HOOK_GUARD и сумма пропусков для строки macrunner-fex-jit.
++int MRHookGuardForReport() {
++  const char* Value = getenv("MACRUNNER_FEX_HOOK_GUARD");
++  return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++}
++uint64_t MRHookSuppressedTotal() {
++  uint64_t Sum = 0;
++  for (const auto& Counter : MacRunnerHookSuppressed) {
++    Sum += Counter.load(std::memory_order_relaxed);
++  }
++  return Sum;
++}
+ int MRProtKeepModeForReport() {
+   const char* Value = getenv("MACRUNNER_FEX_PROT_KEEP");
+   return (Value && Value[0] >= '0' && Value[0] <= '2' && !Value[1]) ? Value[0] - '0' : 0;
+@@ -362,7 +377,8 @@ void MRReport(uint64_t Compiles) {
+     "revived={} revive_hash_miss={} revive_skip={} revive_registered={} revive_unstable={} revive={} codebuf_max={} "
+     "callret_clears={} callret_ms={} range_queries={} range_cached={} bp_writes={} revive_bp={} revive_bp_drops={} "
+     "revive_keep_bp={} bp_precise={} bp_precise_erased={} bp_fallback={} bp_precise_on={} bp_across={} bp_across_unread={} "
+-    "alias_found={} alias_marked={} alias_answered={}\n",
++    "alias_found={} alias_marked={} alias_answered={} "
++    "hook_guard={} hook_suppressed={} hs_free={} hs_alloc={} hs_protect={} hs_map={} hs_unmap={} hs_depth_max={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+     MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
+     MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+@@ -384,7 +400,11 @@ void MRReport(uint64_t Compiles) {
+     MRBpPreciseErased.load(std::memory_order_relaxed), MRBpFallback.load(std::memory_order_relaxed), MRMonoBpPrecise(),
+     MRBpAcross.load(std::memory_order_relaxed), MRBpAcrossUnread.load(std::memory_order_relaxed),
+     MacRunnerAliasFound.load(std::memory_order_relaxed), MacRunnerAliasMarked.load(std::memory_order_relaxed),
+-    MacRunnerAliasAnswered.load(std::memory_order_relaxed));
++    MacRunnerAliasAnswered.load(std::memory_order_relaxed),
++    MRHookGuardForReport(), MRHookSuppressedTotal(), MacRunnerHookSuppressed[0].load(std::memory_order_relaxed),
++    MacRunnerHookSuppressed[1].load(std::memory_order_relaxed), MacRunnerHookSuppressed[2].load(std::memory_order_relaxed),
++    MacRunnerHookSuppressed[3].load(std::memory_order_relaxed), MacRunnerHookSuppressed[4].load(std::memory_order_relaxed),
++    MacRunnerHookMaxDepth.load(std::memory_order_relaxed));
+   Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+   FEX::Windows::Logging::Raw(Line);
+ }
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index 18b794cd0..c58bfbc04 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -922,6 +922,9 @@ NTSTATUS ResetToConsistentState(EXCEPTION_RECORD* Exception, CONTEXT* GuestConte
+ }
+ 
+ void NotifyMemoryAlloc(void* Address, SIZE_T Size, ULONG Type, ULONG Prot, BOOL After, NTSTATUS Status) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Alloc)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return;
++  }
+   if (!InvalidationTracker || !GetCPUArea().ThreadState()) {
+     return;
+   }
+@@ -938,6 +941,9 @@ void NotifyMemoryAlloc(void* Address, SIZE_T Size, ULONG Type, ULONG Prot, BOOL
+ }
+ 
+ void NotifyMemoryFree(void* Address, SIZE_T Size, ULONG FreeType, BOOL After, NTSTATUS Status) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Free)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return;
++  }
+   if (!InvalidationTracker || !GetCPUArea().ThreadState()) {
+     return;
+   }
+@@ -953,6 +959,9 @@ void NotifyMemoryFree(void* Address, SIZE_T Size, ULONG FreeType, BOOL After, NT
+ }
+ 
+ void NotifyMemoryProtect(void* Address, SIZE_T Size, ULONG NewProt, BOOL After, NTSTATUS Status) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Protect)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return;
++  }
+   if (!InvalidationTracker || !GetCPUArea().ThreadState()) {
+     return;
+   }
+@@ -968,6 +977,9 @@ void NotifyMemoryProtect(void* Address, SIZE_T Size, ULONG NewProt, BOOL After,
+ }
+ 
+ NTSTATUS NotifyMapViewOfSection(void* Unk1, void* Address, void* Unk2, SIZE_T Size, ULONG AllocType, ULONG Prot) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Map)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return STATUS_SUCCESS;
++  }
+   if (!InvalidationTracker || !GetCPUArea().ThreadState()) {
+     return STATUS_SUCCESS;
+   }
+@@ -982,6 +994,9 @@ NTSTATUS NotifyMapViewOfSection(void* Unk1, void* Address, void* Unk2, SIZE_T Si
+ }
+ 
+ void NotifyUnmapViewOfSection(void* Address, BOOL After, NTSTATUS Status) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Unmap)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return;
++  }
+   if (!InvalidationTracker || !GetCPUArea().ThreadState()) {
+     return;
+   }
+diff --git a/Source/Windows/Common/Allocator.cpp b/Source/Windows/Common/Allocator.cpp
+index fc955fd37..38b8689c5 100644
+--- a/Source/Windows/Common/Allocator.cpp
++++ b/Source/Windows/Common/Allocator.cpp
+@@ -4,8 +4,11 @@
+ #include "Windows/Common/FEXUnixLib.h"
+ #include "Windows/Common/Logging.h"
+ 
++#include "Allocator.h"
+ #include <array>
++#include <atomic>
+ #include <chrono>
++#include <cstdlib>
+ #include <libloaderapi.h>
+ #include <sysinfoapi.h>
+ #include <synchapi.h>
+@@ -26,9 +29,15 @@
+ // Кодирование значения слота выбрано так, чтобы НОЛЬ (что видит новый поток по умолчанию)
+ // означал «поток скобку ещё не проходил»: бит 0 — признак пройденного ThreadInit,
+ // остальные биты — глубина вложенности.
++extern std::atomic<uint64_t> MacRunnerHookSuppressed[5], MacRunnerHookMaxDepth; // Core.cpp (HookGuard)
++
+ namespace {
+ constexpr uintptr_t JITWriteReadyBit = 1;
+ DWORD JITWriteTlsIndex = TLS_OUT_OF_INDEXES;
++DWORD HookGuardTlsIndex = TLS_OUT_OF_INDEXES; // ★ MacRunner 30.09: глубина областей HookGuard; слот заводится ТОЛЬКО при MACRUNNER_FEX_HOOK_GUARD=1
++// ★ Гейт читается ОДИН раз в SetupHooks (среда CRT к тому времени готова) и хранится простым bool. НЕЛЬЗЯ читать getenv лениво из хука: хук стреляет уже из
++//   rpmalloc_initialize (первая строка InitCRTProcess), а `Env` PE-CRT заполняет InitEnv (.CRT$FEXB) ПОЗЖЕ — getenv тогда разыменует нулевой указатель.
++bool HookGuardOn = false;
+ 
+ uintptr_t JITWriteSlotGet() {
+   if (JITWriteTlsIndex == TLS_OUT_OF_INDEXES) {
+@@ -67,9 +76,59 @@ void SetupHooks(HMODULE ntdll) {
+   SYSTEM_INFO system_info {};
+   GetSystemInfo(&system_info);
+   FEXCore::Allocator::SetupHooks(system_info.dwPageSize, Ptrs);
++  // Слот HookGuard — ПОСЛЕ слота JITWrite: его индекс не меняется ни при каком значении гейта.
++  {
++    const char* Value = getenv("MACRUNNER_FEX_HOOK_GUARD");
++    HookGuardOn = Value && Value[0] == '1' && !Value[1];
++    if (HookGuardOn && HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
++      HookGuardTlsIndex = TlsAlloc();
++    }
++  }
+ }
+ } // namespace FEX::Windows::Allocator
+ 
++namespace FEX::Windows::HookGuard {
++bool Enabled() {
++  return HookGuardOn;
++}
++
++uintptr_t Depth() {
++  if (HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
++    return 0;
++  }
++  return reinterpret_cast<uintptr_t>(TlsGetValue(HookGuardTlsIndex));
++}
++
++void Enter() {
++  if (HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
++    return;
++  }
++  const uintptr_t Value = Depth() + 1;
++  TlsSetValue(HookGuardTlsIndex, reinterpret_cast<LPVOID>(Value));
++  for (uint64_t Max = MacRunnerHookMaxDepth.load(std::memory_order_relaxed);
++       Value > Max && !MacRunnerHookMaxDepth.compare_exchange_weak(Max, Value, std::memory_order_relaxed);) {
++  }
++}
++
++void Leave() {
++  if (HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
++    return;
++  }
++  const uintptr_t Value = Depth();
++  if (Value) {
++    TlsSetValue(HookGuardTlsIndex, reinterpret_cast<LPVOID>(Value - 1));
++  }
++}
++
++bool Suppress(Kind K) {
++  if (!HookGuardOn || !Depth()) {
++    return false;
++  }
++  MacRunnerHookSuppressed[static_cast<unsigned>(K)].fetch_add(1, std::memory_order_relaxed);
++  return true;
++}
++} // namespace FEX::Windows::HookGuard
++
+ // Реализация объявлений из FEXCore/Utils/AllocatorHooks.h для ветви _WIN32.
+ namespace FEXCore::Allocator {
+ void JITWriteThreadInit() {
+diff --git a/Source/Windows/Common/Allocator.h b/Source/Windows/Common/Allocator.h
+index 082ebd1cf..ca6e367bb 100644
+--- a/Source/Windows/Common/Allocator.h
++++ b/Source/Windows/Common/Allocator.h
+@@ -5,3 +5,42 @@
+ namespace FEX::Windows::Allocator {
+ void SetupHooks(HMODULE ntdll);
+ }
++
++#include <cstdint>
++
++// ★ MacRunner (30.09.2026) — MACRUNNER_FEX_HOOK_GUARD=1 (по умолчанию ВЫКЛЮЧЕН, поведение прежнее).
++//   Дефект (доказан снимком спанов wxh-spans-r3-m1, 30.09): аллокатор FEX (rpmalloc) внутри инвалидации, под ЭКСКЛЮЗИВНЫМ CodeInvalidationMutex,
++//   возвращает ОС кусок памяти (VirtualFree -> NtFreeVirtualMemory). Обёртка NtFreeVirtualMemory в ARM64EC ntdll зовёт хук NotifyMemoryFree, если не выставлен
++//   InSyscallCallback (он защищает только от ВЛОЖЕННЫХ хуков, а вызов из кода эмулятора вне хука проходит) -> InvalidateAlignedInterval(Free=true) ->
++//   InvalidateIntervalInternal -> тот же эксклюзивный замок, который этот же поток уже держит; WritePriorityMutex не рекурсивен -> самоблокировка.
++//   Область Scope увеличивает счётчик глубины в слоте Win32 TLS (thread_local в PE-модулях FEX запрещён: каталог TLS пуст, см. Allocator.cpp) и на её время
++//   хуки Notify* ЭТОГО потока возвращаются сразу: не берут ThreadCreationMutex и не зовут трекер. Пропускается только то, что делает поток внутри области, а он
++//   там исполняет лишь код FEX; память гостя в области не освобождается и не защищается. Другие потоки оповещают как обычно.
++//   Счётчики пропусков по видам хука и наибольшая глубина — в строке macrunner-fex-jit (hs_free/hs_alloc/hs_protect/hs_map/hs_unmap/hs_depth_max).
++namespace FEX::Windows::HookGuard {
++enum class Kind : unsigned { Free, Alloc, Protect, Map, Unmap, Count };
++bool Enabled();              // MACRUNNER_FEX_HOOK_GUARD=1, читается один раз
++uintptr_t Depth();           // глубина областей ЭТОГО потока (0 при выключенном гейте)
++void Enter();
++void Leave();
++bool Suppress(Kind K);       // истина (и счёт по виду), если поток внутри области: оповещение пропустить целиком
++
++class Scope {
++public:
++  Scope() : Active {Enabled()} {
++    if (Active) {
++      Enter();
++    }
++  }
++  ~Scope() {
++    if (Active) {
++      Leave();
++    }
++  }
++  Scope(const Scope&) = delete;
++  Scope& operator=(const Scope&) = delete;
++
++private:
++  bool Active;
++};
++} // namespace FEX::Windows::HookGuard
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index bdc6bc9b2..276465a40 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -6,6 +6,7 @@
+ #include <FEXCore/Core/Context.h>
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Debug/InternalThreadState.h>
++#include "Allocator.h"
+ #include "InvalidationTracker.h"
+ #include "MacRunnerHostPageGeometry.h"
+ #include "MacRunnerProtKeep.h"
+@@ -439,6 +440,9 @@ bool InvalidationTracker::DiscoverExecutableView(uint64_t Address) {
+   const uint64_t End = (reinterpret_cast<uint64_t>(Info.BaseAddress) + Info.RegionSize + FEXCore::Utils::FEX_PAGE_SIZE - 1) & FEXCore::Utils::FEX_PAGE_MASK;
+   const FEXCore::IntervalList<uint64_t>::Interval View {Base, End};
+ 
++  // ★ MacRunner (30.09.2026, MACRUNNER_FEX_HOOK_GUARD): вставки в векторы интервалов под IntervalsLock (unique) выделяют память; если аллокатор отобразит новый кусок,
++  //   хук NotifyMemoryAlloc зайдёт в HandleMemoryProtectionNotification на тот же IntervalsLock. Область — до замка, чтобы накрыть и его взятие.
++  HookGuard::Scope HookGuardScope;
+   std::unique_lock Lock(IntervalsLock);
+   if (XIntervals.Query(Address).Enclosed) {
+     return true; // другой поток успел
+@@ -543,6 +547,7 @@ void InvalidationTracker::InvalidateIntervalInternal(uint64_t Address, uint64_t
+ 
+ void InvalidationTracker::InvalidateCallTargetPatch(uint64_t Address, uint64_t Size) {
+   std::scoped_lock CodeLock(CTX.GetCodeInvalidationMutex());
++  HookGuard::Scope HookGuardScope; // MACRUNNER_FEX_HOOK_GUARD: см. Allocator.h (вектор Erased и стирание кешей под эксклюзивным замком)
+   fextl::vector<uint64_t> Erased;
+   CTX.MRInvalidateCodeBuffersPrecise(Address, Size, Erased);
+   if (Erased.empty()) {
+@@ -555,6 +560,9 @@ void InvalidationTracker::InvalidateCallTargetPatch(uint64_t Address, uint64_t S
+ 
+ void InvalidationTracker::InvalidateIntervalInternalLocked(uint64_t Address, uint64_t Size) {
+   // NOTE: This assumes CodeInvalidationMutex is locked by the caller
++  // ★ MacRunner (30.09.2026, MACRUNNER_FEX_HOOK_GUARD): вся инвалидация под замком — сброс кешей блоков (стирание CachedCodePages освобождает память аллокатору,
++  //   тот может вернуть ОС кусок -> NtFreeVirtualMemory -> NotifyMemoryFree -> InvalidateIntervalInternal на ТОМ ЖЕ замке). Подробности — Allocator.h.
++  HookGuard::Scope HookGuardScope;
+   CTX.InvalidateCodeBuffersCodeRange(Address, Size);
+   for (auto Thread : Threads) {
+     CTX.InvalidateThreadCachedCodeRange(Thread.second, Address, Size);
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+index 1cbce11e5..94a75f086 100644
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -1046,6 +1046,9 @@ void BTCpuNotifyMemoryDirty(void* Address, SIZE_T Size) {
+ }
+ 
+ void BTCpuNotifyMemoryAlloc(void* Address, SIZE_T Size, ULONG Type, ULONG Prot, BOOL After, ULONG Status) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Alloc)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return;
++  }
+   if (!After) {
+     ThreadCreationMutex.lock();
+   } else {
+@@ -1058,6 +1061,9 @@ void BTCpuNotifyMemoryAlloc(void* Address, SIZE_T Size, ULONG Type, ULONG Prot,
+ }
+ 
+ void BTCpuNotifyMemoryProtect(void* Address, SIZE_T Size, ULONG NewProt, BOOL After, ULONG Status) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Protect)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return;
++  }
+   if (!After) {
+     ThreadCreationMutex.lock();
+   } else {
+@@ -1069,6 +1075,9 @@ void BTCpuNotifyMemoryProtect(void* Address, SIZE_T Size, ULONG NewProt, BOOL Af
+ }
+ 
+ void BTCpuNotifyMemoryFree(void* Address, SIZE_T Size, ULONG FreeType, BOOL After, ULONG Status) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Free)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return;
++  }
+   if (!After) {
+     ThreadCreationMutex.lock();
+   } else {
+@@ -1080,12 +1089,18 @@ void BTCpuNotifyMemoryFree(void* Address, SIZE_T Size, ULONG FreeType, BOOL Afte
+ }
+ 
+ NTSTATUS BTCpuNotifyMapViewOfSection(void* Unk1, void* Address, void* Unk2, SIZE_T Size, ULONG AllocType, ULONG Prot) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Map)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return STATUS_SUCCESS;
++  }
+   std::scoped_lock Lock(ThreadCreationMutex);
+   HandleImageMap(reinterpret_cast<uint64_t>(Address));
+   return STATUS_SUCCESS;
+ }
+ 
+ void BTCpuNotifyUnmapViewOfSection(void* Address, BOOL After, ULONG Status) {
++  if (FEX::Windows::HookGuard::Suppress(FEX::Windows::HookGuard::Kind::Unmap)) { // MACRUNNER_FEX_HOOK_GUARD (Allocator.h)
++    return;
++  }
+   if (!After) {
+     ThreadCreationMutex.lock();
+     auto [Start, Size] = InvalidationTracker->InvalidateContainingSection(reinterpret_cast<uint64_t>(Address), true);
+-- 
+2.54.0 (Apple Git-157)
+

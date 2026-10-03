@@ -1,0 +1,646 @@
+From 9510fa770429804289e18adca5bba6655a93ac26 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 09:59:33 +1000
+Subject: [PATCH 44/46] EXPERIMENT: guarded binary32/64 subnormal loads and
+ retired x87 counters (default off)
+
+Family: FLD m32/m64 binary-to-full80 conversions.
+Members: D9 /0 and DD /0; normal and signed zero existing; subnormal added.
+Trigger: recorded FLD entries; integer normalization avoids host DAZ/FZ.
+Coverage: full converter/JIT; FCW-independent exact load; NaNs/infinities use FEX fallback.
+Regression: native functional 4144; base0 OFF/ON 896, differences 0; subnormal siblings/edges.
+Diagnostics: explicit gate, normal-exit stderr, owned mapped counters, no debugger.
+Audit completed: yes. No install; candidate game acceptance pending.
+---
+ FEXCore/Source/Interface/Core/Core.cpp        | 18 +++++
+ FEXCore/Source/Interface/Core/HBX87Coverage.h | 36 +++++++++
+ .../Source/Interface/Core/HBX87CoverageIR.h   | 33 ++++++++
+ .../Source/Interface/Core/HBX87EarlyEmit.inl  | 32 ++++++--
+ FEXCore/Source/Interface/Core/HBX87Emit.inl   | 70 ++++++++++++++++-
+ FEXCore/Source/Interface/Core/HBX87Proof.h    |  6 ++
+ FEXCore/Source/Interface/Core/HBX87Stats.h    | 69 +++++++++++++++++
+ Source/Windows/ARM64EC/Module.cpp             | 10 ++-
+ Source/Windows/Common/Logging.cpp             | 75 +++++++++++++++++++
+ Source/Windows/Common/Logging.h               |  2 +
+ Source/Windows/WOW64/Module.cpp               | 10 ++-
+ Source/Windows/include/winternl.h             |  2 +
+ 12 files changed, 354 insertions(+), 9 deletions(-)
+ create mode 100644 FEXCore/Source/Interface/Core/HBX87Coverage.h
+ create mode 100644 FEXCore/Source/Interface/Core/HBX87CoverageIR.h
+ create mode 100644 FEXCore/Source/Interface/Core/HBX87Stats.h
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 1491698fb..8db9014ce 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -18,6 +18,8 @@ $end_info$
+ #include "Interface/Core/CPUID.h"
+ #include "Interface/Core/Frontend.h"
+ #include "Interface/Core/OpcodeDispatcher.h"
++#include "Interface/Core/HBX87CoverageIR.h"
++#include "Interface/Core/HBX87IR.h"
+ #include "Interface/Core/JIT/JITClass.h"
+ #include "Interface/Core/Dispatcher/Dispatcher.h"
+ #include "Interface/Core/X86Tables/X86Tables.h"
+@@ -1101,10 +1103,26 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+           }
+ 
+           Thread->OpDispatcher->SetForceTSO(ForceTSO);
++          unsigned CoverageOpcode = FEXCore::HBX87::Coverage::Opcodes;
++          IR::Ref CoverageCW {};
++          if (FEXCore::HBX87::Coverage::Enabled()) {
++            // Table identity, not DecodedInfo->OP: the decoder tables have
++            // overlapping numeric opcode spaces. Capture the pre-instruction
++            // FCW even for FLDCW/FNINIT/FNSTENV, then count only after effects.
++            const auto table = reinterpret_cast<uintptr_t>(TableInfo);
++            const auto first = reinterpret_cast<uintptr_t>(X86Tables::X87F80Ops.data());
++            if (table >= first && table < first + sizeof(X86Tables::X87F80Ops)) {
++              CoverageOpcode = (table - first) / sizeof(X86Tables::X86InstInfo);
++              CoverageCW = Thread->OpDispatcher->_LoadContextGPR(IR::OpSize::i16Bit, offsetof(FEXCore::Core::CPUState, FCW));
++            }
++          }
+           if (GPRSize == IR::OpSize::i32Bit && DecodedInfo->OPRaw >= 0xD8 && DecodedInfo->OPRaw <= 0xDF) {
+             Thread->OpDispatcher->TrackX87Instruction32(DecodedInfo);
+           }
+           std::invoke(Fn, Thread->OpDispatcher, DecodedInfo);
++          if (!Thread->OpDispatcher->HadDecodeFailure() && CoverageOpcode < FEXCore::HBX87::Coverage::Opcodes) {
++            FEXCore::HBX87::Coverage::Emit(*Thread->OpDispatcher, CoverageOpcode, CoverageCW, FEXCore::HBX87::PC24());
++          }
+           if (Thread->OpDispatcher->HadDecodeFailure()) {
+             HadDispatchError = true;
+           } else {
+diff --git a/FEXCore/Source/Interface/Core/HBX87Coverage.h b/FEXCore/Source/Interface/Core/HBX87Coverage.h
+new file mode 100644
+index 000000000..0c1974779
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/HBX87Coverage.h
+@@ -0,0 +1,36 @@
++// SPDX-License-Identifier: MIT
++// Diagnostic only: native shared counters, never enabled in timing runs.
++#pragma once
++#include <cstddef>
++#include <cstdint>
++#include <cstdlib>
++#include "HBX87Stats.h"
++
++namespace FEXCore::HBX87::Coverage {
++constexpr uint64_t Magic = UINT64_C(0x31564f4337385848); // HX87COV1, little endian
++constexpr unsigned Opcodes = 2048, Classes = 8, Outcomes = 12;
++// FCW classes, in priority order: PC64, RC, unmasked, reserved PC,
++// disabled PC24; otherwise PC53 or PC24. Class 7 is reserved.
++enum FCWClass : unsigned { PC53, PC24, PC64, RC, Unmasked, ReservedPC, DisabledPC24, Reserved };
++enum Outcome : unsigned {
++ Hit53, Hit24, RejectPC64, RejectRC, RejectUnmasked, RejectReservedPC,
++ RejectDisabledPC24, RejectInputDomain, RejectFPCR, RejectRange, CvtHit, CvtReject
++};
++struct alignas(64) Storage {
++ uint64_t magic, version, pid, bytes;
++ uint64_t backend; // 0 native/synthetic, 1 WOW64, 2 ARM64EC
++ uint64_t reserved[3];
++ alignas(64) uint64_t instructions[Opcodes][Classes];
++ alignas(64) uint64_t outcomes[Outcomes];
++ alignas(64) uint64_t stats[Stats::Count];
++};
++static_assert(offsetof(Storage, instructions) == 64);
++inline Storage* Shared {};
++inline bool Enabled() {
++ static const bool enabled = [] {
++  const char* p = std::getenv("MACRUNNER_HB_X87_COVERAGE");
++  return p && p[0] == '1' && p[1] == 0;
++ }();
++ return enabled;
++}
++}
+diff --git a/FEXCore/Source/Interface/Core/HBX87CoverageIR.h b/FEXCore/Source/Interface/Core/HBX87CoverageIR.h
+new file mode 100644
+index 000000000..626d7579d
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/HBX87CoverageIR.h
+@@ -0,0 +1,33 @@
++// SPDX-License-Identifier: MIT
++#pragma once
++#include "Interface/Core/HBX87Coverage.h"
++#include "Interface/IR/IREmitter.h"
++#include <FEXCore/Utils/LogManager.h>
++
++namespace FEXCore::HBX87::Coverage {
++// Emit AFTER the x87 instruction's effects: a faulting guest memory access
++// cannot inflate the completed-instruction denominator on a retry. CW was
++// loaded before dispatch, so control-word-changing instructions classify
++// against their actual incoming state.
++template<class Builder>
++void Emit(Builder& B, unsigned opcode, FEXCore::IR::Ref cw, bool pc24) {
++ if (!Enabled()) return;
++ LOGMAN_THROW_A_FMT(Shared != nullptr, "HB x87 coverage storage unavailable");
++ using namespace FEXCore::IR;
++ auto C = [&](uint64_t n) { return B._Constant(static_cast<int64_t>(n)); };
++ auto pc = B._And(OpSize::i64Bit, cw, C(0x300));
++ auto select = [&](Ref value, uint64_t equal, unsigned yes, Ref no) {
++  return B._Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::EQ, value, C(equal), C(yes), no);
++ };
++ auto cls = select(pc, 0, pc24 ? PC24 : DisabledPC24, C(PC53));
++ cls = select(pc, 0x100, ReservedPC, cls);
++ auto masked = B._And(OpSize::i64Bit, cw, C(0x3f));
++ cls = B._Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::NEQ, masked, C(0x3f), C(Unmasked), cls);
++ auto rc = B._And(OpSize::i64Bit, cw, C(0xc00));
++ cls = B._Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::NEQ, rc, C(0), C(RC), cls);
++ cls = select(pc, 0x300, PC64, cls);
++ auto offset = B._Lshl(OpSize::i64Bit, cls, C(3));
++ auto base = C(reinterpret_cast<uintptr_t>(&Shared->instructions[opcode][0]));
++ B._AtomicFetchAdd(OpSize::i64Bit, C(1), B._Add(OpSize::i64Bit, base, offset));
++}
++}
+diff --git a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+index 10b9ba344..81ede7682 100644
+--- a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+@@ -9,10 +9,23 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+  const auto kind=static_cast<FEXCore::HBX87::Kind>(Op->Kind);
+  LOGMAN_THROW_A_FMT(kind<=FEXCore::HBX87::Sqrt,"Invalid HB x87 opcode");
+  ForwardLabel PreSlow,FPCRSlow,RangeSlow,Path53,Path24,Done;
++ ForwardLabel PC64Slow,RCSlow,UnmaskedSlow,ReservedSlow,Disabled24Slow;
+  // PC64 is rejected before ANY operand extraction/classification.
+  and_(Size::i64Bit,TMP1,CW,0x300);
+  eor(Size::i64Bit,TMP1,TMP1,0x300);
+- (void)cbz(Size::i64Bit,TMP1,&PreSlow);
++ const bool Reasons=FEXCore::HBX87::Coverage::Enabled()||FEXCore::HBX87::Stats::Enabled();
++ (void)cbz(Size::i64Bit,TMP1,Reasons?&PC64Slow:&PreSlow);
++ if(Reasons) {
++   and_(Size::i64Bit,TMP1,CW,0xc00);
++   (void)cbnz(Size::i64Bit,TMP1,&RCSlow);
++   and_(Size::i64Bit,TMP1,CW,0x3f);
++   sub(Size::i64Bit,TMP1,TMP1,0x3f);
++   (void)cbnz(Size::i64Bit,TMP1,&UnmaskedSlow);
++   and_(Size::i64Bit,TMP1,CW,0x300);
++   sub(Size::i64Bit,TMP2,TMP1,0x100);
++   (void)cbz(Size::i64Bit,TMP2,&ReservedSlow);
++   if(!FEXCore::HBX87::PC24()) (void)cbz(Size::i64Bit,TMP1,&Disabled24Slow);
++ }
+  LoadConstant(Size::i64Bit,TMP2,0x0f3f);
+  and_(Size::i64Bit,TMP1,CW,TMP2);
+  sub(Size::i64Bit,TMP2,TMP1,0x023f);
+@@ -165,14 +178,16 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+    fmov(Size::i64Bit,VTMP1.D(),TMP3,true);
+    mov(Dst.Q(),VTMP1.Q());
+    HBCount(unsigned(kind)*5+(isDouble?0:1),Dst);
++   HBObserve(isDouble?FEXCore::HBX87::Coverage::Hit53:FEXCore::HBX87::Coverage::Hit24);
+    (void)b(&Done);
+  };
+  (void)Bind(&Path53);
+  EmitPrecision(true);
+  (void)Bind(&Path24);
+  EmitPrecision(false);
+- auto EmitOriginal=[&](unsigned reason) {
++ auto EmitOriginal=[&](unsigned reason,unsigned outcome) {
+    HBCount(unsigned(kind)*5+reason,A);
++   HBObserve(outcome);
+    if(kind==FEXCore::HBX87::Sqrt) {
+      IR::IROp_F80SQRT Original; std::memset(&Original,0,sizeof(Original));
+      Original.Header=*IROp;Original.Header.Op=IR::OP_F80SQRT;
+@@ -187,9 +202,16 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+    }
+    (void)b(&Done);
+  };
+- (void)Bind(&PreSlow); EmitOriginal(2);
+- (void)Bind(&FPCRSlow); EmitOriginal(3);
+- (void)Bind(&RangeSlow); EmitOriginal(4);
++ (void)Bind(&PreSlow); EmitOriginal(2,FEXCore::HBX87::Coverage::RejectInputDomain);
++ (void)Bind(&FPCRSlow); EmitOriginal(3,FEXCore::HBX87::Coverage::RejectFPCR);
++ (void)Bind(&RangeSlow); EmitOriginal(4,FEXCore::HBX87::Coverage::RejectRange);
++ if(Reasons) {
++   (void)Bind(&PC64Slow); EmitOriginal(2,FEXCore::HBX87::Coverage::RejectPC64);
++   (void)Bind(&RCSlow); EmitOriginal(2,FEXCore::HBX87::Coverage::RejectRC);
++   (void)Bind(&UnmaskedSlow); EmitOriginal(2,FEXCore::HBX87::Coverage::RejectUnmasked);
++   (void)Bind(&ReservedSlow); EmitOriginal(2,FEXCore::HBX87::Coverage::RejectReservedPC);
++   (void)Bind(&Disabled24Slow); EmitOriginal(2,FEXCore::HBX87::Coverage::RejectDisabledPC24);
++ }
+  (void)Bind(&Done);
+  return;
+ }
+diff --git a/FEXCore/Source/Interface/Core/HBX87Emit.inl b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+index ed8706719..ddaf5c930 100644
+--- a/FEXCore/Source/Interface/Core/HBX87Emit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+@@ -4,6 +4,47 @@
+ // Included at the BEGINNING of Arm64JITCore::Op_Unhandled.
+ // Full FEX integration NOT BUILT. Uses only TMP1..TMP4, VTMP1..VTMP2.
+ using namespace ARMEmitter;
++auto HBStats = [&](unsigned id) {
++  if (!FEXCore::HBX87::Stats::Enabled()) return;
++  LoadConstant(Size::i64Bit,TMP1,reinterpret_cast<uintptr_t>(&FEXCore::HBX87::Stats::Values[id]));
++  if (CTX->HostFeatures.SupportsAtomics) {
++    LoadConstant(Size::i64Bit,TMP2,1);
++    ldaddal(SubRegSize::i64Bit,TMP2,TMP2,TMP1);
++  } else {
++    BackwardLabel Retry;
++    (void)Bind(&Retry);
++    ldaxr(SubRegSize::i64Bit,TMP2,TMP1);
++    add(Size::i64Bit,TMP3,TMP2,1);
++    stlxr(SubRegSize::i64Bit,TMP4,TMP3,TMP1);
++    (void)cbnz(Size::i32Bit,TMP4,&Retry);
++  }
++  // One bounded stderr witness per outcome; exact final values also survive
++  // externally bounded Wine termination in the already owned mapped file.
++  ForwardLabel SkipStatsSnapshot;
++  (void)cbnz(Size::i64Bit,TMP2,&SkipStatsSnapshot);
++  IR::IROp_F80Add Dummy; std::memset(&Dummy,0,sizeof(Dummy));
++  Dummy.Header.Op=IR::OP_F80ADD; Dummy.Header.Size=IR::OpSize::i128Bit;
++  FallbackInfo Info {};
++  if (!InterpreterOps::GetFallbackHandler(&Dummy.Header,&Info) || Info.ABI!=FABI_F80_I16_F80_F80_PTR) std::abort();
++  mrs(TMP1,SystemRegister::FPSR);
++  stp<IndexType::PRE>(XReg::lr,TMP1,Reg::rsp,-16);
++  mov(VTMP2.Q(),VTMP1.Q());
++  ldr(TMP1,FALLBACK_HANDLER_OFFSET(Info.HandlerIndex,ABIHandler));
++  LoadConstant(Size::i64Bit,TMP4,reinterpret_cast<uintptr_t>(&FEXCore::HBX87::StatsSnapshot));
++  blr(TMP1);
++  ldp<IndexType::POST>(XReg::lr,TMP1,Reg::rsp,16);
++  msr(SystemRegister::FPSR,TMP1);
++  (void)Bind(&SkipStatsSnapshot);
++};
++auto HBObserve = [&](unsigned id) {
++  HBStats(id); // first twelve categories have the same numbering
++  if (!FEXCore::HBX87::Coverage::Enabled()) return;
++  LOGMAN_THROW_A_FMT(FEXCore::HBX87::Coverage::Shared && CTX->HostFeatures.SupportsAtomics,
++                    "HB x87 coverage requires mapped storage and LSE");
++  LoadConstant(Size::i64Bit,TMP1,reinterpret_cast<uintptr_t>(&FEXCore::HBX87::Coverage::Shared->outcomes[id]));
++  LoadConstant(Size::i64Bit,TMP2,1);
++  ldaddal(SubRegSize::i64Bit,TMP2,TMP2,TMP1);
++};
+ auto HBCount = [&](unsigned id, ARMEmitter::VRegister Value) {
+   if (!FEXCore::HBX87::Proof()) return;
+   LOGMAN_THROW_A_FMT(CTX->HostFeatures.SupportsAtomics, "HB x87 proof requires LSE");
+@@ -40,13 +81,14 @@ if (FEXCore::HBX87::Enabled() && IROp->Op==IR::OP_F80CVTTO) {
+     const bool D=Cvt->SrcSize==IR::OpSize::i64Bit;
+     const unsigned f=D?52:23,shift=D?11:40,bias=D?1023:127,expmax=D?2047:255;
+     const uint64_t frac=(UINT64_C(1)<<f)-1;
+-    ForwardLabel Slow,Zero,Pack,Done;
++    const bool Subnormals = FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_LOAD_SUBNORMAL");
++    ForwardLabel Slow,Zero,Subnormal,Pack,Done;
+     umov<SubRegSize::i64Bit>(TMP2,GetVReg(Cvt->X80Src),0);
+     if(!D)uxtw(Size::i64Bit,TMP2,TMP2);
+     and_(Size::i64Bit,TMP3,TMP2,D?UINT64_C(0x7fffffffffffffff):UINT64_C(0x7fffffff));
+     (void)cbz(Size::i64Bit,TMP3,&Zero);
+     lsr(Size::i64Bit,TMP3,TMP3,f);
+-    (void)cbz(Size::i64Bit,TMP3,&Slow);
++    (void)cbz(Size::i64Bit,TMP3,Subnormals?&Subnormal:&Slow);
+     sub(Size::i64Bit,TMP4,TMP3,expmax);
+     (void)cbz(Size::i64Bit,TMP4,&Slow);
+     LoadConstant(Size::i64Bit,TMP4,16383-bias);
+@@ -58,6 +100,25 @@ if (FEXCore::HBX87::Enabled() && IROp->Op==IR::OP_F80CVTTO) {
+     orr(Size::i64Bit,TMP2,TMP2,UINT64_C(1)<<f);
+     lsl(Size::i64Bit,TMP2,TMP2,shift);
+     (void)b(&Pack);
++    if(Subnormals) {
++      (void)Bind(&Subnormal);
++      // Exact binary subnormal normalization; no host FP/rounding/status writes.
++      lsr(Size::i64Bit,TMP3,TMP2,D?48:16);
++      and_(Size::i64Bit,TMP3,TMP3,0x8000);
++      and_(Size::i64Bit,TMP2,TMP2,frac);
++      clz(Size::i64Bit,TMP4,TMP2);
++      lslv(Size::i64Bit,TMP2,TMP2,TMP4);
++      // Save normalized significand while recording this actual subnormal hit.
++      fmov(Size::i64Bit,VTMP1.D(),TMP2);
++      LoadConstant(Size::i64Bit,TMP2,16383+64-bias-f);
++      sub(Size::i64Bit,TMP4,TMP2,TMP4);
++      orr(Size::i64Bit,TMP3,TMP3,TMP4);
++      fmov(Size::i64Bit,VTMP1.D(),TMP3,true);
++      mov(GetVReg(Node).Q(),VTMP1.Q());
++      HBStats(D?FEXCore::HBX87::Stats::Load64Subnormal:FEXCore::HBX87::Stats::Load32Subnormal);
++      HBObserve(FEXCore::HBX87::Coverage::CvtHit);
++      (void)b(&Done);
++    }
+     (void)Bind(&Zero);
+     lsr(Size::i64Bit,TMP3,TMP2,D?48:16);
+     and_(Size::i64Bit,TMP3,TMP3,0x8000);
+@@ -67,9 +128,11 @@ if (FEXCore::HBX87::Enabled() && IROp->Op==IR::OP_F80CVTTO) {
+     fmov(Size::i64Bit,VTMP1.D(),TMP3,true);
+     mov(GetVReg(Node).Q(),VTMP1.Q());
+     HBCount(D?27:25,GetVReg(Node));
++    HBObserve(FEXCore::HBX87::Coverage::CvtHit);
+     (void)b(&Done);
+     (void)Bind(&Slow);
+     HBCount(D?28:26,GetVReg(Cvt->X80Src));
++    HBObserve(FEXCore::HBX87::Coverage::CvtReject);
+     // Same call protocol as the original F32/F64 -> F80 case; no recursive
+     // re-entry through this enrichment and no second guest-memory load.
+     FallbackInfo OriginalInfo{};
+@@ -179,6 +242,7 @@ if(IROp->Op==IR::OP_HBX87FAST) {
+    fmov(Size::i64Bit,VTMP1.D(),TMP3,true);
+    mov(Dst.Q(),VTMP1.Q());
+    HBCount(unsigned(kind)*5+(isDouble?0:1),Dst);
++   HBObserve(isDouble?FEXCore::HBX87::Coverage::Hit53:FEXCore::HBX87::Coverage::Hit24);
+    (void)b(&Done);
+  };
+  EmitPrecision(true);
+@@ -186,6 +250,8 @@ if(IROp->Op==IR::OP_HBX87FAST) {
+  EmitPrecision(false);
+  auto EmitOriginal=[&](unsigned reason) {
+    HBCount(unsigned(kind)*5+reason,A);
++   HBObserve(reason==2?FEXCore::HBX87::Coverage::RejectInputDomain:
++             reason==3?FEXCore::HBX87::Coverage::RejectFPCR:FEXCore::HBX87::Coverage::RejectRange);
+    if(kind==FEXCore::HBX87::Sqrt) {
+      IR::IROp_F80SQRT Original; memset(&Original,0,sizeof(Original));
+      Original.Header=*IROp;Original.Header.Op=IR::OP_F80SQRT;
+diff --git a/FEXCore/Source/Interface/Core/HBX87Proof.h b/FEXCore/Source/Interface/Core/HBX87Proof.h
+index 7513bcda1..75c486d4c 100644
+--- a/FEXCore/Source/Interface/Core/HBX87Proof.h
++++ b/FEXCore/Source/Interface/Core/HBX87Proof.h
+@@ -4,6 +4,8 @@
+ #pragma once
+ #include "Common/VectorRegType.h"
+ #include "Interface/Core/HBX87IR.h"
++#include "Interface/Core/HBX87Coverage.h"
++#include "Interface/Core/HBX87Stats.h"
+ #include <FEXCore/Utils/CompilerDefs.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <atomic>
+@@ -33,4 +35,8 @@ inline void Dump(){
+ // Keep the same preservation attribute as its normal OpHandlers target.
+ FEXCORE_PRESERVE_ALL_ATTR inline VectorRegType Report(uint16_t, VectorRegType a, VectorRegType,
+                                                      FEXCore::Core::CpuStateFrame*) { Dump();return a; }
++FEXCORE_PRESERVE_ALL_ATTR inline VectorRegType StatsSnapshot(uint16_t, VectorRegType a, VectorRegType,
++                                                          FEXCore::Core::CpuStateFrame*) {
++ Stats::Dump(false); return a;
++}
+ }
+diff --git a/FEXCore/Source/Interface/Core/HBX87Stats.h b/FEXCore/Source/Interface/Core/HBX87Stats.h
+new file mode 100644
+index 000000000..b2060f793
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/HBX87Stats.h
+@@ -0,0 +1,69 @@
++// SPDX-License-Identifier: MIT
++// Process-local retired converter/arithmetic outcomes; diagnostic gate only.
++#pragma once
++#include <atomic>
++#include <cstdint>
++#include <cstdlib>
++#if !defined(_WIN32)
++#include <cstdio>
++#else
++namespace FEX::Windows::Logging { void Raw(const char*); }
++#endif
++
++namespace FEXCore::HBX87::Stats {
++enum Outcome : unsigned {
++ Hit53, Hit24, RejectPC64, RejectRC, RejectUnmasked, RejectReservedPC,
++ RejectDisabledPC24, RejectInputDomain, RejectFPCR, RejectRange, LoadHit, LoadReject,
++ Store32Hit, Store64Hit, StorePC64, StoreRC, StoreUnmasked, StorePC,
++ StoreDomain, StoreRange, StoreRounding, Load32Subnormal, Load64Subnormal,
++ LoadCWChanged, LoadCWRemoved, ClearChanged, ClearRemoved, Count
++};
++inline constexpr const char* Names[Count] = {
++ "arith53", "arith24", "arith_pc64", "arith_rc", "arith_unmasked", "arith_reserved_pc",
++ "arith_pc24_disabled", "arith_domain", "arith_fpcr", "arith_range", "load_hit", "load_reject",
++ "store32_hit", "store64_hit", "store_pc64", "store_rc", "store_unmasked", "store_pc",
++ "store_domain", "store_range", "store_rounding", "load32_subnormal", "load64_subnormal",
++ "fldcw_changed", "fldcw_store_removed", "ie_sf_byte_changed", "ie_sf_byte_store_removed"
++};
++alignas(64) inline uint64_t LocalValues[Count] {};
++inline uint64_t* Values = LocalValues;
++inline std::atomic<bool> Printed {};
++inline bool Gate() {
++ const char* p = std::getenv("MACRUNNER_HB_X87_STATS");
++ return p && p[0] == '1' && !p[1];
++}
++inline void Dump(bool Final = true) {
++ if (!Gate() || (Final && Printed.exchange(true, std::memory_order_relaxed))) return;
++ char line[2048], *p = line;
++ auto Text = [&](const char* q) { while (*q) *p++ = *q++; };
++ auto Num = [&](uint64_t n) {
++  char t[20]; unsigned z = 0;
++  do { t[z++] = char('0' + n % 10); n /= 10; } while (n);
++  while (z) *p++ = t[--z];
++ };
++ Text("[hb-x87-stats-v1]");
++ Text(Final ? " final=1" : " final=0");
++ for (unsigned i = 0; i < Count; ++i) {
++  Text(" "); Text(Names[i]); Text("=");
++  Num(std::atomic_ref<uint64_t>(Values[i]).load(std::memory_order_relaxed));
++ }
++ *p++ = '\n'; *p = 0;
++#if defined(_WIN32)
++ FEX::Windows::Logging::Raw(line);
++#else
++ std::fputs(line, stderr);
++#endif
++}
++inline void ExitDump() { Dump(); }
++inline bool Enabled() {
++ static const bool enabled = [] {
++  if (!Gate()) return false;
++#if !defined(_WIN32)
++  // Called during normal JIT construction, never first initialized in a handler.
++  std::atexit(ExitDump);
++#endif
++  return true;
++ }();
++ return enabled;
++}
++}
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index 41435d3ae..fac40fc3e 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -8,6 +8,7 @@ $end_info$
+ */
+ 
+ #include <FEXCore/fextl/fmt.h>
++#include "../../../FEXCore/Source/Interface/Core/HBX87Stats.h"
+ #include <algorithm>
+ #include <atomic>
+ extern std::atomic<uint64_t> MacRunnerJitSMC; // ★ MacRunner Opus 19.09: определён в Core.cpp
+@@ -749,6 +750,10 @@ NTSTATUS ProcessInit() {
+ 
+   {
+     auto HostFeatures = FEX::Windows::CPUFeatures::FetchHostFeatures(IsWine, FEXCore::HostFeatures::HostTypeEnum::Arm64ec);
++    if (FEXCore::HBX87::Stats::Enabled()) {
++      FEX::Windows::Logging::Raw(HostFeatures.SupportsAtomics ?
++        "[hb-x87-stats-init] advertised_lse=1\n" : "[hb-x87-stats-init] advertised_lse=0; use LL/SC\n");
++    }
+     CTX = FEXCore::Context::Context::CreateNewContext(HostFeatures);
+   }
+ 
+@@ -758,6 +763,7 @@ NTSTATUS ProcessInit() {
+   Exception::HandlerConfig.emplace(*CTX);
+   InvalidationTracker.emplace(*CTX, Threads);
+   ImageTracker.emplace(*CTX, false);
++  FEX::Windows::Logging::InitCoverage();
+ 
+   auto MainModule = reinterpret_cast<__TEB*>(NtCurrentTeb())->Peb->ImageBaseAddress;
+   HandleImageMap(reinterpret_cast<uint64_t>(MainModule), true);
+@@ -790,7 +796,9 @@ NTSTATUS ProcessInit() {
+   return STATUS_SUCCESS;
+ }
+ 
+-void ProcessTerm(HANDLE Handle, BOOL After, NTSTATUS Status) {}
++void ProcessTerm(HANDLE Handle, BOOL After, NTSTATUS Status) {
++  FEXCore::HBX87::Stats::Dump();
++}
+ 
+ class ScopedCallbackDisable {
+ private:
+diff --git a/Source/Windows/Common/Logging.cpp b/Source/Windows/Common/Logging.cpp
+index 395e837e5..2da31a892 100644
+--- a/Source/Windows/Common/Logging.cpp
++++ b/Source/Windows/Common/Logging.cpp
+@@ -11,6 +11,8 @@
+ #include <winternl.h>
+ #include <winnt.h>
+ #include <libloaderapi.h>
++#include "Priv.h"
++#include "../../../FEXCore/Source/Interface/Core/HBX87Coverage.h"
+ 
+ namespace {
+ using WineDebugWrite = int (WINAPI*)(const char* Message, unsigned int Length);
+@@ -66,6 +68,79 @@ void Raw(const char* Message) {
+   }
+ }
+ 
++void InitCoverage() {
++  // Initialise before guest execution, including SilentLog runs. No CRT file
++  // I/O from the PE translator: use the existing ntdll boundary instead.
++  if ((FEXCore::HBX87::Coverage::Enabled() || FEXCore::HBX87::Stats::Enabled()) && !FEXCore::HBX87::Coverage::Shared) {
++    const char* Dir = getenv("MACRUNNER_HB_X87_COVERAGE_DIR");
++    const auto Fail = [](const char* Message) {
++      Raw(Message);
++      NtTerminateProcess(NtCurrentProcess(), STATUS_UNSUCCESSFUL);
++      __fastfail(0);
++    };
++    if (!Dir || !*Dir) {
++      Fail("[hb-x87-coverage] missing owned output directory\n");
++      return;
++    }
++#ifdef ARCHITECTURE_arm64ec
++    constexpr unsigned Backend = 2;
++    constexpr const char* BackendName = "arm64ec";
++#else
++    constexpr unsigned Backend = 1;
++    constexpr const char* BackendName = "wow64";
++#endif
++    const auto Path = fextl::fmt::format("{}\\x87-{}-{}.bin", Dir, BackendName, GetCurrentProcessId());
++    ScopedUnicodeString DosPath {Path.c_str()};
++    ScopedUnicodeString NTPath;
++    if (!RtlDosPathNameToNtPathName_U(DosPath->Buffer, &*NTPath, nullptr, nullptr)) {
++      Fail("[hb-x87-coverage] path conversion failed\n");
++      return;
++    }
++    OBJECT_ATTRIBUTES Attr;
++    InitializeObjectAttributes(&Attr, &*NTPath, OBJ_CASE_INSENSITIVE, nullptr, nullptr);
++    HANDLE File {}, Section {};
++    IO_STATUS_BLOCK IOSB {};
++    LARGE_INTEGER Size;
++    Size.QuadPart = sizeof(FEXCore::HBX87::Coverage::Storage);
++    auto Status = NtCreateFile(&File, GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, &Attr, &IOSB, &Size,
++                              FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_CREATE,
++                              FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, nullptr, 0);
++    if (Status < 0 || !File) {
++      Fail(fextl::fmt::format("[hb-x87-coverage] exclusive create failed: {:x}\n", Status).c_str());
++      return;
++    }
++    Status = NtCreateSection(&Section, SECTION_MAP_READ | SECTION_MAP_WRITE, nullptr, &Size, PAGE_READWRITE, SEC_COMMIT, File);
++    NtClose(File);
++    if (Status < 0 || !Section) {
++      Fail(fextl::fmt::format("[hb-x87-coverage] section failed: {:x}\n", Status).c_str());
++      return;
++    }
++    void* Base {};
++    SIZE_T ViewSize = Size.QuadPart;
++    // Ex has the standard ABI in both Windows and Darwin Wine. The selected
++    // Darwin NtMapViewOfSection export instead takes a packed extra pointer
++    // as argument eight; calling that export with Windows' inherit enum faults.
++    // No extended parameters are needed for this private data mapping.
++    Status = NtMapViewOfSectionEx(Section, NtCurrentProcess(), &Base, nullptr, &ViewSize,
++                                 0, PAGE_READWRITE, nullptr, 0);
++    NtClose(Section);
++    if (Status < 0 || !Base || ViewSize < sizeof(FEXCore::HBX87::Coverage::Storage)) {
++      Fail(fextl::fmt::format("[hb-x87-coverage] map failed: {:x}; invalid base or view\n", Status).c_str());
++      return;
++    }
++    auto* Shared = static_cast<FEXCore::HBX87::Coverage::Storage*>(Base);
++    Shared->version = 2;
++    Shared->pid = GetCurrentProcessId();
++    Shared->bytes = sizeof(*Shared);
++    Shared->backend = Backend;
++    Shared->magic = FEXCore::HBX87::Coverage::Magic;
++    FEXCore::HBX87::Coverage::Shared = Shared;
++    FEXCore::HBX87::Stats::Values = Shared->stats;
++    Raw(fextl::fmt::format("[hb-x87-coverage] pid={} backend={} bytes={} mapped HX87COV1; diagnostic only\n",
++                         Shared->pid, BackendName, Shared->bytes).c_str());
++  }
++}
++
+ void Init() {
+   FEX_CONFIG_OPT(SilentLog, SILENTLOG);
+   if (SilentLog()) {
+diff --git a/Source/Windows/Common/Logging.h b/Source/Windows/Common/Logging.h
+index 5fd04f667..b7e17901e 100644
+--- a/Source/Windows/Common/Logging.h
++++ b/Source/Windows/Common/Logging.h
+@@ -3,6 +3,8 @@
+ 
+ namespace FEX::Windows::Logging {
+ void Init();
++// Mapping invokes Wine notifications; call only after CTX and both trackers exist.
++void InitCoverage();
+ 
+ // ★★★ MacRunner N2b 2026-09-07 — ЕДИНСТВЕННЫЙ ГОДНЫЙ КАНАЛ ДИАГНОСТИКИ ИЗ PE-ПОЛОВИНЫ.
+ //
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+index f6758c6b8..c394607f8 100644
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -9,6 +9,7 @@ $end_info$
+ // Thanks to André Zwing, whose ideas from https://github.com/AndreRH/hangover this code is based upon
+ 
+ #include <FEXCore/fextl/fmt.h>
++#include "../../../FEXCore/Source/Interface/Core/HBX87Stats.h"
+ #include <FEXCore/Core/X86Enums.h>
+ #include <FEXCore/Core/SignalDelegator.h>
+ #include <FEXCore/Core/Context.h>
+@@ -610,6 +611,10 @@ void BTCpuProcessInit() {
+ 
+   {
+     auto HostFeatures = FEX::Windows::CPUFeatures::FetchHostFeatures(IsWine, FEXCore::HostFeatures::HostTypeEnum::Wow64);
++    if (FEXCore::HBX87::Stats::Enabled()) {
++      FEX::Windows::Logging::Raw(HostFeatures.SupportsAtomics ?
++        "[hb-x87-stats-init] advertised_lse=1\n" : "[hb-x87-stats-init] advertised_lse=0; use LL/SC\n");
++    }
+     MACRUNNER_FEX_STEP(10, "FetchHostFeatures");
+     CTX = FEXCore::Context::Context::CreateNewContext(HostFeatures);
+     MACRUNNER_FEX_STEP(11, "CreateNewContext");
+@@ -623,6 +628,7 @@ void BTCpuProcessInit() {
+   Context::HandlerConfig.emplace(*CTX);
+   InvalidationTracker.emplace(*CTX, Threads);
+   ImageTracker.emplace(*CTX, false);
++  FEX::Windows::Logging::InitCoverage();
+ 
+   auto MainModule = reinterpret_cast<__TEB*>(NtCurrentTeb())->Peb->ImageBaseAddress;
+   HandleImageMap(reinterpret_cast<uint64_t>(MainModule), true);
+@@ -665,7 +671,9 @@ void BTCpuProcessInit() {
+   }
+ }
+ 
+-void BTCpuProcessTerm(HANDLE Handle, BOOL After, ULONG Status) {}
++void BTCpuProcessTerm(HANDLE Handle, BOOL After, ULONG Status) {
++  FEXCore::HBX87::Stats::Dump();
++}
+ 
+ void BTCpuThreadInit() {
+   static constexpr size_t DefaultWow64CS {4};
+diff --git a/Source/Windows/include/winternl.h b/Source/Windows/include/winternl.h
+index de9e28741..c7076b044 100644
+--- a/Source/Windows/include/winternl.h
++++ b/Source/Windows/include/winternl.h
+@@ -525,6 +525,8 @@ NTSTATUS WINAPI NtFreeVirtualMemory(HANDLE, PVOID*, SIZE_T*, ULONG);
+ NTSTATUS WINAPI NtGetContextThread(HANDLE, CONTEXT*);
+ ULONG WINAPI NtGetCurrentProcessorNumber(void);
+ NTSYSAPI NTSTATUS WINAPI NtMapViewOfSection(HANDLE, HANDLE, PVOID*, ULONG_PTR, SIZE_T, const LARGE_INTEGER*, SIZE_T*, SECTION_INHERIT, ULONG, ULONG);
++NTSYSAPI NTSTATUS WINAPI NtMapViewOfSectionEx(HANDLE, HANDLE, PVOID*, const LARGE_INTEGER*, SIZE_T*, ULONG, ULONG,
++                                           struct MEM_EXTENDED_PARAMETER*, ULONG);
+ NTSYSAPI NTSTATUS WINAPI NtUnmapViewOfSection(HANDLE, PVOID);
+ NTSTATUS WINAPI NtOpenKeyEx(PHANDLE, ACCESS_MASK, const OBJECT_ATTRIBUTES*, ULONG);
+ NTSTATUS WINAPI NtProtectVirtualMemory(HANDLE, PVOID*, SIZE_T*, ULONG, ULONG*);
+-- 
+2.54.0 (Apple Git-157)
+

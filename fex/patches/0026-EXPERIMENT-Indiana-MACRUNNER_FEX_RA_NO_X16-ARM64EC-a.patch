@@ -1,0 +1,95 @@
+From dd45eef6b65c4ba047d1c3f5010f5d621937e49d Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 05:32:26 +1000
+Subject: [PATCH 26/80] =?UTF-8?q?EXPERIMENT=20(Indiana):=20MACRUNNER=5FFEX?=
+ =?UTF-8?q?=5FRA=5FNO=5FX16=20=E2=80=94=20ARM64EC=20allocator=20pool=20wit?=
+ =?UTF-8?q?hout=20x16?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+On ARM64EC x16 is in the dynamic register pool (RA = x6, x7, x14, x15, x16, x30), while
+Wine's macOS x18 resume thunk branches through x16 for pcs inside FEX's code buffer on
+the assumption that FEX never keeps x16 live. With the gate the pool is x6, x7, x14,
+x15, x30: pairs (x6,x7)/(x14,x15) keep indices 0..3, so RAPairs = 4 stays valid. One
+line per process (macrunner-fex-ra-no-x16) proves the gate took effect. Default keeps
+the upstream pool.
+
+Svod-Origin: exp-indiana-stlur-20260930 5f3fde7d0 (artifacts/indiana-20260929/engine/buildsh-ind/src)
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../Core/ArchHelpers/Arm64Emitter.cpp         | 44 +++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+
+diff --git a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+index 729aa63ab..6e6dcaf7b 100644
+--- a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+@@ -23,6 +23,34 @@
+ #include <tuple>
+ #include <utility>
+ 
++#ifdef ARCHITECTURE_arm64ec
++#include <atomic>
++#include <cstdlib>
++
++// FEX::Windows::Logging::Raw (__wine_dbg_output): fprintf в PE-части FEX роняет процесс (см. Core.cpp).
++namespace FEX::Windows::Logging {
++void Raw(const char* Message);
++}
++
++namespace {
++// ★ MacRunner Indiana 30.09.2026 — гейт MACRUNNER_FEX_RA_NO_X16 (см. x64::RA_NoX16 ниже).
++// Печать одна на процесс и безусловна при включённом гейте: доказывает, что пул без x16 выбран.
++bool MacRunnerRaNoX16() {
++  static const bool On = [] {
++    const char* V = getenv("MACRUNNER_FEX_RA_NO_X16");
++    return V && V[0] == '1' && !V[1];
++  }();
++  if (On) {
++    static std::atomic<bool> Printed {false};
++    if (!Printed.exchange(true, std::memory_order_relaxed)) {
++      FEX::Windows::Logging::Raw("macrunner-fex-ra-no-x16: пул распределителя ARM64EC без x16 (x6 x7 x14 x15 x30)\n");
++    }
++  }
++  return On;
++}
++} // namespace
++#endif
++
+ namespace FEXCore::CPU {
+ 
+ // LLVM's preserve_all doc, this is used throughout this file and reproduced
+@@ -147,6 +175,17 @@ namespace x64 {
+     ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r16, ARMEmitter::Reg::r30,
+   };
+ 
++  // ★ MacRunner Indiana 30.09.2026 — тот же пул БЕЗ x16 (гейт MACRUNNER_FEX_RA_NO_X16=1, умолчание — прежний).
++  // Wine на macOS после возврата из сигнала восстанавливает x18 трамплином, который ветвится через x16,
++  // если адрес возврата лежит в буфере кода FEX (signal_arm64.c, setup_x18_resume_from_sigcontext), и
++  // обосновывает это тем, что x16 у FEX «роли не несёт». Для ARM64EC это неверно ровно здесь: x16 —
++  // регистр распределителя (Indiana: `add x16, x27, #0xfec` ; `stlur x14, [x16]`). Без x16 в пуле
++  // выпущенный код никогда не держит в нём живого значения, и трамплин r16 становится честным.
++  // Пары (x6,x7) и (x14,x15) — индексы 0..3 — не меняются, RAPairs = 4 остаётся верным.
++  constexpr std::array<ARMEmitter::Register, 5> RA_NoX16 = {
++    ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r30,
++  };
++
+   constexpr std::array<ARMEmitter::Register, 5> PreserveAll_Dynamic = {ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r16,
+                                                                        ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
+ 
+@@ -388,6 +427,11 @@ Arm64Emitter::Arm64Emitter(FEXCore::Context::ContextImpl* ctx, void* EmissionPtr
+   if (EmitterCTX->Config.Is64BitMode()) {
+     StaticRegisters = x64::SRA;
+     GeneralRegisters = x64::RA;
++#ifdef ARCHITECTURE_arm64ec
++    if (MacRunnerRaNoX16()) {
++      GeneralRegisters = x64::RA_NoX16;
++    }
++#endif
+     GeneralRegistersNotPreserved = x64::NotPreserved_Dynamic;
+     StaticFPRegisters = x64::SRAFPR;
+     GeneralFPRegisters = x64::RAFPR;
+-- 
+2.54.0 (Apple Git-157)
+

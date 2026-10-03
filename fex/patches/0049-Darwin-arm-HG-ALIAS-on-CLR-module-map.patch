@@ -1,0 +1,296 @@
+From 2f24b63a3f87dbe43239c4ba395db8338d7ebdee Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 12:44:31 +1000
+Subject: [PATCH] Darwin: arm hook and alias correctness when CLR code
+ generation modules map
+
+Arm HG1/HG2/HG3 and ALIAS once coreclr.dll or clrjit.dll maps, before the
+existing image handler executes. No application profile is required.
+The exact emergency switch MACRUNNER_FEX_ALIAS_AUTO=0 keeps the policy off.
+Preallocate hook-depth TLS before hooks are active; publish one arm record
+with module, guest PID, UTC and QPC. Pending early maps are retained.
+Keep the JIT entry and validation machinery unchanged while unarmed.
+Wine L0, diagnostic transport, VALIDATE1/WV1 and UnixLib ABI8 are unchanged.
+
+Family: module notifications and guarded allocator/cache hook boundaries
+Members: ARM64EC and WOW64 HandleImageMap; HG1/HG2/HG3 scopes and all existing
+memory hooks; executable alias range lookup and NoTrap validation policy.
+Trigger: named coreclr forwarder plus original alias-vp guest code.
+Coverage: both PE architectures; exact case-insensitive module basenames;
+early/late/concurrent one-shot publication; emergency off; existing hooks.
+Regression: extracted policy 8/8; named alias target probes 8/8 plus flush
+control PASS; native stand quick160/full500595, known1/651, new0.
+Audit completed: yes. Field and timing are pending separate acceptance.
+---
+ FEXCore/Source/Interface/Core/Core.cpp        | 10 +-
+ Source/Windows/ARM64EC/Module.cpp             |  1 +
+ Source/Windows/Common/Allocator.cpp           | 92 ++++++++++++++++++-
+ Source/Windows/Common/Allocator.h             |  6 ++
+ Source/Windows/Common/InvalidationTracker.cpp |  8 ++
+ Source/Windows/WOW64/Module.cpp               |  1 +
+ 6 files changed, 114 insertions(+), 4 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index d331d791d..f92c21440 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -97,6 +97,8 @@ std::atomic<uint64_t> MacRunnerProtCalls {0}, MacRunnerProtInvBytes {0}, MacRunn
+ //   found — виды, найденные лениво на промахе QueryExecutableRange (слой Б); marked — интервалы, помеченные «только проверять»
+ //   при смене прав (слой В); answered — ответы QueryExecutableRange из такого интервала (Writable = NoTrap = true).
+ std::atomic<uint64_t> MacRunnerAliasFound {0}, MacRunnerAliasMarked {0}, MacRunnerAliasAnswered {0};
++std::atomic<uint32_t> MacRunnerModuleAliasState {0}; // 0 pending, 1 publishing, 2 armed, 3 emergency-off
++std::atomic<uint64_t> MacRunnerModuleAliasCount {0}, MacRunnerModuleAliasUtc100ns {0}, MacRunnerModuleAliasQpc {0};
+ // ★ MacRunner (30.09.2026) — MACRUNNER_FEX_HOOK_GUARD (Source/Windows/Common/Allocator.h): пропущенные оповещения хуков памяти ПО ВИДАМ
+ //   (0 Free, 1 Alloc, 2 Protect, 3 Map, 4 Unmap) и наибольшая глубина вложенных областей. Пропуск = FEX внутри инвалидации трогал СВОЮ память.
+ std::atomic<uint64_t> MacRunnerHookSuppressed[7] {}, MacRunnerHookMaxDepth {0};
+@@ -157,8 +159,12 @@ bool MRRangeCacheOn() {
+ std::atomic<uint64_t> MRRangeQueries {0}, MRRangeCached {0};
+ // ★ MacRunner (30.09.2026): состояние гейта HOOK_GUARD и сумма пропусков для строки macrunner-fex-jit.
+ int MRHookGuardForReport() {
++#if defined(_WIN32) && defined(FEX_WINE_DARWIN)
++  return MacRunnerModuleAliasState.load(std::memory_order_acquire) == 2;
++#else
+   const char* Value = getenv("MACRUNNER_FEX_HOOK_GUARD");
+   return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++#endif
+ }
+ uint64_t MRHookSuppressedTotal() {
+   uint64_t Sum = 0;
+@@ -399,7 +405,7 @@ void MRReport(uint64_t Compiles) {
+     "revived={} revive_hash_miss={} revive_skip={} revive_registered={} revive_unstable={} revive={} codebuf_max={} "
+     "callret_clears={} callret_ms={} range_queries={} range_cached={} bp_writes={} revive_bp={} revive_bp_drops={} "
+     "revive_keep_bp={} bp_precise={} bp_precise_erased={} bp_fallback={} bp_precise_on={} bp_across={} bp_across_unread={} "
+-    "alias_found={} alias_marked={} alias_answered={} "
++    "alias_found={} alias_marked={} alias_answered={} alias_module_state={} alias_module_count={} alias_module_utc_100ns={} alias_module_qpc={} "
+     "hook_guard={} hook_suppressed={} hs_free={} hs_alloc={} hs_protect={} hs_map={} hs_unmap={} hs_flush={} hs_dirty={} hs_depth_max={} "
+     "hg_scopes_inv={} hg_scopes_compile={} hg_scopes_clear={} hs_path_inv={} hs_path_compile={} hs_path_clear={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+@@ -424,6 +430,8 @@ void MRReport(uint64_t Compiles) {
+     MRBpAcross.load(std::memory_order_relaxed), MRBpAcrossUnread.load(std::memory_order_relaxed),
+     MacRunnerAliasFound.load(std::memory_order_relaxed), MacRunnerAliasMarked.load(std::memory_order_relaxed),
+     MacRunnerAliasAnswered.load(std::memory_order_relaxed),
++    MacRunnerModuleAliasState.load(std::memory_order_acquire), MacRunnerModuleAliasCount.load(std::memory_order_relaxed),
++    MacRunnerModuleAliasUtc100ns.load(std::memory_order_relaxed), MacRunnerModuleAliasQpc.load(std::memory_order_relaxed),
+     MRHookGuardForReport(), MRHookSuppressedTotal(), MacRunnerHookSuppressed[0].load(std::memory_order_relaxed),
+     MacRunnerHookSuppressed[1].load(std::memory_order_relaxed), MacRunnerHookSuppressed[2].load(std::memory_order_relaxed),
+     MacRunnerHookSuppressed[3].load(std::memory_order_relaxed), MacRunnerHookSuppressed[4].load(std::memory_order_relaxed),
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index 41435d3ae..a4a7a734e 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -290,6 +290,7 @@ void InitSyscalls() {
+ void HandleImageMap(uint64_t Address, bool MainImage = false) {
+   fextl::string ModulePath = FEX::Windows::GetSectionFilePath(Address);
+   fextl::string ModuleName = fextl::string {FEX::Windows::BaseName(ModulePath)};
++  FEX::Windows::AliasPolicy::ImageMapped(ModuleName);
+   InvalidationTracker->HandleImageMap(ModuleName, Address);
+   ImageTracker->HandleImageMap(ModulePath, Address, MainImage);
+ }
+diff --git a/Source/Windows/Common/Allocator.cpp b/Source/Windows/Common/Allocator.cpp
+index dfe812d10..e405a408e 100644
+--- a/Source/Windows/Common/Allocator.cpp
++++ b/Source/Windows/Common/Allocator.cpp
+@@ -9,6 +9,7 @@
+ #include <atomic>
+ #include <chrono>
+ #include <cstdlib>
++#include <cstring>
+ #include <libloaderapi.h>
+ #include <sysinfoapi.h>
+ #include <synchapi.h>
+@@ -31,6 +32,8 @@
+ // остальные биты — глубина вложенности.
+ extern std::atomic<uint64_t> MacRunnerHookSuppressed[7], MacRunnerHookMaxDepth;                         // Core.cpp (HookGuard)
+ extern std::atomic<uint64_t> MacRunnerHookGuardScopes[3], MacRunnerHookSuppressedByPath[3];          // Core.cpp (HookGuard, HG2)
++extern std::atomic<uint32_t> MacRunnerModuleAliasState;
++extern std::atomic<uint64_t> MacRunnerModuleAliasCount, MacRunnerModuleAliasUtc100ns, MacRunnerModuleAliasQpc;
+ 
+ namespace {
+ constexpr uintptr_t JITWriteReadyBit = 1;
+@@ -39,6 +42,57 @@ DWORD HookGuardTlsIndex = TLS_OUT_OF_INDEXES; // ★ MacRunner 30.09: глуби
+ // ★ Гейт читается ОДИН раз в SetupHooks (среда CRT к тому времени готова) и хранится простым bool. НЕЛЬЗЯ читать getenv лениво из хука: хук стреляет уже из
+ //   rpmalloc_initialize (первая строка InitCRTProcess), а `Env` PE-CRT заполняет InitEnv (.CRT$FEXB) ПОЗЖЕ — getenv тогда разыменует нулевой указатель.
+ bool HookGuardOn = false;
++std::atomic<bool> ModuleAutoReady {false};
++bool ModuleAutoAllowed = false;
++std::atomic<unsigned> PendingModule {0};
++
++bool ModuleNameEquals(std::string_view Value, std::string_view Expected) {
++  if (Value.size() != Expected.size()) return false;
++  for (size_t i = 0; i < Value.size(); ++i) {
++    char C = Value[i];
++    if (C >= 'A' && C <= 'Z') C += 'a' - 'A';
++    if (C != Expected[i]) return false;
++  }
++  return true;
++}
++
++char* WriteNumber(char* Out, uint64_t Number) {
++  char Digits[20];
++  unsigned Count = 0;
++  do { Digits[Count++] = '0' + Number % 10; Number /= 10; } while (Number);
++  while (Count) *Out++ = Digits[--Count];
++  return Out;
++}
++
++void ArmModule(unsigned Module) {
++  if (!Module || !ModuleAutoReady.load(std::memory_order_acquire) || !ModuleAutoAllowed) return;
++  uint32_t Expected = 0;
++  if (!MacRunnerModuleAliasState.compare_exchange_strong(Expected, 1, std::memory_order_acq_rel)) return;
++  FILETIME Time {};
++  LARGE_INTEGER Qpc {};
++  GetSystemTimeAsFileTime(&Time);
++  QueryPerformanceCounter(&Qpc);
++  const uint64_t Utc = (static_cast<uint64_t>(Time.dwHighDateTime) << 32) | Time.dwLowDateTime;
++  MacRunnerModuleAliasUtc100ns.store(Utc, std::memory_order_relaxed);
++  MacRunnerModuleAliasQpc.store(Qpc.QuadPart, std::memory_order_relaxed);
++  MacRunnerModuleAliasCount.store(1, std::memory_order_relaxed);
++  MacRunnerModuleAliasState.store(2, std::memory_order_release);
++  // Fixed stack buffer and Raw: PE fprintf/printf terminate the custom CRT.
++  char Line[256];
++  const char* Prefix = Module == 1 ? "macrunner-fex-alias-arm: reason=module name=coreclr.dll pid=" :
++                                     "macrunner-fex-alias-arm: reason=module name=clrjit.dll pid=";
++  char* Out = Line;
++  memcpy(Out, Prefix, strlen(Prefix)); Out += strlen(Prefix);
++  Out = WriteNumber(Out, GetCurrentProcessId());
++  constexpr char UtcLabel[] = " utc_filetime_100ns=";
++  memcpy(Out, UtcLabel, sizeof(UtcLabel) - 1); Out += sizeof(UtcLabel) - 1;
++  Out = WriteNumber(Out, Utc);
++  constexpr char QpcLabel[] = " qpc=";
++  memcpy(Out, QpcLabel, sizeof(QpcLabel) - 1); Out += sizeof(QpcLabel) - 1;
++  Out = WriteNumber(Out, Qpc.QuadPart);
++  *Out++ = '\n'; *Out = 0;
++  FEX::Windows::Logging::Raw(Line);
++}
+ 
+ uintptr_t JITWriteSlotGet() {
+   if (JITWriteTlsIndex == TLS_OUT_OF_INDEXES) {
+@@ -81,16 +135,31 @@ void SetupHooks(HMODULE ntdll) {
+   {
+     const char* Value = getenv("MACRUNNER_FEX_HOOK_GUARD");
+     HookGuardOn = Value && Value[0] == '1' && !Value[1];
+-    if (HookGuardOn && HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
++#ifdef FEX_WINE_DARWIN
++    const char* Auto = getenv("MACRUNNER_FEX_ALIAS_AUTO");
++    ModuleAutoAllowed = !(Auto && Auto[0] == '0' && !Auto[1]);
++    HookGuardOn = false; // Darwin policy is automatic; legacy app-profile vars do not select it.
++    if (!ModuleAutoAllowed) MacRunnerModuleAliasState.store(3, std::memory_order_release);
++#endif
++    if ((HookGuardOn || ModuleAutoAllowed) && HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
+       HookGuardTlsIndex = TlsAlloc();
+     }
++    if ((HookGuardOn || ModuleAutoAllowed) && HookGuardTlsIndex == TLS_OUT_OF_INDEXES) {
++      Logging::Raw("macrunner-fex-alias-arm: TLS allocation failed\n");
++      NtTerminateProcess(NtCurrentProcess(), STATUS_NO_MEMORY);
++      __fastfail(0);
++    }
++    ModuleAutoReady.store(true, std::memory_order_release);
++    ArmModule(PendingModule.load(std::memory_order_acquire));
+   }
+ }
+ } // namespace FEX::Windows::Allocator
+ 
+ namespace FEX::Windows::HookGuard {
+ bool Enabled() {
+-  return HookGuardOn;
++  // Bookkeeping on compilation/invalidation only. Preallocate the TLS slot and
++  // retain open scopes before a module arrives; generated hot code is unchanged.
++  return HookGuardOn || ModuleAutoAllowed;
+ }
+ 
+ uintptr_t Depth() {
+@@ -141,7 +210,7 @@ void Leave(Path P) {
+ }
+ 
+ bool Suppress(Kind K) {
+-  if (!HookGuardOn) {
++  if (!HookGuardOn && !AliasPolicy::Armed()) {
+     return false;
+   }
+   const uintptr_t Value = Depth();
+@@ -156,6 +225,23 @@ bool Suppress(Kind K) {
+ }
+ } // namespace FEX::Windows::HookGuard
+ 
++namespace FEX::Windows::AliasPolicy {
++bool Armed() {
++  return MacRunnerModuleAliasState.load(std::memory_order_acquire) == 2;
++}
++void ImageMapped(std::string_view Name) {
++#ifdef FEX_WINE_DARWIN
++  const unsigned Module = ModuleNameEquals(Name, "coreclr.dll") ? 1 : ModuleNameEquals(Name, "clrjit.dll") ? 2 : 0;
++  if (!Module) return;
++  unsigned Expected = 0;
++  PendingModule.compare_exchange_strong(Expected, Module, std::memory_order_acq_rel);
++  ArmModule(PendingModule.load(std::memory_order_acquire));
++#else
++  (void)Name;
++#endif
++}
++} // namespace FEX::Windows::AliasPolicy
++
+ // Реализация объявлений из FEXCore/Utils/AllocatorHooks.h для ветви _WIN32.
+ namespace FEXCore::Allocator {
+ void JITWriteThreadInit() {
+diff --git a/Source/Windows/Common/Allocator.h b/Source/Windows/Common/Allocator.h
+index c3710a4de..b6ca6578c 100644
+--- a/Source/Windows/Common/Allocator.h
++++ b/Source/Windows/Common/Allocator.h
+@@ -7,6 +7,12 @@ void SetupHooks(HMODULE ntdll);
+ }
+ 
+ #include <cstdint>
++#include <string_view>
++
++namespace FEX::Windows::AliasPolicy {
++bool Armed();
++void ImageMapped(std::string_view Name);
++}
+ 
+ // ★ MacRunner (30.09.2026) — MACRUNNER_FEX_HOOK_GUARD=1 (по умолчанию ВЫКЛЮЧЕН, поведение прежнее).
+ //   Дефект (доказан снимком спанов wxh-spans-r3-m1, 30.09): аллокатор FEX (rpmalloc) внутри инвалидации, под ЭКСКЛЮЗИВНЫМ CodeInvalidationMutex,
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index 276465a40..7e95dff46 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -50,13 +50,20 @@ int MacRunnerProtKeepMode() {
+ extern std::atomic<uint64_t> MacRunnerAliasFound, MacRunnerAliasMarked, MacRunnerAliasAnswered; // Core.cpp
+ namespace {
+ bool MRAliasViewsOn() {
++#ifdef FEX_WINE_DARWIN
++  return FEX::Windows::AliasPolicy::Armed();
++#else
+   static const bool On = [] {
+     const char* Value = getenv("MACRUNNER_FEX_ALIAS_VIEWS");
+     return Value && Value[0] == '1' && !Value[1];
+   }();
+   return On;
++#endif
+ }
+ bool MRAliasValidateOn() {
++#ifdef FEX_WINE_DARWIN
++  return FEX::Windows::AliasPolicy::Armed();
++#else
+   static const bool On = [] {
+     if (!MRAliasViewsOn()) {
+       return false;
+@@ -65,6 +72,7 @@ bool MRAliasValidateOn() {
+     return !(Value && Value[0] == '0' && !Value[1]);
+   }();
+   return On;
++#endif
+ }
+ } // namespace
+ 
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+index f6758c6b8..f99fc6a48 100644
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -182,6 +182,7 @@ bool IsAddressInJit(uint64_t Address) {
+ void HandleImageMap(uint64_t Address, bool MainImage = false) {
+   fextl::string ModulePath = FEX::Windows::GetSectionFilePath(Address);
+   fextl::string ModuleName = fextl::string {FEX::Windows::BaseName(ModulePath)};
++  FEX::Windows::AliasPolicy::ImageMapped(ModuleName);
+   InvalidationTracker->HandleImageMap(ModuleName, Address);
+   ImageTracker->HandleImageMap(ModulePath, Address, MainImage);
+ }

@@ -1,0 +1,148 @@
+From 713c1bc815f820fa6d557ac89d3b6f233d1d2bdc Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 15:44:37 +1000
+Subject: [PATCH 36/46] test: validate guarded x87 arithmetic against FEX
+ SoftFloat
+
+Family: x87 FADD/FSUB/FMUL/FDIV/FSQRT at PC24 and PC53. Members: arithmetic register, reverse/pop/memory forms inherit existing guarded IR integration; native corpus tests arithmetic semantics. Trigger: guarded host arithmetic requires exact F80 values and RN precision constraints. Coverage: deterministic 2M cases and 58800 FCW/exception-mask/edge cases; compare accepted F80 result and all SoftFloat flags. Audit completed: yes. Native arithmetic validation passed with zero differences; emitted guest32 code and game timing remain unverified.
+---
+ unittests/x87_guarded_native.cpp | 91 ++++++++++++++++++++++++++++++++
+ unittests/x87_guarded_native.mk  | 15 ++++++
+ unittests/x87_guarded_sources.py |  5 ++
+ 3 files changed, 111 insertions(+)
+ create mode 100644 unittests/x87_guarded_native.cpp
+ create mode 100644 unittests/x87_guarded_native.mk
+ create mode 100644 unittests/x87_guarded_sources.py
+
+diff --git a/unittests/x87_guarded_native.cpp b/unittests/x87_guarded_native.cpp
+new file mode 100644
+index 000000000..5710bfc47
+--- /dev/null
++++ b/unittests/x87_guarded_native.cpp
+@@ -0,0 +1,91 @@
++// SPDX-License-Identifier: MIT
++// Native validation of the production guard against FEX's explicit-state SoftFloat.
++// This is arithmetic coverage, not a substitute for executing emitted guest code.
++#include "Interface/Core/HBX87Guard.h"
++extern "C" {
++#include "SoftFloat-3e/platform.h"
++#include "SoftFloat-3e/softfloat.h"
++}
++#include <bit>
++#include <cmath>
++#include <cstdio>
++#include <cinttypes>
++#include <cstdlib>
++#include <initializer_list>
++using namespace FEXCore::HBX87;
++static uint64_t seed=0x87305320260930ULL;
++static uint64_t random64() { seed^=seed<<13; seed^=seed>>7; seed^=seed<<17; return seed; }
++static uint64_t fpsr() { uint64_t v; asm volatile("mrs %0, fpsr":"=r"(v)); return v; }
++static void fpsr(uint64_t v) { asm volatile("msr fpsr, %0"::"r"(v):"memory"); }
++static F80 reference(F80 a,F80 b,unsigned op,unsigned cw,unsigned& flags) {
++  softfloat_state st{};
++  st.roundingPrecision=((cw>>8)&3)==0?32:((cw>>8)&3)==2?64:80;
++  static const unsigned modes[]={softfloat_round_near_even,softfloat_round_min,
++                                 softfloat_round_max,softfloat_round_minMag};
++  st.roundingMode=modes[(cw>>10)&3]; st.detectTininess=softfloat_tininess_afterRounding;
++  extFloat80_t x{},y{},z{}; x.signif=a.sig;x.signExp=a.se;y.signif=b.sig;y.signExp=b.se;
++  switch(op) {
++    case Add:z=extF80_add(&st,x,y);break;case Sub:z=extF80_sub(&st,x,y);break;
++    case Mul:z=extF80_mul(&st,x,y);break;case Div:z=extF80_div(&st,x,y);break;
++    default:z=extF80_sqrt(&st,x);break;
++  }
++  flags=st.exceptionFlags; F80 r{};r.sig=z.signif;r.se=z.signExp;return r;
++}
++// Volatile operands prevent folding, contraction, or speculative arithmetic before guards.
++template<class T> static T operation(T a,T b,unsigned op) {
++  volatile T x=a,y=b; switch(op) {
++    case Add:return x+y;case Sub:return x-y;case Mul:return x*y;
++    case Div:return x/y;default:return std::sqrt(T(x));
++  }
++}
++static uint64_t accepted[2][5]{},input_reject[5]{},range_reject[5]{},bad=0,flags_bad=0;
++static void check(F80 a,F80 b,unsigned op,unsigned cw,bool pc24) {
++  Numeric n;uint64_t cls=Guard(n,uint64_t(cw),a.sig,uint64_t(a.se),b.sig,uint64_t(b.se),Kind(op),pc24);
++  if(!(cls&3)) {++input_reject[op];return;}
++  unsigned p=(cls&3)==1?53:24; uint64_t old=fpsr();fpsr(0);
++  uint64_t bits=p==53 ? std::bit_cast<uint64_t>(operation(std::bit_cast<double>(Pack(a,53)),std::bit_cast<double>(Pack(b,53)),op))
++                     : std::bit_cast<uint32_t>(operation(std::bit_cast<float>(uint32_t(Pack(a,24))),std::bit_cast<float>(uint32_t(Pack(b,24))),op));
++  uint64_t raised=fpsr();fpsr(old);
++  if(!ResultOK(bits,p,cls&4)){++range_reject[op];return;}
++  ++accepted[p==53?0:1][op];unsigned flags=0;F80 expected=reference(a,b,op,cw,flags),got=Unpack(bits,p);
++  bool mismatch=expected.sig!=got.sig || expected.se!=got.se;
++  // All accepted operations exclude invalid/divzero/overflow/underflow. Inexact remains.
++  unsigned host_flags=(raised&16)?softfloat_flag_inexact:0;
++  bool fm=flags!=host_flags || (raised&~uint64_t(16))!=0;
++  if(mismatch || fm) {
++    if(bad+flags_bad<16) std::printf("FAIL cw=%04x op=%u a=%04x:%016" PRIx64 " b=%04x:%016" PRIx64
++      " got=%04x:%016" PRIx64 " expected=%04x:%016" PRIx64 " soft_flags=%x fpsr=%" PRIx64 "\n",
++      cw,op,a.se,a.sig,b.se,b.sig,got.se,got.sig,expected.se,expected.sig,flags,raised);
++    bad+=mismatch;flags_bad+=fm;
++  }
++}
++int main(int argc,char**argv) {
++  uint64_t fpcr;asm volatile("mrs %0, fpcr":"=r"(fpcr));
++  if(!FPCR_OK(fpcr)){std::printf("FPCR_REJECT=%" PRIx64 "\n",fpcr);return 2;}
++  unsigned count=argc>1?std::strtoul(argv[1],nullptr,10):2000000;
++  // Boundaries, zeros, NaN, unsupported encodings, denormals and extra precision bits.
++  F80 edges[]={{0,0},{0,0x8000},{1,0},{UINT64_C(1)<<63,0},
++    {UINT64_C(1)<<63,0x3fff},{UINT64_C(1)<<63,0xbfff},
++    {UINT64_C(1)<<63,0x7fff},{0xc000000000000001ULL,0x7fff},
++    {0x8000000000000001ULL,0x3fff},{0xffffffffffffffffULL,0x3fff},
++    {UINT64_C(1)<<63,15361},{UINT64_C(1)<<63,17406},
++    {UINT64_C(1)<<63,16257},{UINT64_C(1)<<63,16510}};
++  uint64_t matrix=0;
++  for(unsigned pc: {0u,2u,3u}) for(unsigned rc=0;rc<4;++rc) for(unsigned masks: {0u,1u,31u,62u,63u})
++    for(unsigned op=0;op<5;++op) for(auto a:edges) for(auto b:edges) {
++      check(a,b,op,0x40|(pc<<8)|(rc<<10)|masks,true);++matrix;
++    }
++  for(unsigned i=0;i<count;++i) {
++    unsigned pc=i&1,p=pc?24:53;int emin=pc?-126:-1022,emax=pc?127:1023;
++    auto value=[&](){F80 v{};v.sig=((random64()>>(64-p))<<(64-p))|(UINT64_C(1)<<63);
++      v.se=uint16_t(16383+emin+random64()%unsigned(emax-emin+1))|uint16_t((random64()&1)<<15);return v;};
++    F80 a=value(),b=value();unsigned op=i%5;
++    if(i%7==0)b=a;if(i%11==0)b.se^=0x8000;if(i%13==0)a={};if(i%17==0)b={};
++    check(a,b,op,pc?0x007f:0x027f,true);
++  }
++  std::printf("seed=87305320260930 random_cases=%u matrix_cases=%" PRIu64 " fpcr=%" PRIx64 "\n",count,matrix,fpcr);
++  for(unsigned op=0;op<5;++op)std::printf("op=%u pc53=%" PRIu64 " pc24=%" PRIu64 " input_reject=%" PRIu64 " range_reject=%" PRIu64 "\n",
++    op,accepted[0][op],accepted[1][op],input_reject[op],range_reject[op]);
++  std::printf("value_mismatches=%" PRIu64 " softfloat_flag_mismatches=%" PRIu64 "\n",bad,flags_bad);
++  return bad||flags_bad?1:0;
++}
+diff --git a/unittests/x87_guarded_native.mk b/unittests/x87_guarded_native.mk
+new file mode 100644
+index 000000000..f93ea560a
+--- /dev/null
++++ b/unittests/x87_guarded_native.mk
+@@ -0,0 +1,15 @@
++# Run from an empty lane-owned build directory: nice -n 20 make -f <this> -j2
++FEX_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
++SF := $(FEX_ROOT)/External/SoftFloat-3e
++SF_SOURCES := $(shell python3 $(FEX_ROOT)/unittests/x87_guarded_sources.py $(SF)/CMakeLists.txt)
++OBJECTS := $(patsubst src/%.c,sf-%.o,$(SF_SOURCES))
++DEFS := -DFEXCORE_PRESERVE_ALL_ATTR= -DFEXCORE_HAS_PRESERVE_ALL_ATTR=0 -DSOFTFLOAT_BUILTIN_CLZ=1 -DINLINE='static inline' -DINLINE_LEVEL=4 -DSOFTFLOAT_FAST_INT64=1 -DSOFTFLOAT_FAST_DIV32TO16=1 -DSOFTFLOAT_FAST_DIV64TO32=1
++INCLUDES := -I$(SF)/include -I$(SF)/include/SoftFloat-3e
++.PHONY: all
++all: x87_guarded_native
++sf-%.o: $(SF)/src/%.c
++	xcrun clang -O2 $(DEFS) $(INCLUDES) -c $< -o $@
++libsoftfloat_x87.a: $(OBJECTS)
++	xcrun ar rcs $@ $(OBJECTS)
++x87_guarded_native: $(FEX_ROOT)/unittests/x87_guarded_native.cpp libsoftfloat_x87.a
++	xcrun clang++ -std=c++20 -O2 -ffp-contract=off -fno-fast-math $(DEFS) $(INCLUDES) -I$(FEX_ROOT)/FEXCore/Source $< libsoftfloat_x87.a -o $@
+diff --git a/unittests/x87_guarded_sources.py b/unittests/x87_guarded_sources.py
+new file mode 100644
+index 000000000..0c4405e7d
+--- /dev/null
++++ b/unittests/x87_guarded_sources.py
+@@ -0,0 +1,5 @@
++"""Use exactly FEX's SoftFloat source list, including its explicit-state changes."""
++import pathlib
++import re
++import sys
++print(" ".join(re.findall(r"src/[A-Za-z0-9_]+\.c", pathlib.Path(sys.argv[1]).read_text())))
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,72 @@
+From d7bbb11e5932e4f2058ffdf7f1f465d314d44130 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 22:14:06 +1000
+Subject: [PATCH 40/46] EXPERIMENT: gate full x87 tag classification for saved
+ environments
+
+Family: legacy x87 saved tag words
+Members: FNSTENV/FSTENV16/32, FNSAVE/FSAVE16/32. FXSAVE already has separate tag reconstruction; FLDENV/FRSTOR restore occupancy and are unchanged.
+Trigger: zero/special physical slots serialized as valid00.
+Coverage: physical-slot classification valid00/zero01/special10/empty11 before environment serialization; TOP is not applied twice. Both full80 and reduced64 formulas implemented; reduced mode not enabled in this validation.
+Regression: 32 directed normal/zero/infinity/empty/TOP cases, including both 16/32 layouts; 16 known differences become strict EQUAL, other16 remain EQUAL. OFF vs pre-fix architectural bytes identical45/45. Saved FIP/FOP remains a separate pre-existing limit; native base0/Wine acceptance incomplete pending signing.
+Gate: MACRUNNER_HB_X87_FIX_ENV_TAGS=1, default off.
+Audit completed: yes (implementation family); acceptance limits stated.
+---
+ .../Interface/Core/OpcodeDispatcher/X87.cpp   | 41 +++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+index b1bac6813..ccf451fc6 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+@@ -337,6 +337,47 @@ void OpDispatchBuilder::FSUB(OpcodeArgs, IR::OpSize Width, bool Integer, bool Re
+ }
+ 
+ Ref OpDispatchBuilder::GetX87FTW_Helper() {
++  if (FEXCore::HBX87::StateFix::EnvTags()) {
++    // MM slots and abridged FTW bits are PHYSICAL indices. Empty wins
++    // regardless of stale payload; occupied slots require full classification.
++    const auto D = OpSize::i64Bit;
++    const auto Zero = Constant(0);
++    const auto One = Constant(1);
++    const auto Two = Constant(2);
++    const auto Three = Constant(3);
++    Ref Occupied = _LoadContextGPR(OpSize::i8Bit, offsetof(FEXCore::Core::CPUState, AbridgedFTW));
++    Ref Tags = Zero;
++    for (unsigned i = 0; i < 8; ++i) {
++      const size_t Offset = offsetof(FEXCore::Core::CPUState, mm) + i * 16;
++      Ref Mantissa = _LoadContextGPR(D, Offset);
++      Ref Exponent;
++      Ref IsZero;
++      Ref IsSpecial;
++      if (ReducedPrecisionMode) {
++        Ref Magnitude = _And(D, Mantissa, Constant(0x7fffffffffffffffULL));
++        Exponent = _Bfe(D, 11, 52, Magnitude);
++        IsZero = _Select(D, D, CondClass::EQ, Magnitude, Zero, One, Zero);
++        Ref Denormal = _Select(D, D, CondClass::EQ, Exponent, Zero, One, Zero);
++        Ref NaNInf = _Select(D, D, CondClass::EQ, Exponent, Constant(0x7ff), One, Zero);
++        IsSpecial = _Or(D, Denormal, NaNInf);
++      } else {
++        Exponent = _And(D, _LoadContextGPR(OpSize::i16Bit, Offset + 8), Constant(0x7fff));
++        Ref Magnitude = _Or(D, Exponent, Mantissa);
++        IsZero = _Select(D, D, CondClass::EQ, Magnitude, Zero, One, Zero);
++        Ref Denormal = _Select(D, D, CondClass::EQ, Exponent, Zero, One, Zero);
++        Ref NaNInf = _Select(D, D, CondClass::EQ, Exponent, Constant(0x7fff), One, Zero);
++        Ref IntegerBit = _Bfe(D, 1, 63, Mantissa);
++        Ref Unnormal = _Xor(D, IntegerBit, One);
++        IsSpecial = _Or(D, _Or(D, Denormal, NaNInf), Unnormal);
++      }
++      Ref ValueTag = _Select(D, D, CondClass::EQ, IsSpecial, Zero, Zero, Two);
++      ValueTag = _Select(D, D, CondClass::EQ, IsZero, Zero, ValueTag, One);
++      Ref Valid = _Bfe(D, 1, i, Occupied);
++      Ref Tag = _Select(D, D, CondClass::EQ, Valid, Zero, Three, ValueTag);
++      Tags = _Or(D, Tags, _Lshl(D, Tag, Constant(i * 2)));
++    }
++    return Tags;
++  }
+   // AbridgedFTWIndex has 1-bit per slot (8 slots). Duplicate each bit to get
+   // 2-bits per slot (16-bit result). Duplicating bits is equivalent to
+   // Morton interleaving a number with itself. To interleave efficiently two
+-- 
+2.54.0 (Apple Git-157)
+

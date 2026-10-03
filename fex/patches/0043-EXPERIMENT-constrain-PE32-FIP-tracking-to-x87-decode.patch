@@ -1,0 +1,40 @@
+From dca031525c7192292730df4a8cefdf09711fea46 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 01:57:53 +1000
+Subject: [PATCH 43/46] EXPERIMENT: constrain PE32 FIP tracking to x87 decoder
+ tables
+
+Family: decoder-table identity for x87 metadata, versus overlapping raw opcode bytes.
+Members: X87F80Ops and X87F64Ops; all foreign tables excluded. Trigger siblings: SSE66 0F D8..DF, sharing raw D8..DF with primary x87 escapes.
+Evidence: Frontend NormalOpHeader assigns secondary opcode to OPRaw; NormalOp supplies actual TableInfo. Imported raw-byte-only gate tracked SSE as x87 and changed saved FIP.
+Correction: after the existing default-OFF MACRUNNER_HB_X87_FIX_FIP_CS32 gate, require TableInfo within either x87 array. No new guest ABI or runtime stores.
+Regression: all eight SSE D8..DF witnesses strict NEW before -> EQUAL8/8 after. Final shifted matrix retains EQUAL43 plus two unchanged CALL faults of our old native address adapter. Pop control KNOWN9, sticky control KNOWN2, env control KNOWN16; zero-restore siblings52/52 EQUAL. Full80 tested; reduced64 table eligibility implemented but numerical acceptance NOT_ENABLED. Original two-base/game and ASM64 acceptance still incomplete; no product install, no GOAL.
+Cost: this eligibility check runs during IR generation. Correction costs already measured on the prior fipcs runner, SHA1f44438238cc96f1eeb69c2e490c0e2ed567f6caf24fa0ba444607de8eaaec8c; no universal latency or final-byte golden claim.
+Audit completed: yes for table identity batch; metadata FOP/FDP/DS/FXSAVE remains separate documented scope.
+---
+ FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+index 452b816ab..332a0e2e0 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+@@ -340,6 +340,15 @@ void OpDispatchBuilder::TrackX87Instruction32(OpcodeArgs) {
+   if (!FEXCore::HBX87::StateFix::InstructionPointers32()) {
+     return;
+   }
++  // Secondary/SSE tables reuse raw D8..DF bytes. They must not change FIP.
++  // Decoder table identity also covers the reduced-precision x87 table.
++  const auto Table = reinterpret_cast<uintptr_t>(Op->TableInfo);
++  const auto Full = reinterpret_cast<uintptr_t>(FEXCore::X86Tables::X87F80Ops.data());
++  const auto Reduced = reinterpret_cast<uintptr_t>(FEXCore::X86Tables::X87F64Ops.data());
++  if (!((Table >= Full && Table < Full + sizeof(FEXCore::X86Tables::X87F80Ops)) ||
++        (Table >= Reduced && Table < Reduced + sizeof(FEXCore::X86Tables::X87F64Ops)))) {
++    return;
++  }
+   // Imported from GUEST32-BASE 386457d86cf32d34: control instructions
+   // preserve the last computational x87 instruction in protected mode.
+   const uint8_t Escape = Op->OPRaw;
+-- 
+2.54.0 (Apple Git-157)
+

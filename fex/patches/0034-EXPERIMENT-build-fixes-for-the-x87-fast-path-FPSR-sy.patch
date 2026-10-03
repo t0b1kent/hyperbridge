@@ -1,0 +1,73 @@
+From fcc61d18e02bb7547b48241c6aa7490af8cd57c3 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 15:40:38 +1000
+Subject: [PATCH 34/46] EXPERIMENT: build fixes for the x87 fast path (FPSR
+ system register, uxtw size, IR op construction)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CodeEmitter/CodeEmitter/Emitter.h           |  1 +
+ FEXCore/Source/Interface/Core/HBX87Emit.inl | 10 +++++-----
+ 2 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/CodeEmitter/CodeEmitter/Emitter.h b/CodeEmitter/CodeEmitter/Emitter.h
+index 001adcbaf..978a56597 100644
+--- a/CodeEmitter/CodeEmitter/Emitter.h
++++ b/CodeEmitter/CodeEmitter/Emitter.h
+@@ -361,6 +361,7 @@ enum class SystemRegister : uint32_t {
+   RNDRRS = GenSystemReg<0b11, 0b011, 0b0010, 0b0100, 0b001>,
+   NZCV = GenSystemReg<0b11, 0b011, 0b0100, 0b0010, 0b000>,
+   FPCR = GenSystemReg<0b11, 0b011, 0b0100, 0b0100, 0b000>,
++  FPSR = GenSystemReg<0b11, 0b011, 0b0100, 0b0100, 0b001>, // MacRunner: x87 fast path saves/restores the cumulative flags
+   TPIDRRO_EL0 = GenSystemReg<0b11, 0b011, 0b1101, 0b0000, 0b011>,
+   CNTFRQ_EL0 = GenSystemReg<0b11, 0b011, 0b1110, 0b0000, 0b000>,
+   CNTVCT_EL0 = GenSystemReg<0b11, 0b011, 0b1110, 0b0000, 0b010>,
+diff --git a/FEXCore/Source/Interface/Core/HBX87Emit.inl b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+index 7334f0b82..54e7d25d0 100644
+--- a/FEXCore/Source/Interface/Core/HBX87Emit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+@@ -14,7 +14,7 @@ auto HBCount = [&](unsigned id, ARMEmitter::VRegister Value) {
+   add(Size::i64Bit,TMP3,TMP2,1);
+   and_(Size::i64Bit,TMP3,TMP3,TMP2); // n & (n-1), preserves NZCV
+   (void)cbnz(Size::i64Bit,TMP3,&Skip);
+-  IR::IROp_F80Add Dummy{}; Dummy.Header.Op=IR::OP_F80ADD;Dummy.Header.Size=IR::OpSize::i128Bit;
++  IR::IROp_F80Add Dummy; memset(&Dummy,0,sizeof(Dummy)); Dummy.Header.Op=IR::OP_F80ADD;Dummy.Header.Size=IR::OpSize::i128Bit;
+   FallbackInfo ProofInfo{};
+   LOGMAN_THROW_A_FMT(InterpreterOps::GetFallbackHandler(&Dummy.Header,&ProofInfo),"No F80 ABI for proof");
+   LOGMAN_THROW_A_FMT(ProofInfo.ABI==FABI_F80_I16_F80_F80_PTR,"Unexpected F80 proof ABI");
+@@ -41,7 +41,7 @@ if (FEXCore::HBX87::Enabled() && IROp->Op==IR::OP_F80CVTTO) {
+     const uint64_t frac=(UINT64_C(1)<<f)-1;
+     ForwardLabel Slow,Zero,Pack,Done;
+     umov<SubRegSize::i64Bit>(TMP2,GetVReg(Cvt->X80Src),0);
+-    if(!D)uxtw(TMP2,TMP2);
++    if(!D)uxtw(Size::i64Bit,TMP2,TMP2);
+     and_(Size::i64Bit,TMP3,TMP2,D?UINT64_C(0x7fffffffffffffff):UINT64_C(0x7fffffff));
+     (void)cbz(Size::i64Bit,TMP3,&Zero);
+     lsr(Size::i64Bit,TMP3,TMP3,f);
+@@ -146,7 +146,7 @@ if(IROp->Op==IR::OP_HBX87FAST) {
+    }
+    msr(SystemRegister::FPSR,TMP1); // restored before EVERY post-operation branch
+    umov<SubRegSize::i64Bit>(TMP2,VTMP1,0);
+-   if(!isDouble)uxtw(TMP2,TMP2);
++   if(!isDouble)uxtw(Size::i64Bit,TMP2,TMP2);
+    ForwardLabel ZeroResult,PackResult;
+    and_(Size::i64Bit,TMP3,TMP2,absMask);
+    (void)cbz(Size::i64Bit,TMP3,&ZeroResult);
+@@ -184,12 +184,12 @@ if(IROp->Op==IR::OP_HBX87FAST) {
+  auto EmitOriginal=[&](unsigned reason) {
+    HBCount(unsigned(kind)*5+reason,A);
+    if(kind==FEXCore::HBX87::Sqrt) {
+-     IR::IROp_F80SQRT Original{};
++     IR::IROp_F80SQRT Original; memset(&Original,0,sizeof(Original));
+      Original.Header=*IROp;Original.Header.Op=IR::OP_F80SQRT;
+      Original.X80Src=Op->X80Src1;
+      Op_Unhandled(&Original.Header,Node);
+    } else {
+-     IR::IROp_F80Add Original{};
++     IR::IROp_F80Add Original; memset(&Original,0,sizeof(Original));
+      Original.Header=*IROp;
+      Original.Header.Op=kind==FEXCore::HBX87::Add?IR::OP_F80ADD:kind==FEXCore::HBX87::Sub?IR::OP_F80SUB:kind==FEXCore::HBX87::Mul?IR::OP_F80MUL:IR::OP_F80DIV;
+      Original.X80Src1=Op->X80Src1;Original.X80Src2=Op->X80Src2;
+-- 
+2.54.0 (Apple Git-157)
+

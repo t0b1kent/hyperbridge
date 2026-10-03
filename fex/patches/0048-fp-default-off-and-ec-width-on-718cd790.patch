@@ -1,0 +1,630 @@
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+diff --git a/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp b/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
+index 6c2b3499a..fe7bf8593 100644
+--- a/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
+@@ -176,6 +176,36 @@ DEF_OP(PushRoundingMode) {
+   msr(ARMEmitter::SystemRegister::FPCR, TMP1);
+ }
+ 
++DEF_OP(PushFPCRNoFlush) {
++  auto Dest = GetReg(Node);
++  mrs(Dest, ARMEmitter::SystemRegister::FPCR);
++  // ARM FZ without AFP flushes inputs as well as outputs. Guest SSE controls
++  // these independently through software DAZ input and FTZ output selection.
++  and_(ARMEmitter::Size::i64Bit, TMP1, Dest, ~(uint64_t(1) << 24));
++  if (HostSupportsAFP) {
++    and_(ARMEmitter::Size::i64Bit, TMP1, TMP1, ~uint64_t(1));
++  }
++  msr(ARMEmitter::SystemRegister::FPCR, TMP1);
++}
++
++DEF_OP(PushFPSR) {
++  auto Dest = GetReg(Node);
++  mrs(Dest, ARMEmitter::SystemRegister::FPSR);
++  LoadConstant(ARMEmitter::Size::i32Bit, TMP1, 0);
++  msr(ARMEmitter::SystemRegister::FPSR, TMP1);
++}
++
++DEF_OP(GetFPSR) {
++  // Dependency keeps the arithmetic live for exception flags. No extra
++  // machine-code read of the vector is needed; ordered IR emission suffices.
++  mrs(GetReg(Node), ARMEmitter::SystemRegister::FPSR);
++}
++
++DEF_OP(PopFPSR) {
++  auto Op = IROp->C<IR::IROp_PopFPSR>();
++  msr(ARMEmitter::SystemRegister::FPSR, GetReg(Op->FPSR));
++}
++
+ DEF_OP(PopRoundingMode) {
+   auto Op = IROp->C<IR::IROp_PopRoundingMode>();
+   msr(ARMEmitter::SystemRegister::FPCR, GetReg(Op->FPCR));
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index 45df2aa28..4fa1fa855 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -1376,6 +1376,8 @@ private:
+   // Opcode helpers for generalizing behavior across VEX and non-VEX variants.
+ 
+   Ref ADDSUBPOpImpl(OpSize Size, IR::OpSize ElementSize, Ref Src1, Ref Src2);
++  Ref SSEApplyDAZ(OpSize Size, OpSize ElementSize, Ref Src, Ref MXCSR);
++  Ref SSEApplyFTZ(OpSize Size, OpSize ElementSize, Ref Result, Ref MXCSR);
+ 
+   void AVXVariableShiftImpl(OpcodeArgs, IROps IROp);
+ 
+@@ -1461,6 +1463,8 @@ private:
+   //   - Example 32bit ADDSS Dest, Src
+   //   - Dest[31:0] = Dest[31:0] + Src[31:0]
+   //   - Dest[{256,128}:32] = (Unmodified)
++  Ref SSEIndefiniteResult(IROps IROp, IR::OpSize Size, IR::OpSize ElementSize, Ref Result, Ref Src1, Ref Src2,
++                          bool Scalar, bool Unary);
+   Ref VectorScalarInsertALUOpImpl(OpcodeArgs, IROps IROp, IR::OpSize DstSize, IR::OpSize ElementSize,
+                                   const X86Tables::DecodedOperand& Src1Op, const X86Tables::DecodedOperand& Src2Op, bool ZeroUpperBits);
+ 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/AVX_128.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/AVX_128.cpp
+index cfce2569d..bf905b818 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/AVX_128.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/AVX_128.cpp
+@@ -185,13 +185,15 @@ void OpDispatchBuilder::AVX128_VectorALU(OpcodeArgs, IROps IROp, IR::OpSize Elem
+   auto Src1 = AVX128_LoadSource_WithOpSize(Op, Op->Src[0], Op->Flags, !Is128Bit);
+   auto Src2 = AVX128_LoadSource_WithOpSize(Op, Op->Src[1], Op->Flags, !Is128Bit);
+   DeriveOp(Result_Low, IROp, _VAdd(OpSize::i128Bit, ElementSize, Src1.Low, Src2.Low));
++  Ref Low = SSEIndefiniteResult(IROp, OpSize::i128Bit, ElementSize, Result_Low, Src1.Low, Src2.Low, false, false);
+ 
+   if (Is128Bit) {
+     auto High = LoadZeroVector(OpSize::i128Bit);
+-    AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Result_Low, .High = High});
++    AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Low, .High = High});
+   } else {
+     DeriveOp(Result_High, IROp, _VAdd(OpSize::i128Bit, ElementSize, Src1.High, Src2.High));
+-    AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Result_Low, .High = Result_High});
++    Ref High = SSEIndefiniteResult(IROp, OpSize::i128Bit, ElementSize, Result_High, Src1.High, Src2.High, false, false);
++    AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Low, .High = High});
+   }
+ }
+ 
+@@ -201,13 +203,15 @@ void OpDispatchBuilder::AVX128_VectorUnary(OpcodeArgs, IROps IROp, IR::OpSize El
+ 
+   auto Src = AVX128_LoadSource_WithOpSize(Op, Op->Src[0], Op->Flags, !Is128Bit);
+   DeriveOp(Result_Low, IROp, _VFSqrt(OpSize::i128Bit, ElementSize, Src.Low));
++  Ref Low = SSEIndefiniteResult(IROp, OpSize::i128Bit, ElementSize, Result_Low, Src.Low, Src.Low, false, true);
+ 
+   if (Is128Bit) {
+     auto High = LoadZeroVector(OpSize::i128Bit);
+-    AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Result_Low, .High = High});
++    AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Low, .High = High});
+   } else {
+     DeriveOp(Result_High, IROp, _VFSqrt(OpSize::i128Bit, ElementSize, Src.High));
+-    AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Result_Low, .High = Result_High});
++    Ref High = SSEIndefiniteResult(IROp, OpSize::i128Bit, ElementSize, Result_High, Src.High, Src.High, false, true);
++    AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Low, .High = High});
+   }
+ }
+ 
+@@ -663,8 +667,10 @@ void OpDispatchBuilder::AVX128_VectorScalarInsertALU(OpcodeArgs, FEXCore::IR::IR
+ 
+   // If OpSize == ElementSize then it only does the lower scalar op
+   DeriveOp(Result_Low, IROp, _VFAddScalarInsert(OpSize::i128Bit, ElementSize, Src1.Low, Src2.Low, false));
++  const bool Unary = IROp == OP_VFSQRTSCALARINSERT || IROp == OP_VFRSQRTSCALARINSERT;
++  Ref Low = SSEIndefiniteResult(IROp, OpSize::i128Bit, ElementSize, Result_Low, Src1.Low, Src2.Low, true, Unary);
+   auto High = LoadZeroVector(OpSize::i128Bit);
+-  AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Result_Low, .High = High});
++  AVX128_StoreResult_WithOpSize(Op, Op->Dest, RefPair {.Low = Low, .High = High});
+ }
+ 
+ void OpDispatchBuilder::AVX128_VFCMP(OpcodeArgs, IR::OpSize ElementSize) {
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/Vector.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/Vector.cpp
+index 0f15a367f..57d4ddc79 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/Vector.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/Vector.cpp
+@@ -19,11 +19,26 @@ $end_info$
+ #include <array>
+ #include <bit>
+ #include <cstdint>
++#include <cstdlib>
+ #include <stddef.h>
+ 
+ namespace FEXCore::IR {
+ #define OpcodeArgs [[maybe_unused]] FEXCore::X86Tables::DecodedOp Op
+ 
++// Stage 1 only: preserve explicitly loaded guest flags. Arithmetic exception
++// production is a separate change; host FPSR must not substitute for this shadow.
++static uint32_t MacRunnerMXCSRMask() {
++  // Translation-time lookup only; never called from the exception path.
++  // EC link width failure is fixed independently in Module.S.
++  const char* Value = std::getenv("MACRUNNER_FEX_MXCSR_FLAGS");
++  return Value && Value[0] == '1' && !Value[1] ? 0xFFFFU : 0xFFC0U;
++}
++
++static bool MacRunnerDAZFTZ() {
++  const char* Value = std::getenv("MACRUNNER_FEX_DAZ_FTZ");
++  return Value && Value[0] == '1' && !Value[1];
++}
++
+ void OpDispatchBuilder::MOVVectorAlignedOp(OpcodeArgs) {
+   if (Op->Dest.IsGPR() && Op->Src[0].IsGPR() && Op->Dest.Data.GPR.GPR == Op->Src[0].Data.GPR.GPR) {
+     // Nop
+@@ -262,6 +277,40 @@ void OpDispatchBuilder::VMOVSSOp(OpcodeArgs) {
+   VMOVScalarOpImpl(Op, OpSize::i32Bit);
+ }
+ 
++Ref OpDispatchBuilder::SSEIndefiniteResult(IROps IROp, OpSize Size, OpSize ElementSize, Ref Result, Ref Src1, Ref Src2,
++                                          bool Scalar, bool Unary) {
++  switch (IROp) {
++  case OP_VFADD: case OP_VFSUB: case OP_VFMUL: case OP_VFDIV:
++  case OP_VFADDSCALARINSERT: case OP_VFSUBSCALARINSERT: case OP_VFMULSCALARINSERT: case OP_VFDIVSCALARINSERT:
++  case OP_VFSQRT: case OP_VFRSQRT: case OP_VFSQRTSCALARINSERT: case OP_VFRSQRTSCALARINSERT: break;
++  default: return Result;
++  }
++  // MMX/3DNow! and half precision have separate ISA semantics. The scalar
++  // insertion paths carry a full architectural vector, including preserved bits.
++  if (IR::OpSizeAsBits(Size) < 128 || (ElementSize != OpSize::i32Bit && ElementSize != OpSize::i64Bit)) {
++    return Result;
++  }
++  const char* Value = std::getenv("MACRUNNER_FEX_SSE_INDEFINITE");
++  if (!Value || Value[0] != '1' || Value[1]) {
++    return Result;
++  }
++  const bool Single = ElementSize == OpSize::i32Bit;
++  auto AbsMask = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x7FFFFFFFULL : 0x7FFFFFFFFFFFFFFFULL));
++  auto Infinity = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x7F800000ULL : 0x7FF0000000000000ULL));
++  auto IsNaN = [&](Ref Input) {
++    return _VCMPGT(Size, ElementSize, _VAnd(Size, Input, AbsMask), Infinity);
++  };
++  // Input NaN payload/sign/priority is a different policy. Only an invalid
++  // arithmetic result from numeric operands selects x86 default indefinite.
++  auto InputsNaN = Unary ? IsNaN(Src2) : _VOr(Size, IsNaN(Src1), IsNaN(Src2));
++  auto Invalid = _VAnd(Size, IsNaN(Result), _VNot(Size, InputsNaN));
++  auto Indefinite = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0xFFC00000ULL : 0xFFF8000000000000ULL));
++  auto Corrected = _VBSL(Size, Invalid, Indefinite, Result);
++  // An inactive scalar lane can contain any bits, including inherited NaNs.
++  // Preserve exactly the merge and VEX zeroing already produced by the ALU op.
++  return Scalar ? _VInsElement(Size, ElementSize, 0, 0, Result, Corrected) : Corrected;
++}
++
+ void OpDispatchBuilder::VectorALUOp(OpcodeArgs, IROps IROp, IR::OpSize ElementSize) {
+   const auto Size = OpSizeFromSrc(Op);
+   Ref Src = LoadSourceFPR(Op, Op->Src[0], Op->Flags);
+@@ -269,7 +318,8 @@ void OpDispatchBuilder::VectorALUOp(OpcodeArgs, IROps IROp, IR::OpSize ElementSi
+ 
+   DeriveOp(ALUOp, IROp, _VAdd(Size, ElementSize, Dest, Src));
+ 
+-  StoreResult_WithAVXInsert(VectorOpType::SSE, RegClass::FPR, Op, ALUOp);
++  Ref Result = SSEIndefiniteResult(IROp, Size, ElementSize, ALUOp, Dest, Src, false, false);
++  StoreResult_WithAVXInsert(VectorOpType::SSE, RegClass::FPR, Op, Result);
+ }
+ 
+ void OpDispatchBuilder::VectorXOROp(OpcodeArgs) {
+@@ -294,7 +344,8 @@ void OpDispatchBuilder::AVXVectorALUOp(OpcodeArgs, IROps IROp, IR::OpSize Elemen
+ 
+   DeriveOp(ALUOp, IROp, _VAdd(Size, ElementSize, Src1, Src2));
+ 
+-  StoreResultFPR(Op, ALUOp);
++  Ref Result = SSEIndefiniteResult(IROp, Size, ElementSize, ALUOp, Src1, Src2, false, false);
++  StoreResultFPR(Op, Result);
+ }
+ 
+ void OpDispatchBuilder::AVXVectorXOROp(OpcodeArgs) {
+@@ -333,7 +384,7 @@ Ref OpDispatchBuilder::VectorScalarInsertALUOpImpl(OpcodeArgs, IROps IROp, IR::O
+ 
+   // If OpSize == ElementSize then it only does the lower scalar op
+   DeriveOp(ALUOp, IROp, _VFAddScalarInsert(DstSize, ElementSize, Src1, Src2, ZeroUpperBits));
+-  return ALUOp;
++  return SSEIndefiniteResult(IROp, DstSize, ElementSize, ALUOp, Src1, Src2, true, false);
+ }
+ 
+ void OpDispatchBuilder::VectorScalarInsertALUOp(OpcodeArgs, IROps IROp, IR::OpSize ElementSize) {
+@@ -361,7 +412,7 @@ Ref OpDispatchBuilder::VectorScalarUnaryInsertALUOpImpl(OpcodeArgs, IROps IROp,
+ 
+   // If OpSize == ElementSize then it only does the lower scalar op
+   DeriveOp(ALUOp, IROp, _VFSqrtScalarInsert(DstSize, ElementSize, Src1, Src2, ZeroUpperBits));
+-  return ALUOp;
++  return SSEIndefiniteResult(IROp, DstSize, ElementSize, ALUOp, Src1, Src2, true, true);
+ }
+ 
+ void OpDispatchBuilder::VectorScalarUnaryInsertALUOp(OpcodeArgs, IROps IROp, IR::OpSize ElementSize) {
+@@ -667,7 +718,8 @@ void OpDispatchBuilder::VectorUnaryOp(OpcodeArgs, IROps IROp, IR::OpSize Element
+ 
+   DeriveOp(ALUOp, IROp, _VFSqrt(Size, ElementSize, Src));
+ 
+-  StoreResult_WithAVXInsert(VectorOpType::SSE, RegClass::FPR, Op, ALUOp);
++  Ref Result = SSEIndefiniteResult(IROp, Size, ElementSize, ALUOp, Src, Src, false, true);
++  StoreResult_WithAVXInsert(VectorOpType::SSE, RegClass::FPR, Op, Result);
+ }
+ 
+ void OpDispatchBuilder::AVXVectorUnaryOp(OpcodeArgs, IROps IROp, IR::OpSize ElementSize) {
+@@ -686,7 +738,8 @@ void OpDispatchBuilder::AVXVectorUnaryOp(OpcodeArgs, IROps IROp, IR::OpSize Elem
+   //       which, on hardware with SVE, zero-extends as part of
+   //       storing into the destination.
+ 
+-  StoreResultFPR(Op, ALUOp);
++  Ref Result = SSEIndefiniteResult(IROp, SrcSize, ElementSize, ALUOp, Src, Src, false, true);
++  StoreResultFPR(Op, Result);
+ }
+ 
+ void OpDispatchBuilder::VectorUnaryDuplicateOpImpl(OpcodeArgs, IROps IROp, IR::OpSize ElementSize) {
+@@ -2580,18 +2633,85 @@ Ref OpDispatchBuilder::CVTGPR_To_FPRImpl(OpcodeArgs, IR::OpSize DstElementSize,
+   return _VInsElement(OpSize::i128Bit, DstElementSize, 0, 0, Src1, Converted);
+ }
+ 
++Ref OpDispatchBuilder::SSEApplyDAZ(OpSize Size, OpSize ElementSize, Ref Src, Ref MXCSR) {
++  const bool Single = ElementSize == OpSize::i32Bit;
++  auto AbsMask = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x7FFFFFFFULL : 0x7FFFFFFFFFFFFFFFULL));
++  auto SignMask = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x80000000ULL : 0x8000000000000000ULL));
++  auto MinNormal = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x00800000ULL : 0x0010000000000000ULL));
++  auto Tiny = _VCMPGT(Size, ElementSize, MinNormal, _VAnd(Size, Src, AbsMask));
++  auto DAZ = _Bfe(OpSize::i32Bit, 1, 6, MXCSR);
++  auto DAZMask = _VDupFromGPR(Size, ElementSize, _Sub(OpSize::i64Bit, Constant(0), DAZ));
++  return _VBSL(Size, _VAnd(Size, Tiny, DAZMask), _VAnd(Size, Src, SignMask), Src);
++}
++
++Ref OpDispatchBuilder::SSEApplyFTZ(OpSize Size, OpSize ElementSize, Ref Result, Ref MXCSR) {
++  const bool Single = ElementSize == OpSize::i32Bit;
++  auto AbsMask = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x7FFFFFFFULL : 0x7FFFFFFFFFFFFFFFULL));
++  auto SignMask = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x80000000ULL : 0x8000000000000000ULL));
++  auto MinNormal = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x00800000ULL : 0x0010000000000000ULL));
++  auto Tiny = _VCMPGT(Size, ElementSize, MinNormal, _VAnd(Size, Result, AbsMask));
++  auto FTZ = _Bfe(OpSize::i32Bit, 1, 15, MXCSR);
++  auto FTZMask = _VDupFromGPR(Size, ElementSize, _Sub(OpSize::i64Bit, Constant(0), FTZ));
++  return _VBSL(Size, _VAnd(Size, Tiny, FTZMask), _VAnd(Size, Result, SignMask), Result);
++}
++
+ Ref OpDispatchBuilder::CVTFPR_To_GPRImpl(OpcodeArgs, Ref Src, IR::OpSize SrcElementSize, bool HostRoundingMode) {
+   // Source Element size is determined by instruction
+   // GPR size is determined by REX.W
+   // But instruction does not support 16bit register operands
+   const auto GPRSize = std::max(OpSize::i32Bit, OpSizeFromDst(Op));
+ 
++  const bool CorrectDAZFTZ = MacRunnerDAZFTZ();
++  Ref OldFPCR {};
++  if (CorrectDAZFTZ) {
++    auto MXCSR = _LoadContextGPR(OpSize::i32Bit, offsetof(FEXCore::Core::CPUState, mxcsr));
++    Src = SSEApplyDAZ(OpSize::i128Bit, SrcElementSize, Src, MXCSR);
++    OldFPCR = _PushFPCRNoFlush();
++  }
++
++  const char* CvtFlags = std::getenv("MACRUNNER_FEX_MXCSR_CVT_FLAGS");
++  if (CvtFlags && CvtFlags[0] == '1' && !CvtFlags[1]) {
++    // Scalar SSE/VEX float-to-signed-GPR conversions raise IE or PE, never DE.
++    // FRINTI deliberately suppresses IXC, while a two-step FRINTX/FCVTZS can
++    // raise both IOC and IXC for an invalid conversion. Derive guest flags from
++    // the original and unbounded rounded value instead of importing host FPSR.
++    // The shared helper covers SS/SD, r32/r64, register/memory and VEX siblings.
++    const bool Single = SrcElementSize == OpSize::i32Bit;
++    const unsigned Bits = Single ? 32 : 64;
++    const uint64_t AbsMask = Single ? 0x7FFFFFFFULL : 0x7FFFFFFFFFFFFFFFULL;
++    const uint64_t MinNormal = Single ? 0x00800000ULL : 0x0010000000000000ULL;
++    const unsigned IntegerExponent = GPRSize == OpSize::i32Bit ? 31 : 63;
++    const uint64_t Bound = Single ? uint64_t(127 + IntegerExponent) << 23 : uint64_t(1023 + IntegerExponent) << 52;
++
++    Ref Rounded = _Vector_FToI(SrcElementSize, SrcElementSize, Src,
++                              HostRoundingMode ? RoundMode::Host : RoundMode::TowardsZero);
++    Ref OriginalBits = _VExtractToGPR(SrcElementSize, SrcElementSize, Src, 0);
++    Ref RoundedBits = _VExtractToGPR(SrcElementSize, SrcElementSize, Rounded, 0);
++    Ref OriginalAbs = _And(SrcElementSize, OriginalBits, Constant(AbsMask));
++    Ref RoundedAbs = _And(SrcElementSize, RoundedBits, Constant(AbsMask));
++    Ref Sign = _Bfe(SrcElementSize, 1, Bits - 1, OriginalBits);
++    Ref Positive = _Xor(OpSize::i32Bit, Sign, Constant(1));
++    Ref Outside = _Select(OpSize::i32Bit, SrcElementSize, CondClass::UGT, RoundedAbs, Constant(Bound), Constant(1), Constant(0));
++    Ref AtBound = _Select(OpSize::i32Bit, SrcElementSize, CondClass::EQ, RoundedAbs, Constant(Bound), Constant(1), Constant(0));
++    Ref Invalid = _Or(OpSize::i32Bit, Outside, _And(OpSize::i32Bit, AtBound, Positive));
++
++    Ref MXCSR = _LoadContextGPR(OpSize::i32Bit, offsetof(FEXCore::Core::CPUState, mxcsr));
++    Ref DAZ = _Bfe(OpSize::i32Bit, 1, 6, MXCSR);
++    Ref Tiny = _Select(OpSize::i32Bit, SrcElementSize, CondClass::ULT, OriginalAbs, Constant(MinNormal), Constant(1), Constant(0));
++    Ref SuppressPrecision = _Or(OpSize::i32Bit, Invalid, _And(OpSize::i32Bit, DAZ, Tiny));
++    Ref Changed = _Select(OpSize::i32Bit, SrcElementSize, CondClass::NEQ, OriginalBits, RoundedBits, Constant(1), Constant(0));
++    Ref Precision = _And(OpSize::i32Bit, Changed, _Xor(OpSize::i32Bit, SuppressPrecision, Constant(1)));
++    Ref Flags = _Or(OpSize::i32Bit, Invalid, _Lshl(OpSize::i32Bit, Precision, Constant(5)));
++    _StoreContextGPR(OpSize::i32Bit, _Or(OpSize::i32Bit, MXCSR, Flags), offsetof(FEXCore::Core::CPUState, mxcsr));
++  }
++
++  Ref Result {};
+   if (CTX->HostFeatures.SupportsFRINTTS) {
+     // When we have FRINTTS, this is a two-step process. First, we round to the
+     // right integer (where _Vector_FToISized matches x86 semantics), then just
+     // convert that to a GPR.
+     Src = _Vector_FToISized(SrcElementSize, SrcElementSize, Src, HostRoundingMode, GPRSize);
+-    return _Float_ToGPR_ZS(GPRSize, SrcElementSize, Src);
++    Result = _Float_ToGPR_ZS(GPRSize, SrcElementSize, Src);
+   } else {
+     // When we lack hardware support, we need a bit of a convoluted sequence of
+     // fixups before before and after conversion to emulate x86 semantics.
+@@ -2606,8 +2726,12 @@ Ref OpDispatchBuilder::CVTFPR_To_GPRImpl(OpcodeArgs, Ref Src, IR::OpSize SrcElem
+     Ref MaxF = LoadAndCacheNamedVectorConstant(SrcElementSize, (SrcElementSize == OpSize::i32Bit) ?
+                                                                  (Dst32 ? NAMED_VECTOR_CVTMAX_F32_I32 : NAMED_VECTOR_CVTMAX_F32_I64) :
+                                                                  (Dst32 ? NAMED_VECTOR_CVTMAX_F64_I32 : NAMED_VECTOR_CVTMAX_F64_I64));
+-    return _Select(GPRSize, SrcElementSize, CondClass::FGT, MaxF, Src, Converted, MaxI);
++    Result = _Select(GPRSize, SrcElementSize, CondClass::FGT, MaxF, Src, Converted, MaxI);
+   }
++  if (CorrectDAZFTZ) {
++    _PopRoundingMode(OldFPCR);
++  }
++  return Result;
+ }
+ 
+ void OpDispatchBuilder::CVTFPR_To_GPR(OpcodeArgs, IR::OpSize SrcElementSize, bool HostRoundingMode) {
+@@ -3141,7 +3265,7 @@ void OpDispatchBuilder::SaveSSEState(Ref MemBase) {
+ 
+ void OpDispatchBuilder::SaveMXCSRState(Ref MemBase) {
+   // Store MXCSR and the mask for all bits.
+-  _StoreMemPairGPR(OpSize::i32Bit, GetMXCSR(), Constant(0xFFC0), MemBase, 24);
++  _StoreMemPairGPR(OpSize::i32Bit, GetMXCSR(), Constant(MacRunnerMXCSRMask()), MemBase, 24);
+ }
+ 
+ void OpDispatchBuilder::SaveAVXState(Ref MemBase) {
+@@ -3159,7 +3283,7 @@ Ref OpDispatchBuilder::GetMXCSR() {
+   Ref MXCSR = _LoadContextGPR(OpSize::i32Bit, offsetof(FEXCore::Core::CPUState, mxcsr));
+   // Mask out unsupported bits
+   // Keeps FZ, RC, exception masks, and DAZ
+-  MXCSR = _And(OpSize::i32Bit, MXCSR, Constant(0xFFC0));
++  MXCSR = _And(OpSize::i32Bit, MXCSR, Constant(MacRunnerMXCSRMask()));
+   return MXCSR;
+ }
+ 
+@@ -3274,7 +3398,7 @@ void OpDispatchBuilder::RestoreSSEState(Ref MemBase) {
+ 
+ void OpDispatchBuilder::RestoreMXCSRState(Ref MXCSR) {
+   // Mask out unsupported bits
+-  MXCSR = _And(OpSize::i32Bit, MXCSR, Constant(0xFFC0));
++  MXCSR = _And(OpSize::i32Bit, MXCSR, Constant(MacRunnerMXCSRMask()));
+ 
+   _StoreContextGPR(OpSize::i32Bit, MXCSR, offsetof(FEXCore::Core::CPUState, mxcsr));
+   // We only support the rounding mode and FTZ bit being set
+@@ -3486,20 +3610,125 @@ void OpDispatchBuilder::MOVQ2DQ(OpcodeArgs, bool ToXMM) {
+ }
+ 
+ Ref OpDispatchBuilder::ADDSUBPOpImpl(OpSize Size, IR::OpSize ElementSize, Ref Src1, Ref Src2) {
+-  if (CTX->HostFeatures.SupportsFCMA) {
++  const bool CorrectDAZFTZ = MacRunnerDAZFTZ();
++  Ref MXCSR {}, OldFPCR {};
++  if (CorrectDAZFTZ) {
++    MXCSR = _LoadContextGPR(OpSize::i32Bit, offsetof(FEXCore::Core::CPUState, mxcsr));
++    Src1 = SSEApplyDAZ(Size, ElementSize, Src1, MXCSR);
++    Src2 = SSEApplyDAZ(Size, ElementSize, Src2, MXCSR);
++    OldFPCR = _PushFPCRNoFlush();
++  }
++  // Private MacRunner experiment: preserve the second operand's NaN sign on
++  // subtracting lanes. Mask inactive lanes before arithmetic so they cannot
++  // introduce exceptions from an operation x86 never performs.
++  static const bool CorrectAddSub = [] {
++    const char* Value = std::getenv("MACRUNNER_FEX_ADDSUB_NAN");
++    return Value && Value[0] == '1' && Value[1] == '\0';
++  }();
++  const char* AddSubFlagsValue = std::getenv("MACRUNNER_FEX_MXCSR_ADDSUB_FLAGS");
++  // Exact independent DAZ/FTZ values and inactive-lane masking are prerequisites
++  // for using ARM arithmetic status. Other producer families are not imported.
++  const bool AddSubFlags = CorrectDAZFTZ && CorrectAddSub && AddSubFlagsValue &&
++                          AddSubFlagsValue[0] == '1' && !AddSubFlagsValue[1];
++  Ref OldFPSR {};
++  if (AddSubFlags) {
++    OldFPSR = _PushFPSR();
++  }
++  Ref Result;
++  if (CorrectAddSub) {
++    auto SignMask =
++      LoadAndCacheNamedVectorConstant(Size, ElementSize == OpSize::i32Bit ? NAMED_VECTOR_PADDSUBPS_INVERT : NAMED_VECTOR_PADDSUBPD_INVERT);
++    auto EvenMask = _VSShrI(Size, ElementSize, SignMask, IR::OpSizeAsBits(ElementSize) - 1);
++    auto Even1 = _VAnd(Size, Src1, EvenMask);
++    auto Even2 = _VAnd(Size, Src2, EvenMask);
++    auto OddMask = _VNot(Size, EvenMask);
++    auto Odd1 = _VAnd(Size, Src1, OddMask);
++    auto Odd2 = _VAnd(Size, Src2, OddMask);
++    auto Sub = _VFSub(Size, ElementSize, Even1, Even2);
++    auto Add = _VFAdd(Size, ElementSize, Odd1, Odd2);
++    Result = _VBSL(Size, EvenMask, Sub, Add);
++  } else if (CTX->HostFeatures.SupportsFCMA) {
+     if (ElementSize == OpSize::i32Bit) {
+       auto Swizzle = _VRev64(Size, OpSize::i32Bit, Src2);
+-      return _VFCADD(Size, ElementSize, Src1, Swizzle, 90);
++      Result = _VFCADD(Size, ElementSize, Src1, Swizzle, 90);
+     } else {
+       auto Swizzle = _VExtr(Size, OpSize::i8Bit, Src2, Src2, 8);
+-      return _VFCADD(Size, ElementSize, Src1, Swizzle, 90);
++      Result = _VFCADD(Size, ElementSize, Src1, Swizzle, 90);
+     }
+   } else {
+     auto ConstantEOR =
+       LoadAndCacheNamedVectorConstant(Size, ElementSize == OpSize::i32Bit ? NAMED_VECTOR_PADDSUBPS_INVERT : NAMED_VECTOR_PADDSUBPD_INVERT);
+     auto InvertedSource = _VXor(Size, Src2, ConstantEOR);
+-    return _VFAdd(Size, ElementSize, Src1, InvertedSource);
++    Result = _VFAdd(Size, ElementSize, Src1, InvertedSource);
++  }
++  if (AddSubFlags) {
++    auto FPSR = _GetFPSR(Result);
++    _PopFPSR(OldFPSR);
++    const bool Single = ElementSize == OpSize::i32Bit;
++    auto AbsMask = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x7FFFFFFFULL : 0x7FFFFFFFFFFFFFFFULL));
++    auto Infinity = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x7F800000ULL : 0x7FF0000000000000ULL));
++    auto MinNormal = _VDupFromGPR(Size, ElementSize, Constant(Single ? 0x00800000ULL : 0x0010000000000000ULL));
++    auto Zero = _VDupFromGPR(Size, ElementSize, Constant(0));
++    auto Abs1 = _VAnd(Size, Src1, AbsMask);
++    auto Abs2 = _VAnd(Size, Src2, AbsMask);
++    auto TinyNonZero = [&](Ref Abs) {
++      return _VAnd(Size, _VCMPGT(Size, ElementSize, MinNormal, Abs), _VCMPGT(Size, ElementSize, Abs, Zero));
++    };
++    auto NaN = _VOr(Size, _VCMPGT(Size, ElementSize, Abs1, Infinity), _VCMPGT(Size, ElementSize, Abs2, Infinity));
++    auto Denormal = _VAnd(Size, _VOr(Size, TinyNonZero(Abs1), TinyNonZero(Abs2)), _VNot(Size, NaN));
++    auto TinyResult = TinyNonZero(_VAnd(Size, Result, AbsMask));
++    auto ReduceMask = [&](Ref Mask) {
++      Ref Any = Constant(0);
++      for (unsigned Lane = 0; Lane < IR::OpSizeAsBits(Size) / IR::OpSizeAsBits(ElementSize); ++Lane) {
++        Any = _Or(OpSize::i64Bit, Any, _VExtractToGPR(ElementSize, ElementSize, Mask, Lane));
++      }
++      return _And(OpSize::i32Bit, Any, Constant(1));
++    };
++    auto DE = _Lshl(OpSize::i32Bit, ReduceMask(Denormal), Constant(1));
++    auto FTZ = _Bfe(OpSize::i32Bit, 1, 15, MXCSR);
++    auto Flushed = _And(OpSize::i32Bit, ReduceMask(TinyResult), FTZ);
++    auto FTZFlags = _And(OpSize::i32Bit, _Sub(OpSize::i32Bit, Constant(0), Flushed), Constant(0x30));
++    // Ignore ARM IDC: x86 DE is classified per numeric input lane above.
++    auto HostFlags = _Or(OpSize::i32Bit, _And(OpSize::i32Bit, FPSR, Constant(1)),
++                         _Lshl(OpSize::i32Bit, _And(OpSize::i32Bit, FPSR, Constant(0x1E)), Constant(1)));
++    auto Flags = _Or(OpSize::i32Bit, HostFlags, _Or(OpSize::i32Bit, DE, FTZFlags));
++    _StoreContextGPR(OpSize::i32Bit, _Or(OpSize::i32Bit, MXCSR, Flags), offsetof(FEXCore::Core::CPUState, mxcsr));
++  }
++  if (CorrectDAZFTZ) {
++    _PopRoundingMode(OldFPCR);
++    Result = SSEApplyFTZ(Size, ElementSize, Result, MXCSR);
++  }
++  // Xeon corpus: x86 selects the first NaN operand, even if a later operand is
++  // signaling. ARM instead prioritizes signaling NaNs. Classify with integer
++  // operations so the selection does not introduce additional FP exceptions.
++  const char* Priority = std::getenv("MACRUNNER_FEX_ADDSUB_NAN_PRIORITY");
++  if (Priority && Priority[0] == '1' && !Priority[1]) {
++    const bool Is32 = ElementSize == OpSize::i32Bit;
++    auto AbsMask = _VDupFromGPR(Size, ElementSize, Constant(Is32 ? 0x7FFFFFFFULL : 0x7FFFFFFFFFFFFFFFULL));
++    auto Infinity = _VDupFromGPR(Size, ElementSize, Constant(Is32 ? 0x7F800000ULL : 0x7FF0000000000000ULL));
++    auto QuietBit = _VDupFromGPR(Size, ElementSize, Constant(Is32 ? 0x00400000ULL : 0x0008000000000000ULL));
++    auto NaN1 = _VCMPGT(Size, ElementSize, _VAnd(Size, Src1, AbsMask), Infinity);
++    auto NaN2 = _VCMPGT(Size, ElementSize, _VAnd(Size, Src2, AbsMask), Infinity);
++    auto Quiet1 = _VOr(Size, Src1, QuietBit);
++    auto Quiet2 = _VOr(Size, Src2, QuietBit);
++    Result = _VBSL(Size, NaN2, Quiet2, Result);
++    Result = _VBSL(Size, NaN1, Quiet1, Result);
++  }
++  // A NaN produced without a NaN input is x86's negative indefinite, while
++  // ARM produces a positive default NaN. This gate changes only its sign.
++  const char* Indefinite = std::getenv("MACRUNNER_FEX_ADDSUB_INDEFINITE");
++  if (Indefinite && Indefinite[0] == '1' && !Indefinite[1]) {
++    const bool Is32 = ElementSize == OpSize::i32Bit;
++    auto AbsMask = _VDupFromGPR(Size, ElementSize, Constant(Is32 ? 0x7FFFFFFFULL : 0x7FFFFFFFFFFFFFFFULL));
++    auto Infinity = _VDupFromGPR(Size, ElementSize, Constant(Is32 ? 0x7F800000ULL : 0x7FF0000000000000ULL));
++    auto SignBit = _VDupFromGPR(Size, ElementSize, Constant(Is32 ? 0x80000000ULL : 0x8000000000000000ULL));
++    auto NaN1 = _VCMPGT(Size, ElementSize, _VAnd(Size, Src1, AbsMask), Infinity);
++    auto NaN2 = _VCMPGT(Size, ElementSize, _VAnd(Size, Src2, AbsMask), Infinity);
++    auto ResultNaN = _VCMPGT(Size, ElementSize, _VAnd(Size, Result, AbsMask), Infinity);
++    auto DefaultNaN = _VAnd(Size, ResultNaN, _VNot(Size, _VOr(Size, NaN1, NaN2)));
++    Result = _VOr(Size, Result, _VAnd(Size, DefaultNaN, SignBit));
+   }
++  return Result;
+ }
+ 
+ void OpDispatchBuilder::ADDSUBPOp(OpcodeArgs, IR::OpSize ElementSize) {
+diff --git a/FEXCore/Source/Interface/IR/IR.json b/FEXCore/Source/Interface/IR/IR.json
+index 1f80dda7b..40279ee2b 100644
+--- a/FEXCore/Source/Interface/IR/IR.json
++++ b/FEXCore/Source/Interface/IR/IR.json
+@@ -231,6 +231,25 @@
+         "DestSize": "OpSize::i64Bit",
+         "HasSideEffects": true
+       },
++      "GPR = PushFPCRNoFlush": {
++        "Desc": ["Save FPCR and disable host input/output flushing for scoped guest SSE arithmetic; restore with PopRoundingMode"],
++        "DestSize": "OpSize::i64Bit",
++        "HasSideEffects": true
++      },
++      "GPR = PushFPSR": {
++        "Desc": ["Save full host FPSR and clear it for one owned guest floating operation"],
++        "DestSize": "OpSize::i64Bit",
++        "HasSideEffects": true
++      },
++      "GPR = GetFPSR FPR:$Dependency": {
++        "Desc": ["Read host FPSR after Dependency; the SSA use preserves the arithmetic even when its guest destination is dead"],
++        "DestSize": "OpSize::i32Bit",
++        "HasSideEffects": true
++      },
++      "PopFPSR GPR:$FPSR": {
++        "Desc": ["Restore the pre-operation host FPSR, preserving native/x87 ownership"],
++        "HasSideEffects": true
++      },
+       "PopRoundingMode GPR:$FPCR": {
+         "Desc": ["Resets rounding mode after PushRoundingMode operation"
+                 ],
+diff --git a/FEXCore/unittests/Emitter/System_Tests.cpp b/FEXCore/unittests/Emitter/System_Tests.cpp
+index cab7a640f..8a3241041 100644
+--- a/FEXCore/unittests/Emitter/System_Tests.cpp
++++ b/FEXCore/unittests/Emitter/System_Tests.cpp
+@@ -128,6 +128,7 @@ TEST_CASE_METHOD(TestDisassembler, "Emitter: System: System register move") {
+   TEST_SINGLE(msr(SystemRegister::RNDRRS, Reg::r30), "msr rndrrs, x30");
+   TEST_SINGLE(msr(SystemRegister::NZCV, Reg::r30), "msr nzcv, x30");
+   TEST_SINGLE(msr(SystemRegister::FPCR, Reg::r30), "msr fpcr, x30");
++  TEST_SINGLE(msr(SystemRegister::FPSR, Reg::r30), "msr fpsr, x30");
+   TEST_SINGLE(msr(SystemRegister::TPIDRRO_EL0, Reg::r30), "msr S3_3_c13_c0_3, x30");
+   TEST_SINGLE(msr(SystemRegister::CNTFRQ_EL0, Reg::r30), "msr S3_3_c14_c0_0, x30");
+   TEST_SINGLE(msr(SystemRegister::CNTVCT_EL0, Reg::r30), "msr S3_3_c14_c0_2, x30");
+@@ -139,6 +140,7 @@ TEST_CASE_METHOD(TestDisassembler, "Emitter: System: System register move") {
+   TEST_SINGLE(mrs(Reg::r30, SystemRegister::RNDRRS), "mrs x30, rndrrs");
+   TEST_SINGLE(mrs(Reg::r30, SystemRegister::NZCV), "mrs x30, nzcv");
+   TEST_SINGLE(mrs(Reg::r30, SystemRegister::FPCR), "mrs x30, fpcr");
++  TEST_SINGLE(mrs(Reg::r30, SystemRegister::FPSR), "mrs x30, fpsr");
+   TEST_SINGLE(mrs(Reg::r30, SystemRegister::TPIDRRO_EL0), "mrs x30, S3_3_c13_c0_3");
+   TEST_SINGLE(mrs(Reg::r30, SystemRegister::CNTFRQ_EL0), "mrs x30, S3_3_c14_c0_0");
+   TEST_SINGLE(mrs(Reg::r30, SystemRegister::CNTVCT_EL0), "mrs x30, S3_3_c14_c0_2");
+diff --git a/Source/Windows/ARM64EC/Module.S b/Source/Windows/ARM64EC/Module.S
+index 4c18172ea..abe2a2d6e 100644
+--- a/Source/Windows/ARM64EC/Module.S
++++ b/Source/Windows/ARM64EC/Module.S
+@@ -138,7 +138,9 @@ DIRECT_SYSCALL_WRAPPER("#NtProtectVirtualMemoryNative", WineNtProtectVirtualMemo
+   subs x16, x11, x9
+   b.lo end
+   adrp x17, NtDllRedirectionLUTSize
+-  ldr x17, [x17, #:lo12:NtDllRedirectionLUTSize]
++  // Module.cpp declares a uint32_t count: W-load zero-extends and never reads
++  // the neighbouring object or requires accidental 8-byte link alignment.
++  ldr w17, [x17, #:lo12:NtDllRedirectionLUTSize]
+   cmp x16, x17
+   b.hi end
+   adrp x17, NtDllRedirectionLUT
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index fac40fc3e..2790b4584 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -303,6 +303,11 @@ void HandleImageUnmap(uint64_t Address, uint64_t Size) {
+ namespace Exception {
+ static std::optional<FEX::Windows::TSOHandlerConfig> HandlerConfig;
+ static uintptr_t KiUserExceptionDispatcher;
++// Initialized during ProcessInit after CRT setup, before guest execution. The
++// exception path only reads this value; it performs no environment lookup or
++// first-use static initialization.
++static bool MRMxcsrFlagsEnabled;
++static bool MRMxcsrContextControlEnabled;
+ 
+ struct alignas(16) KiUserExceptionDispatcherStackLayout {
+   ARM64_NT_CONTEXT Context;
+@@ -379,6 +384,9 @@ static void LoadStateFromECContext(FEXCore::Core::InternalThreadState* Thread, C
+   }
+ 
+   if ((Context.ContextFlags & CONTEXT_FLOATING_POINT) == CONTEXT_FLOATING_POINT) {
++    if (MRMxcsrFlagsEnabled) {
++      State.mxcsr = Context.MxCsr & 0xFFFFU;
++    }
+     // Floating-point register state
+     if ((Context.ContextFlags & CONTEXT_XSTATE) == CONTEXT_XSTATE) {
+       const auto* Ymm = RtlLocateExtendedFeature(reinterpret_cast<CONTEXT_EX*>(&Context + 1), XSTATE_AVX, nullptr);
+@@ -524,6 +532,23 @@ static ARM64_NT_CONTEXT StoreStateToPackedECContext(FEXCore::Core::InternalThrea
+ 
+   ECContext.Fpcr = FPCR;
+   ECContext.Fpsr = FPSR;
++  if (MRMxcsrFlagsEnabled) {
++    const uint32_t Flags = Thread->CurrentFrame->State.mxcsr & 0x3FU;
++    // Exact inverse of Wine unwind.h:fpcsr_to_mxcsr for the six status bits.
++    // Replace host status, rather than ORing potentially unrelated host IXC.
++    ECContext.Fpsr = (Flags & 1U) | ((Flags & 2U) << 6) | ((Flags & 0x3CU) >> 1);
++    if (MRMxcsrContextControlEnabled) {
++      const uint32_t Mxcsr = Thread->CurrentFrame->State.mxcsr;
++      // Packed EC context is a transport, not a hardware FPCR restore. Match
++      // Wine unwind.h:mxcsr_to_fpcsr, including its independent DAZ/FZ bits.
++      // The executable host FPCR cannot represent every guest control mode.
++      ECContext.Fpcr = ((Mxcsr & 0x40U) << 13) | ((Mxcsr & 0x80U) ? 0U : 0x100U) |
++                       ((Mxcsr & 0x100U) ? 0U : 0x8000U) | ((Mxcsr & 0x200U) ? 0U : 0x200U) |
++                       ((Mxcsr & 0x400U) ? 0U : 0x400U) | ((Mxcsr & 0x800U) ? 0U : 0x800U) |
++                       ((Mxcsr & 0x1000U) ? 0U : 0x1000U) | ((Mxcsr & 0x2000U) << 10) |
++                       ((Mxcsr & 0x4000U) << 8) | ((Mxcsr & 0x8000U) << 9);
++    }
++  }
+ 
+   return ECContext;
+ }
+@@ -709,6 +734,10 @@ NTSTATUS ProcessInit() {
+   InitSyscalls();
+ 
+   FEX::Windows::InitCRTProcess();
++  const char* MxcsrFlags = getenv("MACRUNNER_FEX_MXCSR_FLAGS");
++  Exception::MRMxcsrFlagsEnabled = MxcsrFlags && MxcsrFlags[0] == '1' && !MxcsrFlags[1];
++  const char* MxcsrContextControl = getenv("MACRUNNER_FEX_MXCSR_CONTEXT_CONTROL");
++  Exception::MRMxcsrContextControlEnabled = MxcsrContextControl && MxcsrContextControl[0] == '1' && !MxcsrContextControl[1];
+   const auto ExecutablePath = FEX::Windows::GetExecutableFilePath();
+   const auto ExecutableName = FEX::Windows::BaseName(ExecutablePath);
+   FEX::Config::LoadConfig(fextl::string {ExecutableName}, _environ, FEX::ReadPortabilityInformation());

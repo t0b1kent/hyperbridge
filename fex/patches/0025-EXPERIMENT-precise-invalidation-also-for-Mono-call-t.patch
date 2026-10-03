@@ -1,0 +1,156 @@
+From 9f7f678f2c7c0f2d07832f7ae6d0b090969e1ec4 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 06:30:03 +1000
+Subject: [PATCH 25/80] EXPERIMENT: precise invalidation also for Mono
+ call-target patches across a 4 KiB page boundary
+ (MACRUNNER_FEX_MONO_BP_PRECISE=2)
+
+0037 accepts the call-target pattern 49 BB <imm64> 41 FF D3/E3 only when the
+whole pattern lies in the page of the patched imm64. In the Hollow Knight
+capture ev1-CF (30 Sep) 58 of 17 244 backpatcher writes (0.34 %) are the same
+pattern with the imm64 at a page edge and 49 BB or 41 FF xx on the adjacent page
+(checked against the page snapshots of the capture). They took the old path:
+the whole page and the call-return stacks of every thread that cached it. The
+invalidation-policy stand predicts 435 fewer re-translations (8 876 -> 8 441) and
+7 call-return stack clears instead of 65 once they are precise too.
+
+With MACRUNNER_FEX_MONO_BP_PRECISE=2 the adjacent page is read only when it holds
+translated code (CodePages of the thread's map): the decoder has already read
+it, and freeing it or changing its protection removes it from CodePages through
+a range invalidation, which runs under the exclusive CodeInvalidationMutex that
+MonoBackpatcherWrite holds while it checks. Without translated code on the
+adjacent page the write takes the old path. =1 keeps the 0037 behaviour. The
+capture's 'B' flags gain 4 (pattern across the boundary) and 8 (across, adjacent
+page without code); counters bp_across and bp_across_unread.
+
+Svod-Origin: exp-events-20260930 2a9c40570 (0041 of fexbuild-0019ew)
+Svod-Note: reordered before the capture patches: the capture parts ('B' flags 4/8, bp_across* in 'J', MRCap/MRPattern/MROld) move to the 0040 capture-events patch; the precise-invalidation logic is unchanged
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Core/Core.cpp | 64 +++++++++++++++++++++++---
+ 1 file changed, 58 insertions(+), 6 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 61d944c10..03b93a0e4 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -198,14 +198,15 @@ int MRReviveKeepBp() {
+ //   гостя задевает эти 8 байт, стек возвратов не обнуляется: старый перевод отличается лишь целью вызова, возврат в
+ //   него исполняет вызов старой цели (трамплина Mono) — то же, что видит ядро, ещё не заметившее перекрёстную запись.
+ //   Любая другая запись заплатчика идёт прежним путём.
++//   ★ 30.09.2026: =2 — то же и для шаблона ЧЕРЕЗ ГРАНИЦУ страницы 4 КБ (MRCallTargetPatchKind ниже); =1 — как было.
+ int MRMonoBpPrecise() {
+   static const int Mode = [] {
+     const char* Value = getenv("MACRUNNER_FEX_MONO_BP_PRECISE");
+-    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++    return (Value && (Value[0] == '1' || Value[0] == '2') && !Value[1]) ? Value[0] - '0' : 0;
+   }();
+   return Mode;
+ }
+-std::atomic<uint64_t> MRBpPrecise {0}, MRBpPreciseErased {0}, MRBpFallback {0};
++std::atomic<uint64_t> MRBpPrecise {0}, MRBpPreciseErased {0}, MRBpFallback {0}, MRBpAcross {0}, MRBpAcrossUnread {0};
+ bool MRIsCallTargetPatch(uint64_t Address, uint8_t Size) {
+   // Только внутри одной страницы 4 КБ с самим адресом: она заведомо отображена (заплатчик в неё пишет).
+   constexpr uint64_t PageMask = ~uint64_t {0xFFF};
+@@ -215,6 +216,41 @@ bool MRIsCallTargetPatch(uint64_t Address, uint8_t Size) {
+   const auto* Bytes = reinterpret_cast<const uint8_t*>(Address);
+   return Bytes[-2] == 0x49 && Bytes[-1] == 0xBB && Bytes[8] == 0x41 && Bytes[9] == 0xFF && (Bytes[10] == 0xD3 || Bytes[10] == 0xE3);
+ }
++// ★ MacRunner (Claude, 30.09.2026) — MACRUNNER_FEX_MONO_BP_PRECISE=2: шаблон адреса вызова ЧЕРЕЗ ГРАНИЦУ страницы 4 КБ.
++//   Запись HK ev1-CF (30.09): 58 из 17 244 заплаток (0,34 %) — тот же 49 BB <imm64> 41 FF D3/E3, но imm64 у края
++//   страницы и 49 BB или 41 FF xx — на соседней (сверено по снимкам страниц записи). Проверка выше их отвергает, и каждая
++//   снимает всю страницу со стеками возвратов: по модели стенда +435 повторов (8 876 против 8 441) и 65 обнулений стека
++//   против 7. Соседняя страница читается, только если в ней есть переведённый код (CodePages карты потока): её байты
++//   декодер уже читал, а освобождение или смена прав сняли бы её из CodePages сбросом по диапазону — он идёт под
++//   исключительной CodeInvalidationMutex, которую держит вызывающий (MonoBackpatcherWrite). Кода на соседней странице
++//   нет — прежний путь по странице, нового отказа нет. Сам imm64, пересекающий границу, — не этот случай.
++enum class MRPatchKind { None, InPage, AcrossPage, AcrossUnread };
++MRPatchKind MRCallTargetPatchKind(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, uint8_t Size) {
++  if (MRIsCallTargetPatch(Address, Size)) {
++    return MRPatchKind::InPage;
++  }
++  constexpr uint64_t PageMask = ~uint64_t {0xFFF};
++  const uint64_t Page = Address & PageMask;
++  if (Size != 8 || ((Address + 7) & PageMask) != Page) {
++    return MRPatchKind::None;
++  }
++  const bool Prev = ((Address - 2) & PageMask) != Page;
++  const bool Next = ((Address + 10) & PageMask) != Page;
++  if (Prev == Next) {
++    return MRPatchKind::None; // шаблон целиком в странице — уже проверен выше
++  }
++  const uint64_t Neighbor = Prev ? Page - 0x1000 : Page + 0x1000;
++  {
++    auto lk = Thread->LookupCache->Shared->AcquireReadLock();
++    if (!Thread->LookupCache->Shared->CodePages.contains(Neighbor >> 12)) {
++      return MRPatchKind::AcrossUnread;
++    }
++  }
++  const auto* Bytes = reinterpret_cast<const uint8_t*>(Address);
++  return (Bytes[-2] == 0x49 && Bytes[-1] == 0xBB && Bytes[8] == 0x41 && Bytes[9] == 0xFF && (Bytes[10] == 0xD3 || Bytes[10] == 0xE3)) ?
++           MRPatchKind::AcrossPage :
++           MRPatchKind::None;
++}
+ // Обнуление стека возвратов при инвалидации (InvalidateThreadCachedCodeRange): число и время.
+ std::atomic<uint64_t> MRCallRetClears {0}, MRCallRetTicks {0};
+ 
+@@ -314,7 +350,7 @@ void MRReport(uint64_t Compiles) {
+     "prot_calls={} prot_inv_mb={} prot_kept_mb={} prot_trap_mb={} prot_keep={} "
+     "revived={} revive_hash_miss={} revive_skip={} revive_registered={} revive_unstable={} revive={} codebuf_max={} "
+     "callret_clears={} callret_ms={} range_queries={} range_cached={} bp_writes={} revive_bp={} revive_bp_drops={} "
+-    "revive_keep_bp={} bp_precise={} bp_precise_erased={} bp_fallback={} bp_precise_on={}\n",
++    "revive_keep_bp={} bp_precise={} bp_precise_erased={} bp_fallback={} bp_precise_on={} bp_across={} bp_across_unread={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+     MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
+     MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+@@ -333,7 +369,8 @@ void MRReport(uint64_t Compiles) {
+     MRRangeQueries.load(std::memory_order_relaxed), MRRangeCached.load(std::memory_order_relaxed),
+     MRBackpatchWrites.load(std::memory_order_relaxed), MRReviveBp.load(std::memory_order_relaxed),
+     MRReviveBpDrops.load(std::memory_order_relaxed), MRReviveKeepBp(), MRBpPrecise.load(std::memory_order_relaxed),
+-    MRBpPreciseErased.load(std::memory_order_relaxed), MRBpFallback.load(std::memory_order_relaxed), MRMonoBpPrecise());
++    MRBpPreciseErased.load(std::memory_order_relaxed), MRBpFallback.load(std::memory_order_relaxed), MRMonoBpPrecise(),
++    MRBpAcross.load(std::memory_order_relaxed), MRBpAcrossUnread.load(std::memory_order_relaxed));
+   Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+   FEX::Windows::Logging::Raw(Line);
+ }
+@@ -1588,9 +1625,18 @@ void ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame* Frame, uint
+   auto CTX = static_cast<ContextImpl*>(Thread->CTX);
+   MRBackpatchWrites.fetch_add(1, std::memory_order_relaxed);
+   // Байты вокруг imm64 заплатка не меняет — проверка до записи равносильна проверке после.
+-  const bool MRPrecise = MRMonoBpPrecise() && MRIsCallTargetPatch(Address, Size);
++  // Проверка через границу страницы (MRCallTargetPatchKind) — только под замком ниже.
++  const int MRMode = MRMonoBpPrecise();
++  MRPatchKind MRKind = MRPatchKind::None;
++  bool MRPrecise = false;
+   {
+     auto lk = GuardSignalDeferringSection(CTX->CodeInvalidationMutex, Thread);
++    if (MRMode >= 2) {
++      MRKind = MRCallTargetPatchKind(Thread, Address, Size);
++    } else if (MRMode == 1 && MRIsCallTargetPatch(Address, Size)) {
++      MRKind = MRPatchKind::InPage;
++    }
++    MRPrecise = (MRMode >= 1 && MRKind == MRPatchKind::InPage) || (MRMode >= 2 && MRKind == MRPatchKind::AcrossPage);
+ 
+     if (Size == 8) {
+       *reinterpret_cast<uint64_t*>(Address) = Value;
+@@ -1603,10 +1649,16 @@ void ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame* Frame, uint
+ 
+   if (MRPrecise && CTX->SyscallHandler->InvalidateGuestCallTargetPatch(Thread, Address, Size)) {
+     MRBpPrecise.fetch_add(1, std::memory_order_relaxed);
++    if (MRKind == MRPatchKind::AcrossPage) {
++      MRBpAcross.fetch_add(1, std::memory_order_relaxed);
++    }
+     return;
+   }
+-  if (MRMonoBpPrecise()) {
++  if (MRMode) {
+     MRBpFallback.fetch_add(1, std::memory_order_relaxed);
++    if (MRKind == MRPatchKind::AcrossUnread) {
++      MRBpAcrossUnread.fetch_add(1, std::memory_order_relaxed);
++    }
+   }
+   CTX->SyscallHandler->InvalidateGuestCodeRange(Thread, Address, Size);
+ }
+-- 
+2.54.0 (Apple Git-157)
+

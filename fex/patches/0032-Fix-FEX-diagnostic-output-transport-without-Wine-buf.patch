@@ -1,0 +1,151 @@
+From 55619bd48e718bcefaf0b2cc42a08508b162d0f7 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 02:55:43 +1000
+Subject: [PATCH] Fix FEX diagnostic output transport without Wine buffer
+ overflow
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+MRReport can emit records larger than Wine's per-thread 1024-byte debug
+buffer. __wine_dbg_output deliberately raises STATUS_BUFFER_OVERFLOW
+when a record does not fit. Send complete FEX records to __wine_dbg_write
+with an explicit length instead; retain native Windows file fallback,
+early Raw output, and SilentLog behavior.
+
+Family: Windows FEX diagnostic transport
+Members: Logging::Raw, MsgHandler, AssertHandler
+Trigger: Stardew cooperative bundle ntdll!__wine_dbg_output+0x1d8
+  -> RtlRaiseStatus(80000005) -> invalid exception frame. Historical
+  debug-buffer occupancy is UNKNOWN; this fixes the API size contract.
+Coverage:
+  [x] Raw — before Init and with SilentLog, exact bytes and size boundaries
+  [x] MsgHandler — explicit-length Wine transport, level/thread prefix
+  [x] AssertHandler — explicit-length Wine transport, assertion prefix
+  [x] native Windows — existing optional-Wine LogFile fallback preserved
+Regression tests:
+  logging-tests/transport.cpp includes actual production Logging.cpp.
+  Raw/Msg/Assert/SilentLog: 0,1,1000,1023,1024,4096,65536-byte payloads,
+  pending Wine buffer occupancy 0/128, byte-for-byte equality oracle.
+  Candidate57/57 PASS; actual old source negative control34 FAIL;
+  file fallback passes in both. Fixture is a host API contract test,
+  not a claim about Wine/ARM64EC ABI or field success.
+Build: actual ARM64EC and ARM64 compile+link PASS, nice20/serial/ccache.
+  Only Logging.cpp.obj changed in each private CommonWindows archive;
+  149 frozen linker inputs retained byte-exact. No main tree/dist changed.
+Field: pending accepted106 control and Wine FIFO, not menu acceptance.
+Audit completed: yes
+---
+ Source/Windows/Common/Logging.cpp | 39 ++++++++++++++++++++++---------
+ Source/Windows/Common/Logging.h   |  6 ++---
+ 2 files changed, 31 insertions(+), 14 deletions(-)
+
+diff --git a/Source/Windows/Common/Logging.cpp b/Source/Windows/Common/Logging.cpp
+index 8974a8991..395e837e5 100644
+--- a/Source/Windows/Common/Logging.cpp
++++ b/Source/Windows/Common/Logging.cpp
+@@ -4,6 +4,8 @@
+ #include <FEXCore/Utils/LogManager.h>
+ 
+ #include <cstdio>
++#include <cstring>
++#include <limits>
+ #include <ntstatus.h>
+ #include <windef.h>
+ #include <winternl.h>
+@@ -11,13 +13,28 @@
+ #include <libloaderapi.h>
+ 
+ namespace {
+-void (*WineDbgOut)(const char* Message);
++using WineDebugWrite = int (WINAPI*)(const char* Message, unsigned int Length);
++WineDebugWrite WineDbgWrite;
+ FILE* LogFile;
+ 
++// FEX messages are complete records. Wine's __wine_dbg_output instead appends
++// to a fixed-size per-thread buffer and raises STATUS_BUFFER_OVERFLOW on long
++// records (or when another trace has left a partial record in that buffer).
++// Keep diagnostics out of that buffer and preserve every byte of the record.
++static void WriteDebugMessage(WineDebugWrite Write, const char* Message, size_t Length) {
++  constexpr auto MaxLength = std::numeric_limits<unsigned int>::max();
++  while (Length) {
++    const auto Chunk = static_cast<unsigned int>(Length > MaxLength ? MaxLength : Length);
++    Write(Message, Chunk);
++    Message += Chunk;
++    Length -= Chunk;
++  }
++}
++
+ static void MsgHandler(LogMan::DebugLevels Level, const char* Message) {
+   const auto Output = fextl::fmt::format("{} {:X} {}\n", LogMan::DebugLevelStr(Level), GetCurrentThreadId(), Message);
+-  if (WineDbgOut) {
+-    WineDbgOut(Output.c_str());
++  if (WineDbgWrite) {
++    WriteDebugMessage(WineDbgWrite, Output.c_str(), Output.size());
+   } else if (LogFile) {
+     fwrite(Output.c_str(), 1, Output.size(), LogFile);
+   }
+@@ -25,8 +42,8 @@ static void MsgHandler(LogMan::DebugLevels Level, const char* Message) {
+ 
+ static void AssertHandler(const char* Message) {
+   const auto Output = fextl::fmt::format("A {}\n", Message);
+-  if (WineDbgOut) {
+-    WineDbgOut(Output.c_str());
++  if (WineDbgWrite) {
++    WriteDebugMessage(WineDbgWrite, Output.c_str(), Output.size());
+   } else if (LogFile) {
+     fwrite(Output.c_str(), 1, Output.size(), LogFile);
+   }
+@@ -34,18 +51,18 @@ static void AssertHandler(const char* Message) {
+ } // namespace
+ 
+ namespace FEX::Windows::Logging {
+-// ★ MacRunner N2b: разбор — в Logging.h. Отдельный указатель, а не общий WineDbgOut:
++// ★ MacRunner N2b: разбор — в Logging.h. Отдельный указатель, а не общий WineDbgWrite:
+ // тот заводится только в Init() и молчит при SilentLog, а этот обязан работать всегда,
+ // в том числе до Init() и в самом раннем отказе.
+ void Raw(const char* Message) {
+-  static void (*RawOut)(const char*) = nullptr;
++  static WineDebugWrite RawOut = nullptr;
+   static bool Resolved = false;
+   if (!Resolved) {
+     Resolved = true;
+-    RawOut = reinterpret_cast<decltype(RawOut)>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "__wine_dbg_output"));
++    RawOut = reinterpret_cast<decltype(RawOut)>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "__wine_dbg_write"));
+   }
+   if (RawOut) {
+-    RawOut(Message);
++    WriteDebugMessage(RawOut, Message, std::strlen(Message));
+   }
+ }
+ 
+@@ -55,8 +72,8 @@ void Init() {
+     return;
+   }
+ 
+-  WineDbgOut = reinterpret_cast<decltype(WineDbgOut)>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "__wine_dbg_output"));
+-  if (!WineDbgOut) {
++  WineDbgWrite = reinterpret_cast<decltype(WineDbgWrite)>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "__wine_dbg_write"));
++  if (!WineDbgWrite) {
+     const auto Path = fextl::fmt::format("{}\\fex-{}.log", getenv("LOCALAPPDATA"), GetCurrentProcessId());
+     LogFile = fopen(Path.c_str(), "a");
+   }
+diff --git a/Source/Windows/Common/Logging.h b/Source/Windows/Common/Logging.h
+index 26b7d5645..5fd04f667 100644
+--- a/Source/Windows/Common/Logging.h
++++ b/Source/Windows/Common/Logging.h
+@@ -13,8 +13,8 @@ void Init();
+ // (__acrt_iob_func возвращает nullptr, IO.cpp:432). Замерено: прогон с fprintf'ом
+ // первой строкой BTCpuProcessInit дал exit=0 и НИ ОДНОЙ строки в журнале.
+ //
+-// Raw() пишет через `__wine_dbg_output` — тот самый путь, которым в наш журнал попадают
+-// все строки `macrunner-wow64:` (макрос MESSAGE). Работает ДО Init(), потому что
+-// разрешает символ сам и ничего от конфигурации не ждёт.
++// Raw() пишет через `__wine_dbg_write` с явной длиной: без фиксированного thread-local
++// буфера `__wine_dbg_output` и его STATUS_BUFFER_OVERFLOW. Работает ДО Init(), потому
++// что разрешает символ сам и ничего от конфигурации не ждёт.
+ void Raw(const char* Message);
+ } // namespace FEX::Windows::Logging
+-- 
+2.54.0 (Apple Git-157)
+

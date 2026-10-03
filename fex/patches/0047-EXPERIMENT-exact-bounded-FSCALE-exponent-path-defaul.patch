@@ -1,0 +1,191 @@
+From 7c75c9b80cd653eb70f415afe9ad2db84e063894 Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 11:05:39 +1000
+Subject: [PATCH] EXPERIMENT: exact bounded FSCALE exponent path (default off)
+
+Gate MACRUNNER_HB_X87_FAST_SCALE additionally requires FAST. Keep the
+original FEX F80SCALE helper for every rejected FCW/input/range case.
+Truncate full80 ST1 using its integer bits instead of first rounding it
+to double; preserve signed zero and adjust only an exactly representable
+ST0 exponent. No FPCR/FPSR changes or guest memory reads are added.
+
+Family: FSCALE D9 FD full80 exponent scaling
+Members: D9 FD, operand-prefix 66 D9 FD; PC24/53/64 and all RC modes
+Trigger: four recorded Heroes III FSCALE events, entry weight 17406
+Coverage in this fix:
+  [x] D9 FD PC53/PC24, RN and masked exceptions: exact bounded JIT path
+  [x] positive/negative/fractional/almost-integer ST1; positive/negative zero
+  [x] PC64, other RC, unmasked exceptions, reserved PC, noncanonical and
+      out-of-range inputs: unchanged exact interpreter/FEX helper
+  [x] 66 D9 FD decoder identity: existing decode/lift remains unchanged
+  [ ] other transcendental ops: NOT applicable; different semantics,
+      not members of FSCALE; unchanged exact helper
+Regression tests:
+  release107/scale-corpus-base0: 252 full-state OFF/ON equal, 148 actual
+      fast hits all independently equal; 44 unchanged oracle residuals
+  release107/scale-default-off-base0: prior merged runner equals new OFF
+      in 252/252 architectural states
+  release107/scale-recorded-base0: four recorded FPU inputs, 4/4 hits,
+      OFF/ON equal, source and weights hashed
+  release107/scale-unit-semantics-base0: 54/54 source-derived executions
+      from precision_test_[neg_]fscale, D9_FD and FSCALE_zero_inf ASM
+  shared STAND32 quick: base0 75 EQUAL/29 FIXED/5 EMPTY_RAW80/2 gaps;
+      shifted110 execution NEW also present in previous merged control;
+      no common PASS claimed; five error-report details differ
+  release107/scale-micro-base0: same SHA, A/A then AB/BA/AB; 2 million
+      target ops/point, CPU156.3355 -> 13.2615 ns/op median; diagnostic,
+      includes init/JIT/loop; no game timing claimed
+Audit completed: yes
+
+Product installation and game acceptance pending RELEASE-107 candidate.
+---
+ FEXCore/Source/Interface/Core/HBX87Emit.inl   |   1 +
+ .../Source/Interface/Core/HBX87ScaleEmit.inl  | 124 ++++++++++++++++++
+ 2 files changed, 125 insertions(+)
+ create mode 100644 FEXCore/Source/Interface/Core/HBX87ScaleEmit.inl
+
+diff --git a/FEXCore/Source/Interface/Core/HBX87Emit.inl b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+index ddaf5c930..23790cc69 100644
+--- a/FEXCore/Source/Interface/Core/HBX87Emit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+@@ -73,6 +73,7 @@ auto HBCount = [&](unsigned id, ARMEmitter::VRegister Value) {
+   (void)Bind(&Skip);
+ };
+ #include "Interface/Core/HBX87FPSR.inl"
++#include "Interface/Core/HBX87ScaleEmit.inl"
+ // Exact binary32/64 -> F80 for normal or signed-zero inputs. Specials/subnormals
+ // retain the original converter. No additional guest memory read.
+ if (FEXCore::HBX87::Enabled() && IROp->Op==IR::OP_F80CVTTO) {
+diff --git a/FEXCore/Source/Interface/Core/HBX87ScaleEmit.inl b/FEXCore/Source/Interface/Core/HBX87ScaleEmit.inl
+new file mode 100644
+index 000000000..b0cf2b032
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/HBX87ScaleEmit.inl
+@@ -0,0 +1,124 @@
++// SPDX-License-Identifier: MIT
++// Exact bounded FSCALE; the original FEX F80 helper remains the slow path.
++if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_SCALE") && IROp->Op == IR::OP_F80SCALE) {
++  const auto Scale = IROp->C<IR::IROp_F80SCALE>();
++  const auto A = GetVReg(Scale->X80Src1), D = GetVReg(Scale->X80Src2), Dst = GetVReg(Node);
++  ForwardLabel Path53, Path24, PCSlow, PC64Slow, RCSlow, UnmaskedSlow, Disabled24Slow, DomainSlow, RangeSlow, Done;
++  // Match the proved double/single guard: masked exceptions, RN, PC53/PC24.
++  ldrh(TMP1, STATE, offsetof(FEXCore::Core::CPUState, FCW));
++  and_(Size::i64Bit, TMP2, TMP1, 0x300);
++  sub(Size::i64Bit, TMP3, TMP2, 0x300);
++  (void)cbz(Size::i64Bit, TMP3, &PC64Slow);
++  and_(Size::i64Bit, TMP2, TMP1, 0xc00);
++  (void)cbnz(Size::i64Bit, TMP2, &RCSlow);
++  and_(Size::i64Bit, TMP2, TMP1, 0x3f);
++  sub(Size::i64Bit, TMP2, TMP2, 0x3f);
++  (void)cbnz(Size::i64Bit, TMP2, &UnmaskedSlow);
++  and_(Size::i64Bit, TMP2, TMP1, 0x300);
++  sub(Size::i64Bit, TMP3, TMP2, 0x100);
++  (void)cbz(Size::i64Bit, TMP3, &PCSlow);
++  if (!FEXCore::HBX87::PC24()) (void)cbz(Size::i64Bit, TMP2, &Disabled24Slow);
++  LoadConstant(Size::i64Bit, TMP2, 0x0f3f);
++  and_(Size::i64Bit, TMP1, TMP1, TMP2);
++  sub(Size::i64Bit, TMP2, TMP1, 0x023f);
++  (void)cbz(Size::i64Bit, TMP2, &Path53);
++  if (FEXCore::HBX87::PC24()) {
++    sub(Size::i64Bit, TMP2, TMP1, 0x003f);
++    (void)cbz(Size::i64Bit, TMP2, &Path24);
++  }
++  (void)b(&PCSlow);
++  auto EmitExact = [&](unsigned precision) {
++    ForwardLabel ScaleZero, HaveScale, ZeroX, Pack;
++    // Truncate ST1 toward zero using only its full80 bits. In particular,
++    // converting an almost-integer full80 value to double first is unsafe.
++    umov<SubRegSize::i64Bit>(TMP1, D, 0);
++    umov<SubRegSize::i64Bit>(TMP2, D, 1);
++    and_(Size::i64Bit, TMP2, TMP2, 0x7fff);
++    (void)cbnz(Size::i64Bit, TMP2, &HaveScale);
++    (void)cbnz(Size::i64Bit, TMP1, &DomainSlow); // subnormal/pseudo-zero
++    (void)b(&ScaleZero);
++    (void)Bind(&HaveScale);
++    (void)tbz(TMP1, 63, &DomainSlow); // explicit integer bit required
++    LoadConstant(Size::i64Bit, TMP4, 0x7fff);
++    sub(Size::i64Bit, TMP3, TMP2, TMP4);
++    (void)cbz(Size::i64Bit, TMP3, &DomainSlow); // NaN/infinity
++    LoadConstant(Size::i64Bit, TMP4, 0x3fff);
++    sub(Size::i64Bit, TMP3, TMP2, TMP4);
++    (void)tbnz(TMP3, 63, &ScaleZero); // |ST1|<1
++    sub(Size::i64Bit, TMP4, TMP3, 15);
++    (void)tbz(TMP4, 63, &DomainSlow); // |trunc(ST1)|>=32768
++    LoadConstant(Size::i64Bit, TMP4, 63);
++    sub(Size::i64Bit, TMP4, TMP4, TMP3);
++    lsrv(Size::i64Bit, TMP1, TMP1, TMP4);
++    umov<SubRegSize::i64Bit>(TMP2, D, 1);
++    ForwardLabel PositiveScale, ScaleReady;
++    (void)tbz(TMP2, 15, &PositiveScale);
++    neg(Size::i64Bit, TMP1, TMP1);
++    (void)Bind(&PositiveScale);
++    (void)b(&ScaleReady);
++    (void)Bind(&ScaleZero);
++    LoadConstant(Size::i64Bit, TMP1, 0);
++    (void)Bind(&ScaleReady);
++    umov<SubRegSize::i64Bit>(TMP2, A, 1);
++    and_(Size::i64Bit, TMP2, TMP2, 0x7fff);
++    umov<SubRegSize::i64Bit>(TMP3, A, 0);
++    (void)cbz(Size::i64Bit, TMP2, &ZeroX);
++    (void)tbz(TMP3, 63, &DomainSlow);
++    LoadConstant(Size::i64Bit, TMP4, (UINT64_C(1) << (64 - precision)) - 1);
++    and_(Size::i64Bit, TMP4, TMP3, TMP4);
++    (void)cbnz(Size::i64Bit, TMP4, &DomainSlow);
++    // Both source and result are normal and exactly representable in the
++    // guarded host format. The exponent change needs no FPCR/FPSR writes.
++    const unsigned low = precision == 53 ? 16383 - 1022 : 16383 - 126;
++    const unsigned high = precision == 53 ? 16383 + 1023 : 16383 + 127;
++    auto CheckRange = [&] {
++      LoadConstant(Size::i64Bit, TMP4, low);
++      sub(Size::i64Bit, TMP4, TMP2, TMP4);
++      (void)tbnz(TMP4, 63, &RangeSlow);
++      LoadConstant(Size::i64Bit, TMP4, high + 1);
++      sub(Size::i64Bit, TMP4, TMP2, TMP4);
++      (void)tbz(TMP4, 63, &RangeSlow);
++    };
++    CheckRange();
++    add(Size::i64Bit, TMP2, TMP2, TMP1);
++    CheckRange();
++    umov<SubRegSize::i64Bit>(TMP4, A, 1);
++    and_(Size::i64Bit, TMP4, TMP4, 0x8000);
++    orr(Size::i64Bit, TMP2, TMP2, TMP4);
++    (void)b(&Pack);
++    (void)Bind(&ZeroX);
++    (void)cbnz(Size::i64Bit, TMP3, &DomainSlow);
++    umov<SubRegSize::i64Bit>(TMP2, A, 1);
++    and_(Size::i64Bit, TMP2, TMP2, 0x8000);
++    (void)Bind(&Pack);
++    fmov(Size::i64Bit, VTMP1.D(), TMP3);
++    fmov(Size::i64Bit, VTMP1.D(), TMP2, true);
++    mov(Dst.Q(), VTMP1.Q());
++    HBObserve(precision == 53 ? FEXCore::HBX87::Coverage::Hit53 : FEXCore::HBX87::Coverage::Hit24);
++    (void)b(&Done);
++  };
++  (void)Bind(&Path53); EmitExact(53);
++  (void)Bind(&Path24); EmitExact(24);
++  auto Original = [&](unsigned outcome) {
++    HBObserve(outcome);
++    FallbackInfo Info {};
++    if (!InterpreterOps::GetFallbackHandler(IROp, &Info) || Info.ABI != FABI_F80_I16_F80_F80_PTR) std::abort();
++    str<IndexType::PRE>(XReg::lr, Reg::rsp, -16);
++    mov(VTMP1.Q(), A.Q()); mov(VTMP2.Q(), D.Q());
++    ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
++    ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
++    blr(TMP1);
++    ldr<IndexType::POST>(XReg::lr, Reg::rsp, 16);
++    mov(Dst.Q(), VTMP1.Q());
++    (void)b(&Done);
++  };
++  (void)Bind(&PCSlow); Original(FEXCore::HBX87::Coverage::RejectReservedPC);
++  (void)Bind(&PC64Slow); Original(FEXCore::HBX87::Coverage::RejectPC64);
++  (void)Bind(&RCSlow); Original(FEXCore::HBX87::Coverage::RejectRC);
++  (void)Bind(&UnmaskedSlow); Original(FEXCore::HBX87::Coverage::RejectUnmasked);
++  (void)Bind(&Disabled24Slow); Original(FEXCore::HBX87::Coverage::RejectDisabledPC24);
++  (void)Bind(&DomainSlow); Original(FEXCore::HBX87::Coverage::RejectInputDomain);
++  (void)Bind(&RangeSlow); Original(FEXCore::HBX87::Coverage::RejectRange);
++  (void)Bind(&Done);
++  return;
++}
+-- 
+2.54.0 (Apple Git-157)
+

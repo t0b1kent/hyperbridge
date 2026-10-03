@@ -1,0 +1,109 @@
+From ce80cfa8c1bbcd0493efc17c14a46624d93bd5cf Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 22:16:10 +1000
+Subject: [PATCH 41/46] EXPERIMENT: exact-representable guarded FST/FSTP memory
+ stores
+
+Family: x87 real stores
+Members: FST/FSTP m32/m64 via F80CVT; FSTP m80 and register forms already copy raw values and intentionally retain existing paths.
+Trigger: Heroes accounting FSTP358 events, entry projection66631; converter not in earlier fast arithmetic path.
+Coverage: signed zero and normal exact-representable outputs, both signs, exponent/low-bit bounds, masked nearest PC53 or explicitly enabled PC24. All rounding-required, PC64/reserved/other RC, special/denormal/unnormal and unmasked inputs retain original SoftFloat ABI. Bit packing uses integer instructions, preserves NZCV/FPSR, does not reread guest memory.
+Regression: one runner SHA,560cases across8 FCWs,32/64/80 and FST/FSTP; OFF/ON architectural bytes identical560/560. Strict Unicorn496 EQUAL/64 unchanged special-input divergences,0 introduced; these64 outside admission are not relabelled EQUAL. Initial release-emitter SIGILL preserved and fixed using register constants. Game trace model65 candidates, not proof of65 retired converter hits or CPU speedup.
+Gates: MACRUNNER_HB_X87_FAST=1 and MACRUNNER_HB_X87_FAST_STORE=1; new gate default off.
+Audit completed: yes (implementation family); two-base/app acceptance remains incomplete.
+---
+ FEXCore/Source/Interface/Core/HBX87Emit.inl   |  1 +
+ .../Source/Interface/Core/HBX87StoreEmit.inl  | 69 +++++++++++++++++++
+ 2 files changed, 70 insertions(+)
+ create mode 100644 FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+
+diff --git a/FEXCore/Source/Interface/Core/HBX87Emit.inl b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+index 9b1aeb546..ed8706719 100644
+--- a/FEXCore/Source/Interface/Core/HBX87Emit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+@@ -86,6 +86,7 @@ if (FEXCore::HBX87::Enabled() && IROp->Op==IR::OP_F80CVTTO) {
+     return;
+   }
+ }
++#include "Interface/Core/HBX87StoreEmit.inl"
+ #include "Interface/Core/HBX87EarlyEmit.inl"
+ if(IROp->Op==IR::OP_HBX87FAST) {
+  const auto Op=IROp->C<IR::IROp_HBX87Fast>();
+diff --git a/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl b/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+new file mode 100644
+index 000000000..2ba2f85dc
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+@@ -0,0 +1,69 @@
++// SPDX-License-Identifier: MIT
++// Modifications (c) 2026 MacRunner contributors, MIT
++// Exact-representable FST/FSTP m32/m64 only; no speculative FP, no NZCV writes.
++if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STORE") && IROp->Op == IR::OP_F80CVT &&
++    (IROp->Size == IR::OpSize::i32Bit || IROp->Size == IR::OpSize::i64Bit)) {
++  const bool D = IROp->Size == IR::OpSize::i64Bit;
++  const auto Src = GetVReg(IROp->Args[0]);
++  const auto Dst = GetVReg(Node);
++  const unsigned Fraction = D ? 52 : 23, Shift = D ? 11 : 40;
++  const unsigned MinExp = 16383 - (D ? 1022 : 126), MaxExp = 16383 + (D ? 1023 : 127);
++  const uint64_t LowMask = (UINT64_C(1) << Shift) - 1;
++  ForwardLabel Slow, Input, Zero, Pack, Done;
++  ldrh(TMP1, STATE, offsetof(FEXCore::Core::CPUState, FCW));
++  LoadConstant(Size::i64Bit, TMP4, 0xf3f);
++  and_(Size::i64Bit, TMP1, TMP1, TMP4);
++  sub(Size::i64Bit, TMP1, TMP1, 0x23f);
++  (void)cbz(Size::i64Bit, TMP1, &Input);
++  if (FEXCore::HBX87::PC24()) {
++    add(Size::i64Bit, TMP1, TMP1, 0x200);
++    (void)cbnz(Size::i64Bit, TMP1, &Slow);
++  } else {
++    (void)b(&Slow);
++  }
++  (void)Bind(&Input);
++  umov<SubRegSize::i64Bit>(TMP2, Src, 0);
++  umov<SubRegSize::i64Bit>(TMP1, Src, 1);
++  and_(Size::i64Bit, TMP3, TMP1, 0x7fff);
++  orr(Size::i64Bit, TMP4, TMP3, TMP2);
++  (void)cbz(Size::i64Bit, TMP4, &Zero);
++  (void)tbz(TMP2, 63, &Slow); // zero exponent/denormal/unnormal are not admitted
++  LoadConstant(Size::i64Bit, TMP4, MinExp);
++  sub(Size::i64Bit, TMP4, TMP3, TMP4);
++  (void)tbnz(TMP4, 63, &Slow);
++  LoadConstant(Size::i64Bit, TMP4, MaxExp);
++  sub(Size::i64Bit, TMP4, TMP4, TMP3);
++  (void)tbnz(TMP4, 63, &Slow); // includes NaN, infinity, overflow
++  and_(Size::i64Bit, TMP4, TMP2, LowMask);
++  (void)cbnz(Size::i64Bit, TMP4, &Slow); // any rounding needs exact SoftFloat
++  lsr(Size::i64Bit, TMP2, TMP2, Shift);
++  and_(Size::i64Bit, TMP2, TMP2, (UINT64_C(1) << Fraction) - 1);
++  LoadConstant(Size::i64Bit, TMP4, 16383 - (D ? 1023 : 127));
++  sub(Size::i64Bit, TMP3, TMP3, TMP4);
++  lsl(Size::i64Bit, TMP3, TMP3, Fraction);
++  orr(Size::i64Bit, TMP2, TMP2, TMP3);
++  (void)b(&Pack);
++  (void)Bind(&Zero);
++  LoadConstant(Size::i64Bit, TMP2, 0);
++  (void)Bind(&Pack);
++  and_(Size::i64Bit, TMP1, TMP1, 0x8000);
++  lsl(Size::i64Bit, TMP1, TMP1, D ? 48 : 16);
++  orr(Size::i64Bit, TMP2, TMP2, TMP1);
++  if (D) fmov(Size::i64Bit, Dst.D(), TMP2);
++  else fmov(Size::i32Bit, Dst.S(), TMP2);
++  (void)b(&Done);
++  (void)Bind(&Slow);
++  // Original ABI and original source, loaded once before admission.
++  FallbackInfo Info {};
++  LOGMAN_THROW_A_FMT(InterpreterOps::GetFallbackHandler(IROp, &Info), "Missing exact F80 store converter");
++  str<IndexType::PRE>(XReg::lr, Reg::rsp, -16);
++  mov(VTMP1.Q(), Src.Q());
++  ldr(TMP1, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, ABIHandler));
++  ldr(TMP4, FALLBACK_HANDLER_OFFSET(Info.HandlerIndex, Func));
++  blr(TMP1);
++  ldr<IndexType::POST>(XReg::lr, Reg::rsp, 16);
++  if (D) fmov(Dst.D(), VTMP1.D());
++  else fmov(Dst.S(), VTMP1.S());
++  (void)Bind(&Done);
++  return;
++}
+-- 
+2.54.0 (Apple Git-157)
+

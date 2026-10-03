@@ -1,0 +1,384 @@
+From 2a301fc1f3a3136115e90d79d0a1cb70ddb378ee Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 18:57:46 +1000
+Subject: [PATCH 24/80] EXPERIMENT: precise invalidation for Mono call-target
+ patches (MACRUNNER_FEX_MONO_BP_PRECISE)
+
+Mono's backpatcher rewrites the 8-byte imm64 of `mov r11, imm64; call/jmp r11`
+(49 BB <imm64> 41 FF D3/E3). MonoBackpatcherWrite invalidated the whole
+4 KiB page (every translation touching it) and every thread whose L1/L2 held a
+block of that page zeroed its 4 MiB call-return stack under the exclusive code
+lock. On Hollow Knight that is ~17 000 page drops and call-return clears until
+the main menu (~1.2 s of thread time) and ~29 000 re-translations of unchanged
+neighbours.
+
+With the gate, every translation also records its guest byte extent
+[DecodedMinAddress, DecodedMaxAddress) per code page. A patch whose surrounding
+bytes match the call-target pattern drops only the entry points whose recorded
+extent overlaps the 8 patched bytes (entry points without a record are dropped
+as before), clears only those entries from each thread's L1/L2, and leaves the
+call-return stacks alone: an old translation differs only in the call target,
+so returning into it calls the old target (Mono's trampoline), which is what a
+core that has not yet observed the cross-modification would do. Any other
+backpatcher write keeps the old path. Counters: bp_precise, bp_precise_erased,
+bp_fallback in the macrunner-fex-jit line.
+
+Svod-Origin: exp-inv-20260929 3dd87a06e (0037 of fexbuild-0019s)
+Svod-Note: reordered before 0020-0035: no HB_SCOPE span in InvalidateCallTargetPatch (added with the HB_SPANS patch), the capture gate list entry moves to the capture patch
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Context/Context.h    |  2 +
+ FEXCore/Source/Interface/Core/Core.cpp        | 71 +++++++++++++++-
+ FEXCore/Source/Interface/Core/LookupCache.cpp |  1 +
+ FEXCore/Source/Interface/Core/LookupCache.h   | 81 +++++++++++++++++++
+ FEXCore/include/FEXCore/Core/Context.h        |  5 ++
+ FEXCore/include/FEXCore/HLE/SyscallHandler.h  |  5 ++
+ Source/Windows/ARM64EC/Module.cpp             |  5 ++
+ Source/Windows/Common/InvalidationTracker.cpp | 12 +++
+ Source/Windows/Common/InvalidationTracker.h   |  4 +
+ 9 files changed, 184 insertions(+), 2 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Context/Context.h b/FEXCore/Source/Interface/Context/Context.h
+index b8b68b7c7..55e355f9a 100644
+--- a/FEXCore/Source/Interface/Context/Context.h
++++ b/FEXCore/Source/Interface/Context/Context.h
+@@ -220,6 +220,8 @@ public:
+   void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer = true) override;
+   void InvalidateCodeBuffersCodeRange(uint64_t Start, uint64_t Length) override;
+   void InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) override;
++  void MRInvalidateCodeBuffersPrecise(uint64_t Start, uint64_t Length, fextl::vector<uint64_t>& Erased) override;
++  void MRInvalidateThreadCachedEntries(FEXCore::Core::InternalThreadState* Thread, const fextl::vector<uint64_t>& Erased) override;
+   FEXCore::Utils::WritePriorityMutex::Mutex& GetCodeInvalidationMutex() override {
+     return CodeInvalidationMutex;
+   }
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index a42bd4169..61d944c10 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -190,6 +190,31 @@ int MRReviveKeepBp() {
+   }();
+   return Mode;
+ }
++// ★ MacRunner (Claude, 29.09.2026) — MACRUNNER_FEX_MONO_BP_PRECISE=1: точный сброс для заплаток адреса вызова Mono.
++//   Заплатчик Mono меняет 8 байт imm64 в `mov r11, imm64; call/jmp r11` (49 BB <imm64> 41 FF D3/E3). Прежний путь
++//   (InvalidateGuestCodeRange -> InvalidateAlignedInterval) снимает ВСЮ страницу 4 КБ переводов и обнуляет стек
++//   возвратов 4 МБ у каждого потока, в чьих L1/L2 были блоки страницы: на HK до меню 17 тыс. раз (~1.2 с потоков под
++//   исключительным замком) и ~29 тыс. повторных переводов соседей. Здесь снимаются только переводы, чей охват байтов
++//   гостя задевает эти 8 байт, стек возвратов не обнуляется: старый перевод отличается лишь целью вызова, возврат в
++//   него исполняет вызов старой цели (трамплина Mono) — то же, что видит ядро, ещё не заметившее перекрёстную запись.
++//   Любая другая запись заплатчика идёт прежним путём.
++int MRMonoBpPrecise() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_MONO_BP_PRECISE");
++    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++  }();
++  return Mode;
++}
++std::atomic<uint64_t> MRBpPrecise {0}, MRBpPreciseErased {0}, MRBpFallback {0};
++bool MRIsCallTargetPatch(uint64_t Address, uint8_t Size) {
++  // Только внутри одной страницы 4 КБ с самим адресом: она заведомо отображена (заплатчик в неё пишет).
++  constexpr uint64_t PageMask = ~uint64_t {0xFFF};
++  if (Size != 8 || ((Address - 2) & PageMask) != (Address & PageMask) || ((Address + 10) & PageMask) != (Address & PageMask)) {
++    return false;
++  }
++  const auto* Bytes = reinterpret_cast<const uint8_t*>(Address);
++  return Bytes[-2] == 0x49 && Bytes[-1] == 0xBB && Bytes[8] == 0x41 && Bytes[9] == 0xFF && (Bytes[10] == 0xD3 || Bytes[10] == 0xE3);
++}
+ // Обнуление стека возвратов при инвалидации (InvalidateThreadCachedCodeRange): число и время.
+ std::atomic<uint64_t> MRCallRetClears {0}, MRCallRetTicks {0};
+ 
+@@ -289,7 +314,7 @@ void MRReport(uint64_t Compiles) {
+     "prot_calls={} prot_inv_mb={} prot_kept_mb={} prot_trap_mb={} prot_keep={} "
+     "revived={} revive_hash_miss={} revive_skip={} revive_registered={} revive_unstable={} revive={} codebuf_max={} "
+     "callret_clears={} callret_ms={} range_queries={} range_cached={} bp_writes={} revive_bp={} revive_bp_drops={} "
+-    "revive_keep_bp={}\n",
++    "revive_keep_bp={} bp_precise={} bp_precise_erased={} bp_fallback={} bp_precise_on={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+     MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
+     MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+@@ -307,7 +332,8 @@ void MRReport(uint64_t Compiles) {
+     MRCallRetClears.load(std::memory_order_relaxed), MRCallRetTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+     MRRangeQueries.load(std::memory_order_relaxed), MRRangeCached.load(std::memory_order_relaxed),
+     MRBackpatchWrites.load(std::memory_order_relaxed), MRReviveBp.load(std::memory_order_relaxed),
+-    MRReviveBpDrops.load(std::memory_order_relaxed), MRReviveKeepBp());
++    MRReviveBpDrops.load(std::memory_order_relaxed), MRReviveKeepBp(), MRBpPrecise.load(std::memory_order_relaxed),
++    MRBpPreciseErased.load(std::memory_order_relaxed), MRBpFallback.load(std::memory_order_relaxed), MRMonoBpPrecise());
+   Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+   FEX::Windows::Logging::Raw(Line);
+ }
+@@ -1205,6 +1231,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+             SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+           }
+         }
++        if (MRMonoBpPrecise()) {
++          Thread->LookupCache->MRAddSpans(Entrypoint, Entry.CodePages, Entry.HashBegin, Entry.HashEnd);
++        }
+         // Второй хеш — уже под ловушкой: запись, успевшая до неё, возврат не пропустит.
+         if (MRHashGuest(Entry.HashBegin, Entry.HashEnd) == Entry.Hash) {
+           Thread->LookupCache->AddBlockMapping(Thread, GuestRIP, Entry.CodePages, reinterpret_cast<void*>(Entry.HostCode));
+@@ -1304,6 +1333,10 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+         SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+       }
+     }
++    // ★ MacRunner — точный сброс для заплаток Mono: охват байтов гостя этого перевода по его страницам.
++    if (MRMonoBpPrecise()) {
++      Thread->LookupCache->MRAddSpans(BlockInfo->EntryPoints, CodePages, StartAddr, StartAddr + Length);
++    }
+   }
+ 
+   // Insert to lookup cache
+@@ -1390,6 +1423,31 @@ void ContextImpl::InvalidateCodeBuffersCodeRange(uint64_t Start, uint64_t Length
+   }
+ }
+ 
++void ContextImpl::MRInvalidateCodeBuffersPrecise(uint64_t Start, uint64_t Length, fextl::vector<uint64_t>& Erased) {
++  LOGMAN_THROW_A_FMT(CodeInvalidationMutex.try_lock() == false, "CodeInvalidationMutex needs to be unique_locked here");
++  const size_t Before = Erased.size();
++  {
++    std::scoped_lock lk {CodeBufferListLock};
++    auto it = CodeBufferList.begin();
++    while (it != CodeBufferList.end()) {
++      if (auto Strong = it->lock()) {
++        Strong->LookupCache->MRInvalidatePrecise(Start, Length, Erased);
++        it++;
++      } else {
++        it = CodeBufferList.erase(it);
++      }
++    }
++  }
++  MRBpPreciseErased.fetch_add(Erased.size() - Before, std::memory_order_relaxed);
++}
++
++void ContextImpl::MRInvalidateThreadCachedEntries(FEXCore::Core::InternalThreadState* Thread, const fextl::vector<uint64_t>& Erased) {
++  LOGMAN_THROW_A_FMT(CodeInvalidationMutex.try_lock() == false, "CodeInvalidationMutex needs to be unique_locked here");
++  if (!Erased.empty()) {
++    Thread->LookupCache->MRInvalidateCacheEntries(Erased);
++  }
++}
++
+ void ContextImpl::InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {
+   LOGMAN_THROW_A_FMT(CodeInvalidationMutex.try_lock() == false, "CodeInvalidationMutex needs to be unique_locked here");
+ 
+@@ -1529,6 +1587,8 @@ void ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame* Frame, uint
+   auto Thread = Frame->Thread;
+   auto CTX = static_cast<ContextImpl*>(Thread->CTX);
+   MRBackpatchWrites.fetch_add(1, std::memory_order_relaxed);
++  // Байты вокруг imm64 заплатка не меняет — проверка до записи равносильна проверке после.
++  const bool MRPrecise = MRMonoBpPrecise() && MRIsCallTargetPatch(Address, Size);
+   {
+     auto lk = GuardSignalDeferringSection(CTX->CodeInvalidationMutex, Thread);
+ 
+@@ -1541,6 +1601,13 @@ void ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame* Frame, uint
+     }
+   }
+ 
++  if (MRPrecise && CTX->SyscallHandler->InvalidateGuestCallTargetPatch(Thread, Address, Size)) {
++    MRBpPrecise.fetch_add(1, std::memory_order_relaxed);
++    return;
++  }
++  if (MRMonoBpPrecise()) {
++    MRBpFallback.fetch_add(1, std::memory_order_relaxed);
++  }
+   CTX->SyscallHandler->InvalidateGuestCodeRange(Thread, Address, Size);
+ }
+ 
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.cpp b/FEXCore/Source/Interface/Core/LookupCache.cpp
+index 0b230306f..5e3b3c312 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.cpp
++++ b/FEXCore/Source/Interface/Core/LookupCache.cpp
+@@ -106,6 +106,7 @@ void GuestToHostMap::ClearCache(const LookupCacheWriteLockToken&) {
+   BlockLinks = BlockLinks_pma->new_object<BlockLinksMapType>();
+   // All code is gone, clear the block list
+   BlockList.clear();
++  MRSpans.clear();
+ }
+ 
+ } // namespace FEXCore
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+index bf958d80b..bd94da917 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -134,6 +134,70 @@ struct GuestToHostMap {
+       }
+     }
+     CodePages.erase(lower, upper);
++    if (!MRSpans.empty()) {
++      MRSpans.erase(MRSpans.lower_bound(Start >> 12), MRSpans.upper_bound((Start + Length - 1) >> 12));
++    }
++  }
++
++  // ★ MacRunner (Claude, 29.09.2026) — MACRUNNER_FEX_MONO_BP_PRECISE: охват байтов гостя [Begin, End) каждого перевода
++  //   по страницам. Заплатка адреса вызова Mono снимает только переводы, чей охват задевает изменённые байты, а не всю
++  //   страницу 4 КБ (на HK до меню 17 233 заплатки -> 17 тыс. сбросов страниц и ~29 тыс. повторных переводов соседей).
++  struct MRSpan {
++    uint64_t Entry;
++    uint64_t Begin;
++    uint64_t End;
++  };
++  fextl::map<uint64_t, fextl::vector<MRSpan>> MRSpans;
++
++  void MRAddSpans(const std::ranges::input_range auto& Entries, uint64_t Page, uint64_t Begin, uint64_t End, const LookupCacheWriteLockToken&) {
++    auto& Spans = MRSpans[Page >> 12];
++    for (uint64_t Entry : Entries) {
++      Spans.push_back({Entry, Begin, End});
++    }
++  }
++
++  // Снимает точки входа со страниц [Start, Start + Length), если хоть один их перевод задевает эти байты. Точка входа
++  // без записи охвата (кеш кода, перевод до включения гейта) снимается всегда — как при обычном сбросе страницы.
++  void MRInvalidatePrecise(uint64_t Start, uint64_t Length, fextl::vector<uint64_t>& Erased) {
++    auto lk = AcquireWriteLock();
++    const uint64_t End = Start + Length;
++    for (uint64_t Page = Start >> 12, LastPage = (End - 1) >> 12; Page <= LastPage; ++Page) {
++      auto PageIt = CodePages.find(Page);
++      if (PageIt == CodePages.end()) {
++        continue;
++      }
++      fextl::robin_map<uint64_t, bool> Hit;
++      if (auto SpanIt = MRSpans.find(Page); SpanIt != MRSpans.end()) {
++        auto& Spans = SpanIt->second;
++        for (size_t I = 0; I < Spans.size();) {
++          const bool Overlaps = Spans[I].Begin < End && Start < Spans[I].End;
++          auto& Seen = Hit[Spans[I].Entry];
++          Seen = Seen || Overlaps;
++          if (Overlaps) {
++            Spans[I] = Spans.back();
++            Spans.pop_back();
++          } else {
++            ++I;
++          }
++        }
++      }
++      auto& Entries = PageIt->second;
++      for (size_t I = 0; I < Entries.size();) {
++        const uint64_t Entry = Entries[I];
++        if (auto Known = Hit.find(Entry); Known != Hit.end() && !Known->second) {
++          ++I;
++          continue;
++        }
++        if (Erase(Entry, lk)) {
++          Erased.push_back(Entry);
++        }
++        Entries[I] = Entries.back();
++        Entries.pop_back();
++      }
++      if (Entries.empty()) {
++        CodePages.erase(PageIt);
++      }
++    }
+   }
+ 
+   void AddBlockLink(uint64_t GuestDestination, FEXCore::Context::ExitFunctionLinkData* HostLink,
+@@ -298,6 +362,23 @@ public:
+     CacheBlockMapping(Address, Entry, true, lk);
+   }
+ 
++  // ★ MacRunner — MACRUNNER_FEX_MONO_BP_PRECISE: охват перевода по его страницам (см. GuestToHostMap::MRSpans).
++  void MRAddSpans(const fextl::set<uint64_t>& Entries, const fextl::vector<uint64_t>& Pages, uint64_t Begin, uint64_t End) {
++    auto lk = Shared->AcquireWriteLock();
++    for (auto Page : Pages) {
++      Shared->MRAddSpans(Entries, Page, Begin, End, lk);
++    }
++  }
++
++  // ★ MacRunner — точный сброс: гасит в L1/L2 этого потока только снятые точки входа. Стек возвратов не трогает:
++  //   зовётся только для заплаток адреса вызова, где старый перевод отличается лишь целью вызова.
++  void MRInvalidateCacheEntries(const fextl::vector<uint64_t>& Entries) {
++    auto lk = Shared->AcquireWriteLock();
++    for (auto Entry : Entries) {
++      InvalidateCache(Entry, lk);
++    }
++  }
++
+   // Invalidates L1/L2 for a given guest block
+   void InvalidateCache(uint64_t Address, const LookupCacheWriteLockToken& lk) {
+     // Do L1
+diff --git a/FEXCore/include/FEXCore/Core/Context.h b/FEXCore/include/FEXCore/Core/Context.h
+index ec61b90bf..be03bf1ab 100644
+--- a/FEXCore/include/FEXCore/Core/Context.h
++++ b/FEXCore/include/FEXCore/Core/Context.h
+@@ -144,6 +144,11 @@ public:
+   FEX_DEFAULT_VISIBILITY virtual void InvalidateCodeBuffersCodeRange(uint64_t Start, uint64_t Length) = 0;
+   FEX_DEFAULT_VISIBILITY virtual void
+   InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) = 0;
++  // ★ MacRunner (MACRUNNER_FEX_MONO_BP_PRECISE): точный сброс переводов, задевающих [Start, Start + Length), и гашение
++  //   снятых точек входа в L1/L2 потоков. Вызывающий держит CodeInvalidationMutex.
++  FEX_DEFAULT_VISIBILITY virtual void MRInvalidateCodeBuffersPrecise(uint64_t Start, uint64_t Length, fextl::vector<uint64_t>& Erased) = 0;
++  FEX_DEFAULT_VISIBILITY virtual void
++  MRInvalidateThreadCachedEntries(FEXCore::Core::InternalThreadState* Thread, const fextl::vector<uint64_t>& Erased) = 0;
+   FEX_DEFAULT_VISIBILITY virtual FEXCore::Utils::WritePriorityMutex::Mutex& GetCodeInvalidationMutex() = 0;
+ 
+   FEX_DEFAULT_VISIBILITY virtual void
+diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+index d1f4decd7..d3c90aa7b 100644
+--- a/FEXCore/include/FEXCore/HLE/SyscallHandler.h
++++ b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
+@@ -60,6 +60,11 @@ public:
+   }
+   virtual void MarkGuestExecutableRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {}
+   virtual void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {}
++  // ★ MacRunner (MACRUNNER_FEX_MONO_BP_PRECISE): точный сброс для заплатки адреса вызова. false — не поддержано,
++  //   вызывающий идёт обычным InvalidateGuestCodeRange.
++  virtual bool InvalidateGuestCallTargetPatch(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {
++    return false;
++  }
+   virtual void MarkOvercommitRange(uint64_t Start, uint64_t Length) {}
+   virtual void UnmarkOvercommitRange(uint64_t Start, uint64_t Length) {}
+   virtual ExecutableRangeInfo QueryGuestExecutableRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Address) = 0;
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index 42f055726..18b794cd0 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -653,6 +653,11 @@ public:
+     InvalidationTracker->InvalidateAlignedInterval(Start, Length, false);
+   }
+ 
++  bool InvalidateGuestCallTargetPatch(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) override {
++    InvalidationTracker->InvalidateCallTargetPatch(Start, Length);
++    return true;
++  }
++
+   void MarkOvercommitRange(uint64_t Start, uint64_t Length) override {
+     OvercommitTracker->MarkRange(Start, Length);
+   }
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index ffd33171a..b62159362 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -401,6 +401,18 @@ void InvalidationTracker::InvalidateIntervalInternal(uint64_t Address, uint64_t
+   InvalidateIntervalInternalLocked(Address, Size);
+ }
+ 
++void InvalidationTracker::InvalidateCallTargetPatch(uint64_t Address, uint64_t Size) {
++  std::scoped_lock CodeLock(CTX.GetCodeInvalidationMutex());
++  fextl::vector<uint64_t> Erased;
++  CTX.MRInvalidateCodeBuffersPrecise(Address, Size, Erased);
++  if (Erased.empty()) {
++    return;
++  }
++  for (auto Thread : Threads) {
++    CTX.MRInvalidateThreadCachedEntries(Thread.second, Erased);
++  }
++}
++
+ void InvalidationTracker::InvalidateIntervalInternalLocked(uint64_t Address, uint64_t Size) {
+   // NOTE: This assumes CodeInvalidationMutex is locked by the caller
+   CTX.InvalidateCodeBuffersCodeRange(Address, Size);
+diff --git a/Source/Windows/Common/InvalidationTracker.h b/Source/Windows/Common/InvalidationTracker.h
+index d2a80bcaa..3e5311590 100644
+--- a/Source/Windows/Common/InvalidationTracker.h
++++ b/Source/Windows/Common/InvalidationTracker.h
+@@ -41,6 +41,10 @@ public:
+ 
+   FEXCore::HLE::ExecutableRangeInfo QueryExecutableRange(uint64_t Address);
+ 
++  // ★ MacRunner (MACRUNNER_FEX_MONO_BP_PRECISE): точный сброс для заплатки адреса вызова — без выравнивания до страницы
++  //   и без обнуления стеков возвратов.
++  void InvalidateCallTargetPatch(uint64_t Address, uint64_t Size);
++
+ private:
+   void DetectMonoBackpatcherBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC);
+   void DisableSMCDetection();
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,116 @@
+From b1e0be6141eca5cf2181add1d9c1e154103eb16b Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 18:35:38 +1000
+Subject: [PATCH 20/80] EXPERIMENT: REVIVE must not return translations made
+ before the Mono backpatcher mark
+
+MarkMonoBackpatcherBlock changes what a translation of unchanged bytes must
+contain: writes of the marked block go through MonoBackpatcherWrite, which
+invalidates the patched code. The REVIVE table survived the mark, so the
+block compiled before it came back with plain stores. On Hollow Knight the
+17 233 Mono call-site patches until the main menu then stopped invalidating
+anything (write traps are already off after DisableSMCDetection), and the
+translations of patched call sites went stale silently.
+
+The mark now bumps the REVIVE epoch and clears the table.
+MACRUNNER_FEX_REVIVE_KEEP_BP=1 restores the old behaviour for a
+same-binary comparison (diagnostic only). New counters in the
+macrunner-fex-jit line: bp_writes (MonoBackpatcherWrite calls), revive_bp
+(revivals of the marked block), revive_bp_drops (table drops at the mark).
+
+Svod-Origin: exp-inv-20260929 01f28fc1a (0036 of fexbuild-0019s)
+Svod-Note: reordered before 0020-0035: the capture gate list entry (MACRUNNER_FEX_REVIVE_KEEP_BP) moves to the capture patch; the report fields follow callret_ms (range_* come with 0031)
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ FEXCore/Source/Interface/Core/Core.cpp | 33 ++++++++++++++++++++++++--
+ 1 file changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index f7ed0b983..6f29fe3ae 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -134,6 +134,12 @@ int MRProtKeepModeForReport() {
+ //   полного сброса. Сбросы по диапазону идут под исключительной блокировкой и с компиляцией (разделяемой)
+ //   не пересекаются. Окно, общее с upstream: запись в ЕЩЁ не защищённую ловушкой целую страницу RWX
+ //   между декодированием и ловушкой — двойной хеш его сужает, но не закрывает.
++//   ★ 29.09.2026: пометка «заплатчика» Mono (MarkMonoBackpatcherBlock) меняет перевод при тех же байтах —
++//   записи помеченного блока идут через MonoBackpatcherWrite, который сбрасывает перевод пропатченного
++//   места. До этой правки таблица переживала пометку, и возврат отдавал перевод, собранный ДО неё: на HK
++//   17 233 заплатки Mono до меню стали простыми записями без сброса (ловушки к тому моменту сняты,
++//   DisableSMCDetection), переводы пропатченных вызовов устаревали молча. Теперь пометка обнуляет таблицу.
++//   MACRUNNER_FEX_REVIVE_KEEP_BP=1 — только диагностика: вернуть прежнее поведение для сравнения на одном двоичном.
+ int MRCodeBufMaxForReport() {
+   const char* Value = getenv("MACRUNNER_FEX_CODEBUF_MAX");
+   return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
+@@ -162,6 +168,15 @@ std::mutex MRReviveLock;
+ fextl::unordered_map<uint64_t, MRReviveEntry> MRReviveTable;
+ std::atomic<uint64_t> MRReviveEpoch {1};
+ std::atomic<uint64_t> MRRevived {0}, MRReviveHashMiss {0}, MRReviveSkip {0}, MRReviveRegistered {0}, MRReviveUnstable {0};
++// Заплатки Mono (MonoBackpatcherWrite), возвраты помеченного блока, обнуления таблицы при пометке.
++std::atomic<uint64_t> MRBackpatchWrites {0}, MRReviveBp {0}, MRReviveBpDrops {0};
++int MRReviveKeepBp() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_REVIVE_KEEP_BP");
++    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++  }();
++  return Mode;
++}
+ // Обнуление стека возвратов при инвалидации (InvalidateThreadCachedCodeRange): число и время.
+ std::atomic<uint64_t> MRCallRetClears {0}, MRCallRetTicks {0};
+ 
+@@ -260,7 +275,7 @@ void MRReport(uint64_t Compiles) {
+     "inv_calls={} inv_mb={} remove={} validated={} writable_skipped={} wv_mode={} "
+     "prot_calls={} prot_inv_mb={} prot_kept_mb={} prot_trap_mb={} prot_keep={} "
+     "revived={} revive_hash_miss={} revive_skip={} revive_registered={} revive_unstable={} revive={} codebuf_max={} "
+-    "callret_clears={} callret_ms={}\n",
++    "callret_clears={} callret_ms={} bp_writes={} revive_bp={} revive_bp_drops={} revive_keep_bp={}\n",
+     Compiles, MRRepeats.load(std::memory_order_relaxed), MRRaced.load(std::memory_order_relaxed),
+     MRInsts.load(std::memory_order_relaxed), MRMaxInsts.load(std::memory_order_relaxed),
+     MRIrTicks.load(std::memory_order_relaxed) * 1000 / Frequency, MRCgTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
+@@ -275,7 +290,9 @@ void MRReport(uint64_t Compiles) {
+     MRProtKeepModeForReport(), MRRevived.load(std::memory_order_relaxed), MRReviveHashMiss.load(std::memory_order_relaxed),
+     MRReviveSkip.load(std::memory_order_relaxed), MRReviveRegistered.load(std::memory_order_relaxed),
+     MRReviveUnstable.load(std::memory_order_relaxed), MRReviveMode(), MRCodeBufMaxForReport(),
+-    MRCallRetClears.load(std::memory_order_relaxed), MRCallRetTicks.load(std::memory_order_relaxed) * 1000 / Frequency);
++    MRCallRetClears.load(std::memory_order_relaxed), MRCallRetTicks.load(std::memory_order_relaxed) * 1000 / Frequency,
++    MRBackpatchWrites.load(std::memory_order_relaxed), MRReviveBp.load(std::memory_order_relaxed),
++    MRReviveBpDrops.load(std::memory_order_relaxed), MRReviveKeepBp());
+   Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+   FEX::Windows::Logging::Raw(Line);
+ }
+@@ -1167,6 +1184,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+         if (MRHashGuest(Entry.HashBegin, Entry.HashEnd) == Entry.Hash) {
+           Thread->LookupCache->AddBlockMapping(Thread, GuestRIP, Entry.CodePages, reinterpret_cast<void*>(Entry.HostCode));
+           MRRevived.fetch_add(1, std::memory_order_relaxed);
++          if (GuestRIP == MonoBackpatcherBlock.load(std::memory_order_relaxed)) {
++            MRReviveBp.fetch_add(1, std::memory_order_relaxed);
++          }
+           return Entry.HostCode;
+         }
+         MRReviveHashMiss.fetch_add(1, std::memory_order_relaxed);
+@@ -1460,6 +1480,14 @@ void ContextImpl::RemoveForceTSOInformation(uint64_t Address, uint64_t Size) {
+ 
+ void ContextImpl::MarkMonoBackpatcherBlock(uint64_t BlockEntry) {
+   MonoBackpatcherBlock.store(BlockEntry, std::memory_order_relaxed);
++  // ★ MacRunner — возврат перевода: переводы, собранные до пометки, не должны вернуться (см. MRReviveMode).
++  //   Вызывается под исключительной CodeInvalidationMutex, с компиляцией не пересекается.
++  if (!MRReviveKeepBp()) {
++    MRReviveEpoch.fetch_add(1, std::memory_order_relaxed);
++    std::scoped_lock ReviveLock(MRReviveLock);
++    MRReviveTable.clear();
++    MRReviveBpDrops.fetch_add(1, std::memory_order_relaxed);
++  }
+ }
+ 
+ void ContextImpl::RemoveCustomIREntrypoint(FEXCore::Core::InternalThreadState* Thread, uintptr_t Entrypoint) {
+@@ -1475,6 +1503,7 @@ void ContextImpl::RemoveCustomIREntrypoint(FEXCore::Core::InternalThreadState* T
+ void ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame* Frame, uint8_t Size, uint64_t Address, uint64_t Value) {
+   auto Thread = Frame->Thread;
+   auto CTX = static_cast<ContextImpl*>(Thread->CTX);
++  MRBackpatchWrites.fetch_add(1, std::memory_order_relaxed);
+   {
+     auto lk = GuardSignalDeferringSection(CTX->CodeInvalidationMutex, Thread);
+ 
+-- 
+2.54.0 (Apple Git-157)
+

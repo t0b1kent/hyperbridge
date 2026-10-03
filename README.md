@@ -39,8 +39,9 @@ three); lower is better, the best value is in bold. Hollow Knight rows are still
 | Hollow Knight start-up: Unity's own `Loaded All Assemblies` time | 2.22 s ⁴ | 0.26 s | 0.41 s | **0.17 s** |
 | Hollow Knight in King's Pass: FPS · CPU time per frame | 113–117 · 14.9–15.0 ms ⁴ | not comparable (virtual GPU) | 113–119 · 15.4–16.1 ms | **120 · 6.4–6.8 ms** |
 
-¹ Slower than in the September 29 build (1.01 / 0.97). The prime suspect is the exact overflow check added in 1.0.6,
-so that a division overflow raises the same exception as on Windows; this is being investigated.
+¹ Slower than in the September 29 build (1.01 / 0.97): since 1.0.6 the exact overflow check
+(`MACRUNNER_FEX_DIV_OVERFLOW_DE=1`) is on by default, so that a division overflow raises the same exception as on
+Windows. Patch 0017 (`MACRUNNER_FEX_DIV_PROVEN_HIGH`, exact) brings `cqo; idiv` from 3.05 to 2.01 ns; it is off in 1.0.7.
 ² Measured on the engine of MacRunner 1.0.2; not re-measured for 1.0.7. A switchable exact mode exists; it stays off by
 default because it costs about 3 ns per SSE instruction.
 ³ Measured on MacRunner 1.0.7 with hardware TSO switched on: Hollow Knight's main menu needs 25–26 % less CPU time per
@@ -54,7 +55,7 @@ loops HyperBridge matches CrossOver's FEX within 4 % and is faster than Prism on
 
 **Where it is behind.** Prism needs 17 times less time per x87 `fadd`, 24 % less per call and return and 34 % less per
 indirect call, and matches x86 floating-point results more often. CrossOver's FEX divides 2.4 times (`div r32`) and
-4.2 times (`idiv r64`) faster. In the September 29 measurement Hollow Knight started much slower (2.2 s against 0.41 s);
+4.2 times (`idiv r64`) faster (see ¹). In the September 29 measurement Hollow Knight started much slower (2.2 s against 0.41 s);
 most of that gap was software memory ordering, which the hardware TSO mode now replaces.
 
 In five loop rows one of the three HyperBridge runs was disturbed by background load (spread 68–97 %); the medians above

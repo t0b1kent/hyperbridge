@@ -1,0 +1,95 @@
+From ba70b383037d5729274c0ccebec7728393f88bdc Mon Sep 17 00:00:00 2001
+From: Timur Ravilov <93673987+t0b1kent@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 09:59:34 +1000
+Subject: [PATCH 46/46] EXPERIMENT: elide unchanged x87 control/status writes
+ (default off)
+
+Family: FLDCW, FNCLEX/FNINIT and restores of FCW/IE/SF state.
+Coverage: full80 stack cache retained across FLDCW; reduced path stays unchanged.
+Guest read and fault ordering retained; writes are skipped only when bits already equal.
+WAIT remains original no-op; no new exception suppression.
+Regression: native full-state pairs and independent oracle; base0 896 diff0.
+Audit completed: yes. Level4 projection is a ceiling, not measured CPU savings.
+---
+ .../Source/Interface/Core/JIT/MemoryOps.cpp   | 39 +++++++++++++++++++
+ .../Interface/Core/OpcodeDispatcher/X87.cpp   |  7 +++-
+ 2 files changed, 45 insertions(+), 1 deletion(-)
+
+diff --git a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+index 849df0f2c..b89399982 100644
+--- a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+@@ -11,6 +11,8 @@ $end_info$
+ #include "Interface/Core/ArchHelpers/Arm64Emitter.h"
+ #include "Interface/Core/CPUID.h"
+ #include "Interface/Core/JIT/JITClass.h"
++#include "Interface/Core/HBX87IR.h"
++#include "Interface/Core/HBX87Stats.h"
+ #include "Interface/IR/RegisterAllocationData.h"
+ #include <FEXCore/Utils/CompilerDefs.h>
+ #include <FEXCore/Utils/MathUtils.h>
+@@ -81,6 +83,43 @@ DEF_OP(StoreContext) {
+   if (Op->Class == IR::RegClass::GPR) {
+     auto Src = GetZeroableReg(Op->Value);
+ 
++    const bool Elide = FEXCore::HBX87::Gate("MACRUNNER_HB_X87_ELIDE_REDUNDANT_STATE");
++    const bool CW = OpSize == IR::OpSize::i16Bit && Op->Offset == offsetof(FEXCore::Core::CPUState, FCW);
++    const bool ClearFlag = OpSize == IR::OpSize::i8Bit &&
++      (Op->Offset == offsetof(FEXCore::Core::CPUState, flags) + FEXCore::X86State::X87FLAG_IE_LOC ||
++       Op->Offset == offsetof(FEXCore::Core::CPUState, flags) + FEXCore::X86State::X87FLAG_SF_LOC);
++    if (Elide && (CW || ClearFlag)) {
++      using namespace ARMEmitter;
++      ForwardLabel Equal, Done;
++      if (CW) ldrh(TMP1, STATE, Op->Offset);
++      else ldrb(TMP1, STATE, Op->Offset);
++      eor(Size::i32Bit,TMP1,TMP1,Src);
++      (void)cbz(Size::i32Bit,TMP1,&Equal);
++      if (CW) strh(Src,STATE,Op->Offset);
++      else strb(Src,STATE,Op->Offset);
++      auto Count = [&](unsigned Id) {
++        if (!FEXCore::HBX87::Stats::Enabled()) return;
++        LoadConstant(Size::i64Bit,TMP1,reinterpret_cast<uintptr_t>(&FEXCore::HBX87::Stats::Values[Id]));
++        if (CTX->HostFeatures.SupportsAtomics) {
++          LoadConstant(Size::i64Bit,TMP2,1);
++          ldaddal(SubRegSize::i64Bit,TMP2,TMP2,TMP1);
++        } else {
++          BackwardLabel Retry;
++          (void)Bind(&Retry);
++          ldaxr(SubRegSize::i64Bit,TMP2,TMP1);
++          add(Size::i64Bit,TMP3,TMP2,1);
++          stlxr(SubRegSize::i64Bit,TMP4,TMP3,TMP1);
++          (void)cbnz(Size::i32Bit,TMP4,&Retry);
++        }
++      };
++      Count(CW?FEXCore::HBX87::Stats::LoadCWChanged:FEXCore::HBX87::Stats::ClearChanged);
++      (void)b(&Done);
++      (void)Bind(&Equal);
++      Count(CW?FEXCore::HBX87::Stats::LoadCWRemoved:FEXCore::HBX87::Stats::ClearRemoved);
++      (void)Bind(&Done);
++      return;
++    }
++
+     switch (OpSize) {
+     case IR::OpSize::i8Bit: strb(Src, STATE, Op->Offset); break;
+     case IR::OpSize::i16Bit: strh(Src, STATE, Op->Offset); break;
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+index 332a0e2e0..632a5cd07 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+@@ -705,7 +705,12 @@ void OpDispatchBuilder::X87FLDCW(OpcodeArgs) {
+   // FIXME: Because loading control flags will affect several instructions in fast path, we might have
+   // to switch for now to slow mode whenever these are manually changed.
+   // Remove the next line and try DF_04.asm in fast path.
+-  _StackForceSlow();
++  // Full80 operations consume the current FCW at runtime. Retaining their
++  // full80 stack cache across FLDCW is safe; F64 reduced precision still needs
++  // the original migration. The source read remains unconditional/faulting.
++  if (!FEXCore::HBX87::StateFix::ReadGate("MACRUNNER_HB_X87_ELIDE_REDUNDANT_STATE") || ReducedPrecisionMode()) {
++    _StackForceSlow();
++  }
+   Ref NewFCW = LoadSourceGPR(Op, Op->Src[0], Op->Flags);
+   _StoreContextGPR(OpSize::i16Bit, NewFCW, offsetof(FEXCore::Core::CPUState, FCW));
+ }
+-- 
+2.54.0 (Apple Git-157)
+
