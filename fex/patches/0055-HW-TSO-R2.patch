@@ -1,0 +1,692 @@
+diff --git a/Source/Windows/ARM64EC/Module.S b/Source/Windows/ARM64EC/Module.S
+index abe2a2d6e..e5343f061 100644
+--- a/Source/Windows/ARM64EC/Module.S
++++ b/Source/Windows/ARM64EC/Module.S
+@@ -1,6 +1,104 @@
+ .text
+ .balign 16
+ 
++// Darwin admission also covers native->guest entry without ThreadInit. The
++// native policy caches successful admission in native TLS; one syscall/thread.
++// Gate 0 skips the call. x16/x17 are dispatcher scratch; preserve guest argument
++// registers, all caller-clobbered SIMD, FPCR/FPSR, NZCV, LR and the original (possibly
++// 8-byte-aligned) guest SP before invoking the ARM64EC->unix trampoline.
++.macro macrunner_hwtso_enter
++#ifdef FEX_WINE_DARWIN
++  adrp x16, MacRunnerHardwareTSOMode
++  ldr w16, [x16, :lo12:MacRunnerHardwareTSOMode]
++  cbz w16, .Lhwtso_done\@
++  ldr x16, [x18, #0x1788]
++  ldr x16, [x16, #0x38] // EmulatorData[1]: owning FEX thread record
++  cbz x16, .Lhwtso_slow\@
++  adrp x17, MacRunnerFrontendPtrOffset
++  ldr x17, [x17, :lo12:MacRunnerFrontendPtrOffset]
++  ldr x16, [x16, x17]
++  cbz x16, .Lhwtso_slow\@
++  ldr x16, [x16] // FrontendThreadData::HardwareTSOIdentity (offset 0)
++  cbz x16, .Lhwtso_slow\@
++  mrs x17, tpidrro_el0
++  and x17, x17, #-8
++  eor x16, x16, x17
++  cbz x16, .Lhwtso_done\@
++.Lhwtso_slow\@:
++  mov x16, sp
++  and x17, x16, #-16
++  mov sp, x17
++  sub sp, sp, #688
++  mrs x17, nzcv
++  str x16, [sp, #656]
++  str x17, [sp, #664]
++  mrs x17, fpcr
++  str x17, [sp, #672]
++  mrs x17, fpsr
++  str x17, [sp, #680]
++  stp x0, x1, [sp, #0]
++  stp x2, x3, [sp, #16]
++  stp x4, x5, [sp, #32]
++  stp x6, x7, [sp, #48]
++  stp x8, x9, [sp, #64]
++  stp x10, x11, [sp, #80]
++  stp x12, x13, [sp, #96]
++  stp x14, x15, [sp, #112]
++  stp x29, x30, [sp, #128]
++  stp q0, q1, [sp, #144]
++  stp q2, q3, [sp, #176]
++  stp q4, q5, [sp, #208]
++  stp q6, q7, [sp, #240]
++  stp q16, q17, [sp, #272]
++  stp q18, q19, [sp, #304]
++  stp q20, q21, [sp, #336]
++  stp q22, q23, [sp, #368]
++  stp q24, q25, [sp, #400]
++  stp q26, q27, [sp, #432]
++  stp q28, q29, [sp, #464]
++  stp q30, q31, [sp, #496]
++  stp q8, q9, [sp, #528]
++  stp q10, q11, [sp, #560]
++  stp q12, q13, [sp, #592]
++  stp q14, q15, [sp, #624]
++  bl "#MacRunnerHardwareTSOEnter"
++  ldp q8, q9, [sp, #528]
++  ldp q10, q11, [sp, #560]
++  ldp q12, q13, [sp, #592]
++  ldp q14, q15, [sp, #624]
++  ldp q0, q1, [sp, #144]
++  ldp q2, q3, [sp, #176]
++  ldp q4, q5, [sp, #208]
++  ldp q6, q7, [sp, #240]
++  ldp q16, q17, [sp, #272]
++  ldp q18, q19, [sp, #304]
++  ldp q20, q21, [sp, #336]
++  ldp q22, q23, [sp, #368]
++  ldp q24, q25, [sp, #400]
++  ldp q26, q27, [sp, #432]
++  ldp q28, q29, [sp, #464]
++  ldp q30, q31, [sp, #496]
++  ldp x0, x1, [sp, #0]
++  ldp x2, x3, [sp, #16]
++  ldp x4, x5, [sp, #32]
++  ldp x6, x7, [sp, #48]
++  ldp x8, x9, [sp, #64]
++  ldp x10, x11, [sp, #80]
++  ldp x12, x13, [sp, #96]
++  ldp x14, x15, [sp, #112]
++  ldp x29, x30, [sp, #128]
++  ldr x17, [sp, #672]
++  msr fpcr, x17
++  ldr x17, [sp, #680]
++  msr fpsr, x17
++  ldr x16, [sp, #656]
++  ldr x17, [sp, #664]
++  msr nzcv, x17
++  mov sp, x16
++.Lhwtso_done\@:
++#endif
++.endm
++
+   // __os_arm64x_x64_jump in ARM64EC docs
+   // Expects target code address in x9
+ .globl DispatchJump
+@@ -32,6 +130,7 @@ ExitToX64:
+   str lr, [sp, #-8]! // Push return address to stack, this will be popped by the x86 RET instr.
+ 
+ enter_jit:
++  macrunner_hwtso_enter
+   ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
+   mov w16, #1
+   strb w16, [x17, #0x0] // ChpeV2CpuAreaInfo->InSimulation
+@@ -44,6 +143,8 @@ BeginSimulation:
+   ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
+   ldr x16, [x17, #0x8] // ChpeV2CpuAreaInfo->EmulatorStackBase
+   mov sp, x16
++  macrunner_hwtso_enter
++  ldr x17, [x18, #0x1788]
+   ldr x0, [x17, #0x18] // ChpeV2CpuAreaInfo->ContextAmd64
+   bl "#SyncThreadContext"
+   ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index 397dee423..45c9961ee 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -138,6 +138,9 @@ struct ThreadCPUArea {
+ };
+ 
+ struct FrontendThreadData {
++  // Native thread identity, not merely a guest TID: inherited/copied frontend
++  // records must never admit a different host pthread to the common JIT.
++  uint64_t HardwareTSOIdentity {};
+   bool InLockedRWXRead {};
+ };
+ 
+@@ -169,6 +172,28 @@ FrontendThreadData* GetFrontendThreadData(FEXCore::Core::InternalThreadState* Th
+   return static_cast<FrontendThreadData*>(Thread->FrontendPtr);
+ }
+ 
++uint64_t HardwareTSOIdentity() {
++  uint64_t Identity = 0;
++#ifdef FEX_WINE_DARWIN
++  asm volatile("mrs %0, tpidrro_el0" : "=r"(Identity));
++  Identity &= ~uint64_t {7}; // Opaque Darwin readonly thread token; never a pthread_self pointer.
++#endif
++  return Identity;
++}
++
++extern "C" {
++extern const uint64_t MacRunnerFrontendPtrOffset = offsetof(FEXCore::Core::InternalThreadState, FrontendPtr);
++void MacRunnerHardwareTSOEnter() {
++  FEX::Windows::UnixLib::HardwareTSOThreadEnter(FEXHardwareTSOEntryKind::ARM64ECJitEntry);
++  const auto Thread = GetCPUArea().ThreadState();
++  // Admission is native TSD-owned. A missing frontend cache must not reject an
++  // otherwise legitimate early entry; it merely keeps that entry on the slow
++  // guard. The native policy still performs exactly one syscall per pthread.
++  if (Thread && Thread->FrontendPtr)
++    GetFrontendThreadData(Thread)->HardwareTSOIdentity = HardwareTSOIdentity();
++}
++}
++
+ bool IsEmulatorStackAddress(const ThreadCPUArea CPUArea, uint64_t Address) {
+   return Address <= CPUArea.EmulatorStackBase() && Address >= CPUArea.EmulatorStackLimit();
+ }
+@@ -774,6 +799,7 @@ NTSTATUS ProcessInit() {
+     return STATUS_NOT_SUPPORTED;
+   }
+   FEXCore::Allocator::JITWriteThreadInit();
++  FEX::Windows::UnixLib::InitializeHardwareTSO();
+ #else
+   (void)UnixLibReady;
+ #endif
+@@ -785,6 +811,7 @@ NTSTATUS ProcessInit() {
+         "[hb-x87-stats-init] advertised_lse=1\n" : "[hb-x87-stats-init] advertised_lse=0; use LL/SC\n");
+     }
+     CTX = FEXCore::Context::Context::CreateNewContext(HostFeatures);
++    if (MacRunnerHardwareTSOMode == 2) CTX->SetHardwareTSOSupport(true);
+   }
+ 
+   CTX->SetSignalDelegator(SignalDelegator.get());
+@@ -1120,6 +1147,7 @@ void BTCpu64NotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After
+ }
+ 
+ NTSTATUS ThreadInit() {
++  FEX::Windows::UnixLib::HardwareTSOThreadEnter(FEXHardwareTSOEntryKind::ARM64ECThreadInit);
+   std::scoped_lock Lock(ThreadCreationMutex);
+   FEX::Windows::InitCRTThread();
+   // ★ MacRunner N2b — режим MAP_JIT потоковый, назначаем на каждом потоке FEX.
+@@ -1179,6 +1207,8 @@ NTSTATUS ThreadInit() {
+   Exception::LoadStateFromECContext(Thread, CPUArea.ContextAmd64().AMD64_Context);
+ 
+   Thread->FrontendPtr = new FrontendThreadData();
++  // Leave the cache empty until the first actual guest entry. This exercises
++  // the same preserving guard used by a native entry that bypasses ThreadInit.
+ 
+   {
+     auto ThreadTID = GetCurrentThreadId();
+diff --git a/Source/Windows/Common/FEXUnixLib.cpp b/Source/Windows/Common/FEXUnixLib.cpp
+index 1e1b870f5..52e1b6c55 100644
+--- a/Source/Windows/Common/FEXUnixLib.cpp
++++ b/Source/Windows/Common/FEXUnixLib.cpp
+@@ -19,6 +19,9 @@
+ #define MADV_NOHUGEPAGE 15
+ 
+ extern "C" IMAGE_DOS_HEADER __ImageBase;
++extern "C" {
++uint32_t MacRunnerHardwareTSOMode {};
++}
+ 
+ namespace FEX::Windows::UnixLib {
+ static bool UsingNTQueryPath {};
+@@ -155,6 +158,29 @@ bool TryEnableHardwareTSO() {
+   return Status == STATUS_SUCCESS;
+ }
+ 
++uint32_t InitializeHardwareTSO() {
++#ifdef FEX_WINE_DARWIN
++  FEXUnixLib_SetHardwareTSOControlArgs Args {.Enable = true};
++  const auto Status = Call(FEXUnixLibFunctions::SetHardwareTSOControl, &Args);
++  MacRunnerHardwareTSOMode = Status == 1 || Status == 2 ? static_cast<uint32_t>(Status) : 0;
++#endif
++  return MacRunnerHardwareTSOMode;
++}
++
++void HardwareTSOThreadEnter(FEXHardwareTSOEntryKind Kind) {
++#ifdef FEX_WINE_DARWIN
++  if (!MacRunnerHardwareTSOMode) return;
++  FEXUnixLib_HardwareTSOThreadEnterArgs Args {Kind,
++    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(GetCurrentTEB()->ClientId.UniqueProcess)),
++    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(GetCurrentTEB()->ClientId.UniqueThread))};
++  if (Call(FEXUnixLibFunctions::HardwareTSOThreadEnter, &Args) != static_cast<NTSTATUS>(MacRunnerHardwareTSOMode)) {
++    FEX::Windows::Logging::Raw("macrunner-fex-hwtso: FATAL unix-admission policy mismatch; terminating process\n");
++    NtTerminateProcess(NtCurrentProcess(), STATUS_NOT_SUPPORTED);
++    __builtin_trap();
++  }
++#endif
++}
++
+ bool SetKernelUnalignedAtomicControl(uint64_t Flags) {
+   if (UnixLibAvailable()) {
+     // UnixLib path.
+diff --git a/Source/Windows/Common/FEXUnixLib.h b/Source/Windows/Common/FEXUnixLib.h
+index 9f9d02c69..c9901b6f0 100644
+--- a/Source/Windows/Common/FEXUnixLib.h
++++ b/Source/Windows/Common/FEXUnixLib.h
+@@ -6,6 +6,8 @@
+ #include "../UnixLib/FEXUnixLib.h"
+ #include "wine/unixlib.h"
+ 
++extern "C" uint32_t MacRunnerHardwareTSOMode;
++
+ namespace FEX::Windows::UnixLib {
+ extern decltype(__wine_unix_call_dispatcher) UnixCallDispatcher;
+ extern unixlib_handle_t UnixLibHandle;
+@@ -27,6 +29,10 @@ bool Init(HMODULE NtDll);
+  */
+ bool TryEnableHardwareTSO();
+ 
++// Darwin only: immutable process decision and current native-thread admission.
++uint32_t InitializeHardwareTSO();
++void HardwareTSOThreadEnter(FEXHardwareTSOEntryKind Kind);
++
+ /**
+  * @brief Tries to enable kernel unaligned atomic handling if supported.
+  *
+diff --git a/Source/Windows/Common/TSOHandlerConfig.h b/Source/Windows/Common/TSOHandlerConfig.h
+index e9be14f69..a52c832b4 100644
+--- a/Source/Windows/Common/TSOHandlerConfig.h
++++ b/Source/Windows/Common/TSOHandlerConfig.h
+@@ -22,10 +22,10 @@ public:
+       CTX.SetHardwareTSOSupport(true);
+     }
+ #else
+-    // MacRunner (Darwin): the hardware x86 ordering mode (thread_set_x86_64_compat) belongs to one thread and new
+-    // threads do not inherit it, unlike the Linux prctl, which covers the process. One successful probe here would
+-    // turn off software TSO for every thread of the shared context while only this thread runs ordered. So the probe
+-    // is not made; software TSO stays until each executing thread is admitted (planned: MACRUNNER_HB_HW_TSO).
++    // Hardware support was selected before InitCore. No one-thread probe here.
++    if (MacRunnerHardwareTSOMode == 2) {
++      UnalignedHandlerType = FEXCore::ArchHelpers::Arm64::UnalignedHandlerType::NonAtomic;
++    }
+ #endif
+ 
+     uint64_t Flags = (StrictInProcessSplitLocks() ? FEX_UNALIGN_ATOMIC_STRICT_SPLIT_LOCKS : 0) |
+diff --git a/Source/Windows/UnixLib/CMakeLists.txt b/Source/Windows/UnixLib/CMakeLists.txt
+index ce56e9df7..6edabf418 100644
+--- a/Source/Windows/UnixLib/CMakeLists.txt
++++ b/Source/Windows/UnixLib/CMakeLists.txt
+@@ -3,6 +3,14 @@ project(FEXUnixLib CXX)
+ 
+ include(GNUInstallDirs)
+ 
++if (APPLE)
++  add_library(macrunner_hwtso SHARED MacRunnerHardwareTSO.cpp)
++  target_compile_options(macrunner_hwtso PRIVATE -fno-exceptions -fno-rtti)
++  set_target_properties(macrunner_hwtso PROPERTIES
++    OUTPUT_NAME macrunner-hwtso INSTALL_NAME_DIR "@rpath" BUILD_WITH_INSTALL_NAME_DIR ON)
++  install(TARGETS macrunner_hwtso LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Runtime)
++endif()
++
+ function(CreateLib TargetName LibName)
+   add_library(${TargetName} SHARED FEXUnixLib.cpp)
+   set_target_properties(${TargetName} PROPERTIES OUTPUT_NAME ${LibName} PREFIX "" SUFFIX ".so")
+@@ -12,6 +20,8 @@ function(CreateLib TargetName LibName)
+     # MacRunner N2: клей грузится dlopen'ом внутрь Wine. Исключения и RTTI ему не нужны,
+     # а тянут за собой libc++abi — снимаем, чтобы список импортов остался коротким.
+     target_compile_options(${TargetName} PRIVATE -fno-exceptions -fno-rtti)
++    target_link_libraries(${TargetName} PRIVATE macrunner_hwtso)
++    set_target_properties(${TargetName} PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "@loader_path")
+   endif()
+   install(TARGETS ${TargetName} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Runtime)
+ endfunction()
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.cpp b/Source/Windows/UnixLib/FEXUnixLib.cpp
+index e196d8ee7..559a465f7 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.cpp
++++ b/Source/Windows/UnixLib/FEXUnixLib.cpp
+@@ -15,6 +15,7 @@
+ #include <cstdlib>
+ #include <dlfcn.h>
+ #include <pthread.h>
++#include "MacRunnerHardwareTSO.h"
+ // Для проверки обработчика 6: фактические права области, а не наше предположение о них.
+ #include <mach/mach.h>
+ #include <mach/mach_vm.h>
+@@ -33,6 +34,7 @@ using NTSTATUS = int32_t;
+ using unixlib_entry_t = NTSTATUS (*)(void*);
+ 
+ constexpr NTSTATUS STATUS_SUCCESS = 0;
++constexpr NTSTATUS STATUS_INVALID_PARAMETER = 0xC000000D;
+ constexpr NTSTATUS STATUS_NOT_SUPPORTED = 0xC00000BB;
+ constexpr NTSTATUS STATUS_INTERNAL_ERROR = 0xC00000E5;
+ 
+@@ -76,7 +78,7 @@ __attribute__((used)) static const char MacRunnerGlueMarker[] = "macrunner-fex-g
+ // Конструктор — единственный способ ответить «загрузили ли ИМЕННО МЕНЯ», не полагаясь
+ // на то, что до какого-либо обработчика дошли.
+ __attribute__((constructor)) static void MacRunnerGlueAnnounce(void) {
+-  fprintf(stderr, "macrunner-fex-glue: загружен клей FEX, таблица на 8 мест, pid=%d\n", (int)getpid());
++  fprintf(stderr, "macrunner-fex-glue: загружен клей FEX, таблица на 9 мест, pid=%d\n", (int)getpid());
+   fflush(stderr);
+ }
+ 
+@@ -86,28 +88,12 @@ static uint64_t MarkJITCount {};
+ static uint64_t JITExecCount {};
+ 
+ static NTSTATUS FEXUnixLib_SetHardwareTSOControlHandler(void* _Args) {
+-  // thread_set_x86_64_compat есть в libsystem (dlsym его находит), но включение требует
+-  // права com.apple.developer.cross-architecture-support (или -unmanaged) у исполняемого файла
+-  // процесса вместе с профилем обеспечения; у CrossOver Preview оно стоит на подписанном
+-  // загрузчике lib/wine/aarch64-unix/wine.app (проверено 29.09.2026). У нас права НЕТ, вызов
+-  // отдаёт KERN_FAILURE. Пока права нет, обработчик обязан вернуть ненулевое, чтобы FEX
+-  // честно ушёл на программные барьеры. Молча считать TSO включённым НЕЛЬЗЯ — это порча
+-  // модели памяти, а не потеря скорости. Режим действует на ОДИН поток и не наследуется
+-  // новыми: включать его можно только допуском каждого исполняющего потока, не одной пробой
+-  // (TSOHandlerConfig.h под FEX_WINE_DARWIN пробу не делает).
+-  //
+-  // Символ берётся через dlsym, а не линковкой: он приватный, и его исчезновение в другой
+-  // версии macOS не должно ломать ЗАГРУЗКУ клея целиком.
+   auto Args = reinterpret_cast<const FEXUnixLib_SetHardwareTSOControlArgs*>(_Args);
+-  using tso_fn = int (*)(int);
+-  // Файловый статик, а не локальный: локальный потребовал бы __cxa_guard_acquire, то есть
+-  // зависимость клея от libc++abi. Клей грузится dlopen'ом внутрь Wine — лишние
+-  // зависимости здесь это лишняя поверхность отказа. Повторный dlsym безвреден.
+-  auto SetCompat = reinterpret_cast<tso_fn>(dlsym(RTLD_DEFAULT, "thread_set_x86_64_compat"));
+-  if (!SetCompat) {
+-    return STATUS_NOT_SUPPORTED;
+-  }
+-  return SetCompat(Args->Enable ? 1 : 0) == 0 ? STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
++  if (!Args->Enable) return STATUS_NOT_SUPPORTED; // Active shared-JIT policy cannot be undone.
++  const auto Mode = macrunner_hwtso_admit();
++  // Deliberately nonzero even when enabled: older PE halves treat this as a
++  // failed probe and retain software TSO. The original one-byte ABI is intact.
++  return Mode ? static_cast<NTSTATUS>(Mode) : STATUS_NOT_SUPPORTED;
+ }
+ 
+ // 1-5: механизма в ядре macOS НЕТ. Это не недоделка — соответствующих вызовов не существует,
+@@ -391,6 +377,19 @@ extern "C" __attribute__((visibility("default")))
+ const unsigned long long __fex_darwin_unixlib_abi =
+     0x4645584d52000000ULL | (unsigned long long)ToUnderlying(FEXUnixLibFunctions::MAX);
+ 
++static NTSTATUS FEXUnixLib_HardwareTSOThreadEnterHandler(void* _Args) {
++#ifdef __APPLE__
++  if (!_Args) return STATUS_INVALID_PARAMETER;
++  const auto* Args = static_cast<const FEXUnixLib_HardwareTSOThreadEnterArgs*>(_Args);
++  const auto Kind = static_cast<uint32_t>(Args->Kind);
++  if (Kind < 1 || Kind > 4) return STATUS_INVALID_PARAMETER;
++  const auto Mode = macrunner_hwtso_admit_entry(Kind, Args->WindowsPid, Args->WindowsTid);
++  return Mode ? static_cast<NTSTATUS>(Mode) : STATUS_NOT_SUPPORTED;
++#else
++  return STATUS_NOT_SUPPORTED;
++#endif
++}
++
+ extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
+   FEXUnixLib_SetHardwareTSOControlHandler,
+   FEXUnixLib_SetKernelUnalignedAtomicControlHandler,
+@@ -400,6 +399,7 @@ extern "C" const unixlib_entry_t __wine_unix_call_funcs[] = {
+   FEXUnixLib_DeleteSHMStatsFileHandler,
+   FEXUnixLib_MarkJITMemoryHandler,
+   FEXUnixLib_EnableJITExecHandler,
++  FEXUnixLib_HardwareTSOThreadEnterHandler,
+ };
+ 
+ static_assert(sizeof(__wine_unix_call_funcs) / sizeof(__wine_unix_call_funcs[0]) == ToUnderlying(FEXUnixLibFunctions::MAX));
+diff --git a/Source/Windows/UnixLib/FEXUnixLib.h b/Source/Windows/UnixLib/FEXUnixLib.h
+index f51885842..89501b210 100644
+--- a/Source/Windows/UnixLib/FEXUnixLib.h
++++ b/Source/Windows/UnixLib/FEXUnixLib.h
+@@ -18,6 +18,7 @@ enum class FEXUnixLibFunctions : uint32_t {
+   // arm64ec и Linux.
+   MarkJITMemory,
+   EnableJITExec,
++  HardwareTSOThreadEnter,
+   MAX,
+ };
+ 
+@@ -28,6 +29,19 @@ struct FEXUnixLib_SetHardwareTSOControlArgs {
+ };
+ static_assert(sizeof(FEXUnixLib_SetHardwareTSOControlArgs) == 1);
+ 
++enum class FEXHardwareTSOEntryKind : uint32_t {
++  ARM64ECThreadInit = 1,
++  ARM64ECJitEntry = 2,
++  WOW64ThreadInit = 3,
++  WOW64Simulate = 4,
++};
++struct FEXUnixLib_HardwareTSOThreadEnterArgs {
++  FEXHardwareTSOEntryKind Kind;
++  uint32_t WindowsPid;
++  uint32_t WindowsTid;
++};
++static_assert(sizeof(FEXUnixLib_HardwareTSOThreadEnterArgs) == 12);
++
+ // These match the prctl flag values for PR_ARM64_SET_UNALIGN_ATOMIC
+ static constexpr uint64_t FEX_UNALIGN_ATOMIC_EMULATE = 1ULL << 0;
+ static constexpr uint64_t FEX_UNALIGN_ATOMIC_BACKPATCH = 1ULL << 1;
+diff --git a/Source/Windows/UnixLib/MacRunnerHardwareTSO.cpp b/Source/Windows/UnixLib/MacRunnerHardwareTSO.cpp
+new file mode 100644
+index 000000000..77940d257
+--- /dev/null
++++ b/Source/Windows/UnixLib/MacRunnerHardwareTSO.cpp
+@@ -0,0 +1,189 @@
++// SPDX-License-Identifier: MIT
++#include "MacRunnerHardwareTSO.h"
++#include <mach/mach.h>
++#include <pthread.h>
++#include <dlfcn.h>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <cerrno>
++#include <unistd.h>
++#include <time.h>
++
++// This library is shared by ARM64EC and WOW64: two private unixlib statics must
++// not make contradictory decisions for the shared process. All initialization
++// occurs at ProcessInit, before Context::InitCore, never in a signal handler.
++static pthread_once_t Once = PTHREAD_ONCE_INIT;
++static uint32_t Mode;
++static kern_return_t (*SetCompat)(uint32_t);
++// Mach-O TLV first access can allocate through __tlv_bootstrap. The bypass
++// entry may run during a Wine exception: reserve native pthread TSD at startup
++// instead, and use its existing per-thread storage without loader/TLV work.
++static pthread_key_t AdmissionKey;
++static bool Initialized;
++static uint64_t Attempts, Successes, Failures;
++static uint64_t LogDropped;
++static constexpr uint64_t PrintLimit = 64;
++static uint64_t EntryRows;
++static uint64_t GuestThreads;
++
++static void EntryLog(uint32_t Kind, uint32_t WindowsPid, uint32_t WindowsTid, bool GuestExecution = false) {
++  const int SavedErrno = errno;
++  uint64_t Tid = 0, Identity = 0;
++  pthread_threadid_np(nullptr, &Tid);
++  asm volatile("mrs %0, tpidrro_el0" : "=r"(Identity));
++  Identity &= ~uint64_t{7};
++  timespec UTC {}, Monotonic {};
++  const bool UTCValid = clock_gettime(CLOCK_REALTIME, &UTC) == 0;
++  const bool MonoValid = clock_gettime(CLOCK_MONOTONIC, &Monotonic) == 0;
++  const char* Names[] = {"unknown", "arm64ec-thread-init", "arm64ec-jit-entry", "wow64-thread-init", "wow64-simulate"};
++  char Buffer[512]; char* Out = Buffer;
++  auto Text = [&](const char* Value) { while (*Value) *Out++ = *Value++; };
++  auto Number = [&](uint64_t Value) {
++    char Digits[20]; unsigned Count = 0;
++    do { Digits[Count++] = '0' + Value % 10; Value /= 10; } while (Value);
++    while (Count) *Out++ = Digits[--Count];
++  };
++  Text(GuestExecution ? "macrunner-fex-hwtso-guest: pid=" : "macrunner-fex-hwtso-entry: pid="); Number(getpid());
++  Text(" thread="); Number(Tid); Text(" windows-pid="); Number(WindowsPid);
++  Text(" windows-tid="); Number(WindowsTid); Text(" identity="); Number(Identity);
++  Text(" kind="); Text(Kind < 5 ? Names[Kind] : "invalid");
++  Text(" rc=0 selected="); Number(Mode);
++  Text(" actual-state=NOT_READ utc_ns=");
++  if (UTCValid) Number(uint64_t(UTC.tv_sec) * 1000000000ULL + UTC.tv_nsec); else Text("FAILED");
++  Text(" monotonic_ns=");
++  if (MonoValid) Number(uint64_t(Monotonic.tv_sec) * 1000000000ULL + Monotonic.tv_nsec); else Text("FAILED");
++  Text(" clock=CLOCK_MONOTONIC\n");
++  ssize_t Written; unsigned Retry = 0;
++  do { Written = write(STDERR_FILENO, Buffer, Out - Buffer); } while (Written < 0 && errno == EINTR && ++Retry < 8);
++  if (Written != Out - Buffer) __atomic_add_fetch(&LogDropped, 1, __ATOMIC_RELAXED);
++  __atomic_add_fetch(GuestExecution ? &GuestThreads : &EntryRows, 1, __ATOMIC_RELAXED);
++  errno = SavedErrno;
++}
++
++static void ThreadLog(uint64_t Tid, kern_return_t RC, uint64_t N, bool Fatal) {
++  char Buffer[256]; char *Out = Buffer;
++  auto Text = [&](const char *Value) { while (*Value) *Out++ = *Value++; };
++  auto Number = [&](uint64_t Value) {
++    char Digits[20]; unsigned Count = 0;
++    do { Digits[Count++] = '0' + Value % 10; Value /= 10; } while (Value);
++    while (Count) *Out++ = Digits[--Count];
++  };
++  Text(Fatal ? "macrunner-fex-hwtso: FATAL late-thread-admission thread=" : "macrunner-fex-hwtso: thread=");
++  Number(Tid); Text(" rc=");
++  if (RC < 0) { Text("-"); Number(-int64_t(RC)); } else Number(RC);
++  Text(" attempt="); Number(N);
++  if (Fatal) {
++    Text(" selected="); Number(Mode);
++    Text(" success="); Number(__atomic_load_n(&Successes, __ATOMIC_RELAXED));
++    Text(" failure="); Number(__atomic_load_n(&Failures, __ATOMIC_RELAXED));
++    Text(" shared-JIT-unsafe; terminating process");
++  }
++  Text("\n");
++  // A single bounded write avoids stdio/locale locks in an exception entry.
++  ssize_t Written;
++  unsigned Retry = 0;
++  do { Written = write(STDERR_FILENO, Buffer, Out - Buffer); } while (Written < 0 && errno == EINTR && ++Retry < 8);
++  if (Written != Out - Buffer) __atomic_add_fetch(&LogDropped, 1, __ATOMIC_RELAXED);
++}
++
++static kern_return_t EnableCurrent() {
++  const int SavedErrno = errno;
++  const uint64_t N = __atomic_add_fetch(&Attempts, 1, __ATOMIC_RELAXED);
++  const kern_return_t RC = SetCompat ? SetCompat(1) : KERN_NOT_SUPPORTED;
++  __atomic_add_fetch(RC == KERN_SUCCESS ? &Successes : &Failures, 1, __ATOMIC_RELAXED);
++  if (N <= PrintLimit || RC != KERN_SUCCESS) {
++    uint64_t Tid = 0;
++    pthread_threadid_np(nullptr, &Tid);
++    ThreadLog(Tid, RC, N, false);
++  }
++  errno = SavedErrno;
++  return RC;
++}
++
++static void Initialize() {
++  const char *Value = getenv("MACRUNNER_FEX_HW_TSO");
++  uint32_t Requested = 0;
++  if (Value && (!strcmp(Value, "1") || !strcmp(Value, "2"))) Requested = Value[0] - '0';
++  else if (Value && strcmp(Value, "0"))
++    fprintf(stderr, "macrunner-fex-hwtso: invalid-gate software-only\n");
++  if (Requested) {
++    const int KeyRC = pthread_key_create(&AdmissionKey, nullptr);
++    if (KeyRC) {
++      fprintf(stderr, "macrunner-fex-hwtso: startup-TSD-failure rc=%d software-only\n", KeyRC);
++      Requested = 0;
++    }
++  }
++  if (Requested) {
++    (void)pthread_getspecific(AdmissionKey); // Bind getter before any exception entry.
++    (void)getpid(); // Entry metadata must not resolve a new symbol in a signal entry.
++    timespec BoundClock {};
++    (void)clock_gettime(CLOCK_REALTIME, &BoundClock);
++    (void)clock_gettime(CLOCK_MONOTONIC, &BoundClock); // Bind both clock paths before exception entry.
++    SetCompat = reinterpret_cast<decltype(SetCompat)>(dlsym(RTLD_DEFAULT, "thread_set_x86_64_compat"));
++    if (EnableCurrent() == KERN_SUCCESS && pthread_setspecific(AdmissionKey, reinterpret_cast<void*>(1)) == 0) {
++      Mode = Requested;
++    }
++  }
++  fprintf(stderr, "macrunner-fex-hwtso: decision requested=%u selected=%u software=%u immutable=1\n",
++          Requested, Mode, Mode != 2);
++  fflush(stderr);
++  __atomic_store_n(&Initialized, true, __ATOMIC_RELEASE);
++}
++
++extern "C" uint32_t macrunner_hwtso_admit() {
++  if (!__atomic_load_n(&Initialized, __ATOMIC_ACQUIRE)) pthread_once(&Once, Initialize);
++  if (!Mode) return 0;
++  if (reinterpret_cast<uintptr_t>(pthread_getspecific(AdmissionKey)) & 1) {
++    return Mode;
++  }
++  const kern_return_t RC = EnableCurrent();
++  const int TSDRC = RC == KERN_SUCCESS ? pthread_setspecific(AdmissionKey, reinterpret_cast<void*>(1)) : 0;
++  if (RC != KERN_SUCCESS || TSDRC) {
++    uint64_t Tid = 0;
++    pthread_threadid_np(nullptr, &Tid);
++    ThreadLog(Tid, RC != KERN_SUCCESS ? RC : KERN_FAILURE,
++              __atomic_load_n(&Attempts, __ATOMIC_RELAXED), true);
++    _exit(190);
++  }
++  return Mode;
++}
++
++extern "C" uint32_t macrunner_hwtso_admit_entry(uint32_t Kind, uint32_t WindowsPid, uint32_t WindowsTid) {
++  const uint32_t Selected = macrunner_hwtso_admit();
++  if (!Selected) return 0;
++  const auto Flags = reinterpret_cast<uintptr_t>(pthread_getspecific(AdmissionKey));
++  if (!(Flags & 2)) {
++    if (pthread_setspecific(AdmissionKey, reinterpret_cast<void*>(Flags | 2))) {
++      uint64_t Tid = 0;
++      pthread_threadid_np(nullptr, &Tid);
++      ThreadLog(Tid, KERN_FAILURE, __atomic_load_n(&Attempts, __ATOMIC_RELAXED), true);
++      _exit(190);
++    }
++    EntryLog(Kind, WindowsPid, WindowsTid);
++  }
++  // ThreadInit may prepare a native Wine-only thread. Count actual first guest
++  // execution independently, when the preserving JIT guard / WOW64 simulation
++  // entry is reached. ARM64EC's frontend cache is zero until this first guard.
++  const auto ExecutionFlags = reinterpret_cast<uintptr_t>(pthread_getspecific(AdmissionKey));
++  if ((Kind == 2 || Kind == 4) && !(ExecutionFlags & 4)) {
++    if (pthread_setspecific(AdmissionKey, reinterpret_cast<void*>(ExecutionFlags | 2 | 4))) {
++      uint64_t Tid = 0;
++      pthread_threadid_np(nullptr, &Tid);
++      ThreadLog(Tid, KERN_FAILURE, __atomic_load_n(&Attempts, __ATOMIC_RELAXED), true);
++      _exit(190);
++    }
++    EntryLog(Kind, WindowsPid, WindowsTid, true);
++  }
++  return Selected;
++}
++
++__attribute__((destructor)) static void Summary() {
++  fprintf(stderr, "macrunner-fex-hwtso: exit selected=%u attempts=%llu success=%llu failure=%llu print-limit=%llu log-dropped=%llu entry-rows=%llu guest-threads=%llu\n",
++          Mode, (unsigned long long)__atomic_load_n(&Attempts, __ATOMIC_RELAXED),
++          (unsigned long long)__atomic_load_n(&Successes, __ATOMIC_RELAXED),
++          (unsigned long long)__atomic_load_n(&Failures, __ATOMIC_RELAXED),
++          (unsigned long long)PrintLimit, (unsigned long long)__atomic_load_n(&LogDropped, __ATOMIC_RELAXED),
++          (unsigned long long)__atomic_load_n(&EntryRows, __ATOMIC_RELAXED),
++          (unsigned long long)__atomic_load_n(&GuestThreads, __ATOMIC_RELAXED));
++}
+diff --git a/Source/Windows/UnixLib/MacRunnerHardwareTSO.h b/Source/Windows/UnixLib/MacRunnerHardwareTSO.h
+new file mode 100644
+index 000000000..6dcac4bc9
+--- /dev/null
++++ b/Source/Windows/UnixLib/MacRunnerHardwareTSO.h
+@@ -0,0 +1,15 @@
++// SPDX-License-Identifier: MIT
++#pragma once
++#include <stdint.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++// One process policy shared by both unix halves. 0=software, 1=both, 2=hardware.
++// The first call decides before JIT creation. Later failed admissions terminate.
++uint32_t macrunner_hwtso_admit(void);
++// Same admission policy, with one bounded identity/entry receipt per native
++// guest thread. No syscall repetition, stdio, TLV or loader initialization.
++uint32_t macrunner_hwtso_admit_entry(uint32_t kind, uint32_t windows_pid, uint32_t windows_tid);
++#ifdef __cplusplus
++}
++#endif
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+index 4b88ef3dc..e15db776f 100644
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -605,6 +605,7 @@ void BTCpuProcessInit() {
+     NtTerminateProcess(NtCurrentProcess(), STATUS_NOT_SUPPORTED);
+   }
+   FEXCore::Allocator::JITWriteThreadInit();
++  FEX::Windows::UnixLib::InitializeHardwareTSO();
+   MACRUNNER_FEX_STEP(9, "JITWriteThreadInit");
+ #else
+   (void)UnixLibReady;
+@@ -618,6 +619,7 @@ void BTCpuProcessInit() {
+     }
+     MACRUNNER_FEX_STEP(10, "FetchHostFeatures");
+     CTX = FEXCore::Context::Context::CreateNewContext(HostFeatures);
++    if (MacRunnerHardwareTSOMode == 2) CTX->SetHardwareTSOSupport(true);
+     MACRUNNER_FEX_STEP(11, "CreateNewContext");
+   }
+ 
+@@ -680,6 +682,7 @@ void BTCpuThreadInit() {
+   static constexpr size_t DefaultWow64CS {4};
+   std::scoped_lock Lock(ThreadCreationMutex);
+   FEX::Windows::InitCRTThread();
++  FEX::Windows::UnixLib::HardwareTSOThreadEnter(FEXHardwareTSOEntryKind::WOW64ThreadInit);
+   // ★ MacRunner N2b — режим MAP_JIT ПОТОКОВЫЙ. Каждый новый поток FEX обязан назначить
+   // себе «исполнять» сам: чужой поток за него этого не сделает. Ставится сразу после
+   // InitCRTThread и ДО CreateThread, где пойдут первые записи кода.
+@@ -856,6 +859,7 @@ __attribute__((naked)) void BTCpuSimulate() {
+ }
+ 
+ extern "C" void BTCpuSimulateImpl(CONTEXT* entry_context) {
++  FEX::Windows::UnixLib::HardwareTSOThreadEnter(FEXHardwareTSOEntryKind::WOW64Simulate);
+   const auto TLS = GetTLS();
+   TLS.EntryContext() = entry_context;
+   TLS.CachedCallRetSp() = TLS.ThreadState()->CurrentFrame->State.callret_sp;

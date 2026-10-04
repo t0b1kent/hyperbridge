@@ -1,0 +1,93 @@
+Subject: [PATCH 0070] WOW64: release registry lock while awaiting recoverable guest state
+
+Product port for ENGINE-108 (0001-0049 + 0055 + 0056 + 0065 + 0075).
+Release ThreadCreationMutex while waiting for IN_JIT to clear, then revalidate
+target registry identity before accessing TLS again. Use native NtYieldExecution,
+reassert PAUSED for concurrent requests, and propagate protection failures.
+Protect sizeof(InterruptFaultPage), matching the field-tested 44b9 implementation.
+The lane-only MACRUNNER_FEX_SUSPEND_DIAGNOSTIC block is deliberately omitted.
+
+Family: WOW64 Suspend/Get/Set/Resume, native RWX fault handlers, target teardown.
+Root algorithm matches 44b9; product binary acceptance is a separate PE32-AV run.
+Requires the isolated Darwin interrupt page from 0052 (or an equivalent).
+No dependency on 0050/0051/0053/0054 for the mutex/lifetime fix itself.
+See HANDOFF.md and VALIDATION.json for scoped equivalence and coverage limits.
+
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -903,7 +903,7 @@
+     return Err;
+   }
+ 
+-  std::scoped_lock Lock(ThreadCreationMutex);
++  std::unique_lock Lock(ThreadCreationMutex);
+ 
+   // If the thread hasn't yet been initialized, suspend it without special handling as it wont yet have entered the JIT
+   if (!Threads.contains(ThreadTID)) {
+@@ -911,20 +911,40 @@
+     return NtSuspendThread(*ThreadDup, Count);
+   }
+ 
+-  // If CONTROL_IN_JIT is unset at this point, then it can never be set (and thus the JIT cannot be reentered) as
+-  // CONTROL_PAUSED has been set, as such, while this may redundantly request interrupts in rare cases it will never
+-  // miss them
+-  if (TLS.ControlWord().fetch_or(ControlBits::PAUSED, std::memory_order::relaxed) & ControlBits::IN_JIT) {
+-    LogMan::Msg::DFmt("Thread {:X} is in JIT, polling for interrupt", ThreadTID);
+-
+-    ULONG TmpProt;
+-    void* TmpAddress = &TLS.ThreadState()->InterruptFaultPage;
+-    SIZE_T TmpSize = FEXCore::Utils::FEX_PAGE_SIZE;
+-    NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize, PAGE_READONLY, &TmpProt);
+-  }
+-
+-  // Spin until the JIT is interrupted
+-  FEXCore::Utils::SpinWaitLock::WaitBitMaskPred(TLS.ControlWordAddress(), ControlBits::IN_JIT, 0U, std::equal_to<>());
++  const auto* TargetState = Threads.find(ThreadTID)->second;
++  for (;;) {
++    // Another suspender may have completed while the registry lock was released.
++    // Reassert PAUSED before inspecting IN_JIT and rearm the fault page if needed.
++    const uint32_t Before = TLS.ControlWord().fetch_or(ControlBits::PAUSED, std::memory_order::relaxed);
++    if (!(Before & ControlBits::IN_JIT)) {
++      break;
++    }
++    if (!(Before & ControlBits::PAUSED)) {
++      LogMan::Msg::DFmt("Thread {:X} is in JIT, polling for interrupt", ThreadTID);
++
++      ULONG TmpProt = 0;
++      void* TmpAddress = &TLS.ThreadState()->InterruptFaultPage;
++      SIZE_T TmpSize = sizeof(TLS.ThreadState()->InterruptFaultPage);
++      const NTSTATUS ProtectStatus = NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize, PAGE_READONLY, &TmpProt);
++      if (ProtectStatus) {
++        TLS.ControlWord().fetch_and(~ControlBits::PAUSED, std::memory_order::relaxed);
++        return ProtectStatus;
++      }
++    }
++
++    // A guest RWX fault needs this mutex before it can reach a safe suspend
++    // checkpoint. Never wait for that checkpoint while preventing its handler
++    // from running. No TLS or thread-state memory is accessed outside the lock.
++    Lock.unlock();
++    // The Windows CRT's SwitchToThread shim is not implemented. Use the native
++    // ntdll scheduler entry, which is already part of the imported NT API.
++    NtYieldExecution();
++    Lock.lock();
++    const auto Target = Threads.find(ThreadTID);
++    if (Target == Threads.end() || Target->second != TargetState) {
++      return STATUS_THREAD_IS_TERMINATING;
++    }
++  }
+ 
+   // The JIT has now been interrupted and the context stored in the thread's CPU area is up-to-date
+   if (Err = NtSuspendThread(*ThreadDup, Count); Err) {
+diff --git a/Source/Windows/include/winternl.h b/Source/Windows/include/winternl.h
+--- a/Source/Windows/include/winternl.h
++++ b/Source/Windows/include/winternl.h
+@@ -519,6 +519,7 @@
+ NTSTATUS WINAPI NtContinue(PCONTEXT, BOOLEAN);
+ NTSTATUS WINAPI NtCreateSection(HANDLE*, ACCESS_MASK, const OBJECT_ATTRIBUTES*, const LARGE_INTEGER*, ULONG, ULONG, HANDLE);
+ NTSTATUS WINAPI NtDelayExecution(BOOLEAN, const LARGE_INTEGER*);
++NTSTATUS WINAPI NtYieldExecution(void);
+ NTSTATUS WINAPI NtDuplicateObject(HANDLE, HANDLE, HANDLE, PHANDLE, ACCESS_MASK, ULONG, ULONG);
+ NTSTATUS WINAPI NtFlushInstructionCache(HANDLE, LPCVOID, SIZE_T);
+ NTSTATUS WINAPI NtFreeVirtualMemory(HANDLE, PVOID*, SIZE_T*, ULONG);

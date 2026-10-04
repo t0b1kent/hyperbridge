@@ -1,0 +1,101 @@
+From: MacRunner SUSPEND-COOP
+Subject: [PATCH] WOW64: preserve the current context owner on Get/Set reentry
+
+Family: current-thread BTCpuGetContext/BTCpuSetContext owner lease.
+Trigger: Miles stream main thread waits for PAUSED while still owning IN_JIT.
+Both APIs retain the outer owner; Simulate and remote targets still acquire.
+Gate MACRUNNER_FEX_CONTEXT_OWNER_REENTRY=0 preserves the previous protocol.
+Optional diagnostics are primed in process init and globally bounded, no PE TLS.
+No changes to ARM64EC, JIT generation, UnixLib or interface0072-0074.
+Validation results are in the separate final handoff; this patch is a candidate.
+
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -389,15 +389,53 @@
+ class ScopedJITContextLock {
+ private:
+   TLS TLSData;
++  bool Acquired {};
+ 
+ public:
+-  ScopedJITContextLock(TLS TLSData)
++  // Context APIs can reenter from ResetToConsistentState on the owning thread.
++  // That caller has already reconstructed guest state, but still owns IN_JIT.
++  // Waiting for PAUSED here would prevent the owner from publishing its exit;
++  // releasing IN_JIT in this nested scope would publish it too early instead.
++  static inline bool PreserveOwnerReentry {true};
++  static inline bool DiagnoseOwnerReentry {};
++  static inline std::atomic<unsigned> RunningDiagnosticBudget {32};
++  static inline std::atomic<unsigned> PausedDiagnosticBudget {32};
++
++  ScopedJITContextLock(TLS TLSData, bool ContextAPI = false)
+     : TLSData {TLSData} {
++    const uint32_t Before = ContextAPI && TLSData.TEB == NtCurrentTeb()
++                              ? TLSData.ControlWord().load(std::memory_order::relaxed) : 0;
++    const bool OwnerReentry = Before & ControlBits::IN_JIT;
++    if (OwnerReentry && DiagnoseOwnerReentry) {
++      auto& Counter = Before & ControlBits::PAUSED ? PausedDiagnosticBudget : RunningDiagnosticBudget;
++      unsigned Budget = Counter.load(std::memory_order::relaxed);
++      while (Budget && !Counter.compare_exchange_weak(Budget, Budget - 1, std::memory_order::relaxed)) {}
++      if (Budget) {
++        if (Before & ControlBits::PAUSED) {
++          FEX::Windows::Logging::Raw(PreserveOwnerReentry
++            ? "mr-context-owner: self=1 IN_JIT=1 PAUSED=1 action=preserve\n"
++            : "mr-context-owner: self=1 IN_JIT=1 PAUSED=1 action=wait\n");
++        } else {
++          FEX::Windows::Logging::Raw(PreserveOwnerReentry
++            ? "mr-context-owner: self=1 IN_JIT=1 PAUSED=0 action=preserve\n"
++            : "mr-context-owner: self=1 IN_JIT=1 PAUSED=0 action=reacquire\n");
++        }
++        if (Budget == 1) {
++          FEX::Windows::Logging::Raw("mr-context-owner: diagnostic=DROPPED budget=32/state/process\n");
++        }
++      }
++    }
++    if (OwnerReentry && PreserveOwnerReentry) {
++      return;
++    }
+     LockJITContext(TLSData);
++    Acquired = true;
+   }
+ 
+   ~ScopedJITContextLock() {
+-    UnlockJITContext(TLSData);
++    if (Acquired) {
++      UnlockJITContext(TLSData);
++    }
+   }
+ };
+ 
+@@ -665,6 +703,12 @@
+   }
+ 
+   FEX::Windows::SetupEnvironmentVariableValues(NtDll);
++  // Read once before guest execution; never initialize configuration in an
++  // exception handler. Zero retains the original protocol for a control arm.
++  const char* OwnerReentry = std::getenv("MACRUNNER_FEX_CONTEXT_OWNER_REENTRY");
++  Context::ScopedJITContextLock::PreserveOwnerReentry = !(OwnerReentry && OwnerReentry[0] == '0' && !OwnerReentry[1]);
++  const char* OwnerDiagnostic = std::getenv("MACRUNNER_FEX_CONTEXT_OWNER_DIAGNOSTIC");
++  Context::ScopedJITContextLock::DiagnoseOwnerReentry = OwnerDiagnostic && OwnerDiagnostic[0] == '1' && !OwnerDiagnostic[1];
+ 
+   // wow64.dll will only initialise the cross-process queue if this is set
+   GetTLS().Wow64Info().CpuFlags = WOW64_CPUFLAGS_SOFTWARE;
+@@ -812,7 +856,7 @@
+     return Err;
+   }
+ 
+-  Context::ScopedJITContextLock Lk {TLS};
++  Context::ScopedJITContextLock Lk {TLS, true};
+   if (Err = Context::FlushThreadStateContext(*ThreadDup); Err) {
+     return Err;
+   }
+@@ -834,7 +878,7 @@
+   // Back-up the input context incase we've been passed the CPU area (the flush below would wipe it out otherwise)
+   WOW64_CONTEXT TmpContext = *Context;
+ 
+-  Context::ScopedJITContextLock Lk {TLS};
++  Context::ScopedJITContextLock Lk {TLS, true};
+   if (Err = Context::FlushThreadStateContext(*ThreadDup); Err) {
+     return Err;
+   }

@@ -1,0 +1,81 @@
+Subject: [PATCH 0075] FEXCore: use operand width for BLSR/BLSMSK CF
+
+Backport of upstream FEX 635befb4c802432897a7a5bd28e6755f29c044a4.
+Upstream MIT; dispatcher retains its SPDX-License-Identifier: MIT header.
+The CF zero-test must ignore bits 63:32 for a 32-bit source. The result
+calculation and all undefined-flag choices are unchanged. No new gate.
+
+Family: BMI1 low-bit isolate/reset/mask, 32/64-bit register and memory source
+Members: BLSI, BLSR, BLSMSK (VEX.NDD.LZ.0F38.W0/W1 F3 /1,/2,/3)
+Trigger: c4e278f3d0; RAX=deadbeef00000000; BLSMSK32 must set CF=1
+Coverage:
+  [x] BLSR32/BLSMSK32: existing decode/IR/JIT, CF test corrected to Size
+  [x] BLSR64/BLSMSK64: unchanged Size=i64Bit, covered by hardware rows
+  [x] BLSI32/BLSI64: audited, CF uses result ZF, no source-width defect
+  [x] Memory forms and source/destination aliases: private family probe
+  [ ] Separate interpreter: not applicable; production path is FEX IR/AArch64
+Regression: high32/low32 zero, nonzero, sign-bit/max, both incoming CF values
+InstructionCountCI: all four upstream cmp x6 -> cmp w6 expectations retained
+Audit completed: yes (see FAMILY-AUDIT.md and measured family receipts)
+Product installation: skipped; ENGINE-108 admission belongs to curator
+
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -1819,7 +1819,7 @@ void OpDispatchBuilder::BLSMSKBMIOp(OpcodeArgs) {
+   InvalidatePF_AF();
+ 
+   // CF set according to the Src
+-  auto CFInv = To01(OpSize::i64Bit, Src);
++  auto CFInv = To01(Size, Src);
+ 
+   // The output of BLSMSK is always nonzero, so TST will clear Z (along with C
+   // and O) while setting S.
+@@ -1837,7 +1837,7 @@ void OpDispatchBuilder::BLSRBMIOp(OpcodeArgs) {
+ 
+   StoreResultGPR(Op, Result);
+ 
+-  auto CFInv = To01(OpSize::i64Bit, Src);
++  auto CFInv = To01(Size, Src);
+ 
+   SetNZ_ZeroCV(Size, Result);
+   SetCFInverted(CFInv);
+--- a/unittests/InstructionCountCI/FlagM/VEX_map_group.json
++++ b/unittests/InstructionCountCI/FlagM/VEX_map_group.json
+@@ -19,7 +19,7 @@
+       "ExpectedArm64ASM": [
+         "sub w20, w6, #0x1 (1)",
+         "and w4, w20, w6",
+-        "cmp x6, #0x0 (0)",
++        "cmp w6, #0x0 (0)",
+         "cset x20, ne",
+         "cmp w4, #0x0 (0)",
+         "rmif x20, #63, #nzCv"
+@@ -47,7 +47,7 @@
+       "ExpectedArm64ASM": [
+         "sub w20, w6, #0x1 (1)",
+         "eor w4, w20, w6",
+-        "cmp x6, #0x0 (0)",
++        "cmp w6, #0x0 (0)",
+         "cset x20, ne",
+         "cmp w4, #0x0 (0)",
+         "rmif x20, #63, #nzCv"
+--- a/unittests/InstructionCountCI/VEX_map_group.json
++++ b/unittests/InstructionCountCI/VEX_map_group.json
+@@ -605,7 +605,7 @@
+       "ExpectedArm64ASM": [
+         "sub w20, w6, #0x1 (1)",
+         "and w4, w20, w6",
+-        "cmp x6, #0x0 (0)",
++        "cmp w6, #0x0 (0)",
+         "cset x20, ne",
+         "cmp w4, #0x0 (0)",
+         "mrs x21, nzcv",
+@@ -637,7 +637,7 @@
+       "ExpectedArm64ASM": [
+         "sub w20, w6, #0x1 (1)",
+         "eor w4, w20, w6",
+-        "cmp x6, #0x0 (0)",
++        "cmp w6, #0x0 (0)",
+         "cset x20, ne",
+         "cmp w4, #0x0 (0)",
+         "mrs x21, nzcv",

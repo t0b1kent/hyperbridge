@@ -1,0 +1,88 @@
+Subject: [PATCH 0052 product prerequisite] Give WOW64 interrupt guard its own Darwin page
+
+Apply after the product ports 0070 and 0071 in this packet.
+This is the existing 0052 allocation/layout/unprotect implementation adapted
+to the product base. The protect-size hunk is already supplied by 0070.
+4K guest protection cannot reliably make a writable shared 16K host page
+read-only; isolate the guard at offset16384, allocate at16K, and unprotect16K.
+Windows ARM64EC and non-Darwin layouts remain unchanged.
+No MACRUNNER_FEX_SUSPEND_DIAGNOSTIC, 0050/0053 JIT changes or 0072-0074 included.
+
+Family: interrupt object allocation/layout/protect/unprotect/destruction.
+Historical call gate0: cycle0stall before0052; none/gpr/pc200PASS after0052.
+Product build and runtime must be checked independently by ENGINE-108/PE32-AV.
+
+diff --git a/FEXCore/include/FEXCore/Debug/InternalThreadState.h b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
+--- a/FEXCore/include/FEXCore/Debug/InternalThreadState.h
++++ b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
+@@ -10,6 +10,7 @@
+ 
+ #include <cstddef>
+ #include <cstdint>
++#include <new>
+ #include <shared_mutex>
+ #include <type_traits>
+ 
+@@ -87,7 +88,11 @@
+   uint8_t Size;
+ };
+ 
++#if defined(_WIN32) && !defined(ARCHITECTURE_arm64ec) && defined(FEX_WINE_DARWIN)
++struct alignas(8192) InternalThreadState : public FEXCore::Allocator::FEXAllocOperators {
++#else
+ struct alignas(FEXCore::Utils::FEX_PAGE_SIZE) InternalThreadState : public FEXCore::Allocator::FEXAllocOperators {
++#endif
+   FEXCore::Core::CpuStateFrame* const CurrentFrame = &BaseFrameState;
+ 
+   FEXCore::Context::Context* const CTX;
+@@ -121,8 +126,25 @@
+   // BaseFrameState should always be at the end, directly before the interrupt fault page
+   FEXCore::Core::CpuStateFrame BaseFrameState {};
+ 
+-  // Can be reprotected as RO to trigger an interrupt at generated code block entrypoints
+-  alignas(FEXCore::Utils::FEX_PAGE_SIZE) uint8_t InterruptFaultPage[FEXCore::Utils::FEX_PAGE_SIZE];
++  // A Wine 4K subpage sharing a Darwin 16K page with mutable CPU state
++  // remains host-writable when Wine merges the sibling protections. Give the
++  // interrupt its own complete host page, without changing guest page size.
++#if defined(_WIN32) && !defined(ARCHITECTURE_arm64ec) && defined(FEX_WINE_DARWIN)
++  static constexpr size_t INTERRUPT_PAGE_SIZE = 16384;
++  // COFF rejects type alignment above 8192. Allocate the object at 16K and
++  // place the guard at a fixed 16K offset using two 8K layout units instead.
++  static void* operator new(size_t Size) {
++    return FEXCore::Allocator::aligned_alloc(INTERRUPT_PAGE_SIZE, (Size + INTERRUPT_PAGE_SIZE - 1) & ~(INTERRUPT_PAGE_SIZE - 1));
++  }
++  static void* operator new(size_t Size, std::align_val_t) { return operator new(Size); }
++  static void operator delete(void* Pointer) { FEXCore::Allocator::aligned_free(Pointer); }
++  static void operator delete(void* Pointer, std::align_val_t) { operator delete(Pointer); }
++  alignas(8192) uint8_t InterruptAlignmentPadding[8192];
++  uint8_t InterruptFaultPage[INTERRUPT_PAGE_SIZE];
++#else
++  static constexpr size_t INTERRUPT_PAGE_SIZE = FEXCore::Utils::FEX_PAGE_SIZE;
++  alignas(INTERRUPT_PAGE_SIZE) uint8_t InterruptFaultPage[INTERRUPT_PAGE_SIZE];
++#endif
+ 
+   // ★ MacRunner (MACRUNNER_FEX_EFLAGS_KEEP): полные EFlags гостя на момент доставки исключения — стек по вложенности,
+   //   ключ — RSP гостя; SyncThreadContext возвращает из него PF/AF/DF после обработчика (так делает Prism).
+@@ -137,6 +159,10 @@
+   uint64_t MRSavedEFlagsPad {};
+ };
+ static_assert(std::is_standard_layout_v<FEXCore::Core::InternalThreadState>);
++#if defined(_WIN32) && !defined(ARCHITECTURE_arm64ec) && defined(FEX_WINE_DARWIN)
++static_assert(offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) == 16384,
++              "Darwin interrupt guard must occupy its own aligned host page");
++#endif
+ // Maximum unsigned-offset store range for fault page.
+ static_assert(
+   (offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState)) <= 65520,
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -404,7 +404,7 @@
+   }
+ 
+   void* TmpAddress = reinterpret_cast<void*>(FaultAddress);
+-  SIZE_T TmpSize = FEXCore::Utils::FEX_PAGE_SIZE;
++  SIZE_T TmpSize = sizeof(TLS.ThreadState()->InterruptFaultPage);
+   ULONG TmpProt;
+   NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize, PAGE_READWRITE, &TmpProt);
+ 

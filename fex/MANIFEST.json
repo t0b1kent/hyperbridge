@@ -60,16 +60,18 @@
     "note": "Shipped files differ from the build outputs: the Windows halves are stripped, and the host libraries are renamed and signed with the app's Developer ID."
   },
   "series_head": {
-    "patches": "0001-0019",
-    "sha256_build_sh": {
-      "xtajit64.dll": "3d413809d3ed379cac63ec4e8183066fd9f2b50d969cc8111f141f7cc9109a89",
-      "xtajit.dll": "9bc5810dfb16a74de28732ccbfb238f34599eb4b7bf755fc30446b8f3708ec80",
-      "xtajit64.so": "373e34d2b1756cb712d5aa8356edd02e8ab5efc7386ac227d182d989d29b4089",
-      "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
+    "patches": "64-bit: 0001-0049, 0055, 0056, 0065, 0075, 0160, 0161 (55 patches in fex/patches, filename order)",
+    "wow64": "Separate six-patch chain; see macrunner_1_0_8.wow64 and fex/wow64/README.md",
+    "shipped_sha256": {
+      "engine/fex/aarch64-unix/libarm64ecfex.so": "ed19d22504721add4010d4cb00bfdb2b529bb04fe480a10db87cc6783ad43e93",
+      "engine/fex/aarch64-unix/libmacrunner-hwtso.dylib": "149ad030c9f34ff355c7b94ad334b454f44d29b5f903fa1ca61bc20ca4fd1338",
+      "engine/fex/aarch64-unix/libwow64fex.so": "7cc8079be2620ce32a80b9d06d9a713ebc78cd7d19af552f51c9654bbba7d1ce",
+      "engine/fex/aarch64-unix/xtajit.so": "7cc8079be2620ce32a80b9d06d9a713ebc78cd7d19af552f51c9654bbba7d1ce",
+      "engine/fex/aarch64-unix/xtajit64.so": "ed19d22504721add4010d4cb00bfdb2b529bb04fe480a10db87cc6783ad43e93",
+      "engine/fex/aarch64-windows/xtajit.dll": "aef436aacd966ce9e55ccc1e68706f4af2d2192da923cf0ae17b682580742025",
+      "engine/fex/aarch64-windows/xtajit64.dll": "eb13ea53bf16c9a2153577a02b4ac07d77b3ae0332f905694cd593abc5551401"
     },
-    "note": "Patches 0016-0018 add gated fixes, all default off; 0019 stops the Darwin build from switching the whole context to hardware TSO after a one-thread probe. Two clean fex/build.sh builds (29 Sep 2026) in different directories are byte-identical. The unix libraries are byte-identical to the 0015 head: 0016-0018 change FEXCore and the PE frontend, and 0019 changes only a comment in the unix library.",
-    "verification": "HB<->FEX oracle, 29 Sep 2026: 72 219 x86-64 cases plus 133 division idioms, one binary per check: 0016 changes one case (push 0; ret -> guest fault at 0), 0017 changes none (counter fires on exactly the 240+2 predicted cases), 0018 changes none (the Windows code is outside the oracle). Under MacRunner's Wine, 64-bit probe of 88 DIV/IDIV cases (8-64 bits, register and memory): with MACRUNNER_FEX_DIV_OVERFLOW_DE=1 all 88 equal Microsoft Prism (0xC0000095 for 28 quotient overflows, 0xC0000094 for 40 zero divisors, 20 without exception, same RAX/RDX); without the gate the 28 overflows raise nothing, as before. The 32-bit probe cannot start under this Wine. xbench: cqo; idiv rcx 0.969 -> 0.783 ns with MACRUNNER_FEX_DIV_PROVEN_HIGH=1; div ecx loop unchanged (a mov sits between xor edx,edx and div).",
-    "game_check": "Hollow Knight 1.5.12620 to the main menu, three runs (29 Sep 2026, gates off): menu 38.5-43.1 s after launch, Unity 'Loaded All Assemblies' 2.14-2.36 s, as engine 0015 (2.16-2.39 s). Gameplay not run on this build."
+    "note": "Engine 0161, MacRunner 1.0.8. Release PE reproduction is the clean-cloud result above, not a new local build or a promise for generic fex/build.sh (which omits the separate WOW64 chain). Native whole-file reproduction is not achieved. Historical 0001-0019 head results are preserved in history.series_0001_0019."
   },
   "history": {
     "series_0001_0015": {
@@ -110,6 +112,103 @@
         "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
       },
       "game_check": "Hollow Knight gameplay from a save, DXMT frame counter, 120 Hz display: series head 119.2 and 118.2 FPS, menu 41.7 and 39.5 s; MacRunner 1.0.2 FEX in the same series 117.9, 113.4 and 118.7 FPS, menu 41.7 and 41.2 s. All switches of patches 0009-0010 off. Patch 0012 (JIT map) in a Hollow Knight lab run: 8.1 million named blocks, profile attribution works (tools/fex_jit_attr.py)."
+    },
+    "series_0001_0019": {
+      "patches": "0001-0019",
+      "sha256_build_sh": {
+        "xtajit64.dll": "3d413809d3ed379cac63ec4e8183066fd9f2b50d969cc8111f141f7cc9109a89",
+        "xtajit.dll": "9bc5810dfb16a74de28732ccbfb238f34599eb4b7bf755fc30446b8f3708ec80",
+        "xtajit64.so": "373e34d2b1756cb712d5aa8356edd02e8ab5efc7386ac227d182d989d29b4089",
+        "xtajit.so": "927931f4c75d7025b7f99159f935e320dc481e2fa0ba4f7b4f404a1181283aec"
+      },
+      "note": "Patches 0016-0018 add gated fixes, all default off; 0019 stops the Darwin build from switching the whole context to hardware TSO after a one-thread probe. Two clean fex/build.sh builds (29 Sep 2026) in different directories are byte-identical. The unix libraries are byte-identical to the 0015 head: 0016-0018 change FEXCore and the PE frontend, and 0019 changes only a comment in the unix library.",
+      "verification": "HB<->FEX oracle, 29 Sep 2026: 72 219 x86-64 cases plus 133 division idioms, one binary per check: 0016 changes one case (push 0; ret -> guest fault at 0), 0017 changes none (counter fires on exactly the 240+2 predicted cases), 0018 changes none (the Windows code is outside the oracle). Under MacRunner's Wine, 64-bit probe of 88 DIV/IDIV cases (8-64 bits, register and memory): with MACRUNNER_FEX_DIV_OVERFLOW_DE=1 all 88 equal Microsoft Prism (0xC0000095 for 28 quotient overflows, 0xC0000094 for 40 zero divisors, 20 without exception, same RAX/RDX); without the gate the 28 overflows raise nothing, as before. The 32-bit probe cannot start under this Wine. xbench: cqo; idiv rcx 0.969 -> 0.783 ns with MACRUNNER_FEX_DIV_PROVEN_HIGH=1; div ecx loop unchanged (a mov sits between xor edx,edx and div).",
+      "game_check": "Hollow Knight 1.5.12620 to the main menu, three runs (29 Sep 2026, gates off): menu 38.5-43.1 s after launch, Unity 'Loaded All Assemblies' 2.14-2.36 s, as engine 0015 (2.16-2.39 s). Gameplay not run on this build."
     }
+  },
+  "macrunner_1_0_8": {
+    "released": "2026-10-05, MacRunner 1.0.8 (https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.8)",
+    "patches": "64-bit: 0001-0049, 0055, 0056, 0065, 0075, 0160, 0161 (55 patches in fex/patches, filename order)",
+    "wow64": {
+      "base": "Upstream plus common 0001-0049, 0055, 0056, 0065, 0075 (53 patches)",
+      "order": [
+        "0070",
+        "0071",
+        "0052-port",
+        "0050",
+        "0053",
+        "0087"
+      ],
+      "final_common": [
+        "0160",
+        "0161"
+      ],
+      "files": "fex/wow64/patches; fex/wow64/ORDER.txt",
+      "missing_published_patches": []
+    },
+    "source": "MacRunner 1.0.8 release source archive: hyperbridge/fex in MacRunner-1.0.8-sources, accepted-patches, stage2-received-patches and stage4-received-0161. Patch bytes are preserved; public filenames remove a duplicated number only.",
+    "shipped_sha256": {
+      "engine/fex/aarch64-unix/libarm64ecfex.so": "ed19d22504721add4010d4cb00bfdb2b529bb04fe480a10db87cc6783ad43e93",
+      "engine/fex/aarch64-unix/libmacrunner-hwtso.dylib": "149ad030c9f34ff355c7b94ad334b454f44d29b5f903fa1ca61bc20ca4fd1338",
+      "engine/fex/aarch64-unix/libwow64fex.so": "7cc8079be2620ce32a80b9d06d9a713ebc78cd7d19af552f51c9654bbba7d1ce",
+      "engine/fex/aarch64-unix/xtajit.so": "7cc8079be2620ce32a80b9d06d9a713ebc78cd7d19af552f51c9654bbba7d1ce",
+      "engine/fex/aarch64-unix/xtajit64.so": "ed19d22504721add4010d4cb00bfdb2b529bb04fe480a10db87cc6783ad43e93",
+      "engine/fex/aarch64-windows/xtajit.dll": "aef436aacd966ce9e55ccc1e68706f4af2d2192da923cf0ae17b682580742025",
+      "engine/fex/aarch64-windows/xtajit64.dll": "eb13ea53bf16c9a2153577a02b4ac07d77b3ae0332f905694cd593abc5551401"
+    },
+    "cloud_build_outputs_sha256": {
+      "fex/aarch64-windows/xtajit64.dll": "eb13ea53bf16c9a2153577a02b4ac07d77b3ae0332f905694cd593abc5551401",
+      "wine/lib/wine/aarch64-windows/libarm64ecfex.dll": "eb13ea53bf16c9a2153577a02b4ac07d77b3ae0332f905694cd593abc5551401",
+      "fex/aarch64-unix/libarm64ecfex.so": "1d54ed4023eeedbe0810535facad91972a1a63bede451262364a9f54a6723063",
+      "fex/aarch64-unix/xtajit64.so": "1d54ed4023eeedbe0810535facad91972a1a63bede451262364a9f54a6723063",
+      "fex/aarch64-unix/libmacrunner-hwtso.dylib": "587d16fb0e76cf7efd1c593ed17982649921a974c8e8b61dca689f3977774eac",
+      "fex/aarch64-windows/xtajit.dll": "aef436aacd966ce9e55ccc1e68706f4af2d2192da923cf0ae17b682580742025",
+      "fex/aarch64-unix/libwow64fex.so": "63725e1b1ce0e1543badc399afaca610b0036b32d570cee70f05220dd81e32ed",
+      "fex/aarch64-unix/xtajit.so": "63725e1b1ce0e1543badc399afaca610b0036b32d570cee70f05220dd81e32ed"
+    },
+    "reproduction": {
+      "machine": "Clean Xcode Cloud Mac, Apple M2 Ultra (Virtual), macOS 27.0 (26A428), Xcode 27.0 (27A266a)",
+      "recipe": "REPRO-109, pinned release source plus 0160/0161; separate ARM64EC and WOW64 source order",
+      "pe": "Two distinct PE modules, xtajit64.dll and xtajit.dll, rebuilt byte-exact against the shipped files; the ARM64EC Wine alias is the same PE image.",
+      "native": "The three unique native libraries and their aliases have zero changed/added/removed measured functions and zero changed material sections. Whole-file SHA-256 differs for all three; function/section equality is not semantic equivalence, signature equality or load-command/import/relocation validation.",
+      "classification": "NOT_GOLDEN_SCOPE_AUDIT",
+      "install": "skipped",
+      "signing": "NOT_PERFORMED",
+      "game_data": "NOT_INCLUDED"
+    },
+    "toolchain": {
+      "windows_halves": "llvm-mingw-20260505-ucrt-macos-universal, clang 22.1.5 (LLVM 5ea218a153f4d2f815b8244eab3e4b4ba5e00e6c)",
+      "unix_libraries": "Apple clang 21.0.0 (clang-2100.3.34.2), ld 27037.1.0, macOS SDK 27.0, deployment target 26.0",
+      "cmake": "cmake version 4.3.2",
+      "ninja": "1.13.2.git.kitware.jobserver-pipe-1",
+      "ccache": "ccache version 4.13.6",
+      "pe_link_timestamps": {
+        "arm64ec": 1788779472,
+        "wow64": 1788779471
+      },
+      "configuration": "Release (-O3 -DNDEBUG), FEX_WINE_DARWIN=ON, TUNE_CPU=none, LTO/tests/assertions/telemetry-profiler off; offline telemetry on; static PE runtime and neutral /hyperbridge/fex/src prefix maps. See the release recipes for complete target-specific configuration."
+    },
+    "engine_defaults": {
+      "FEX_SMCCHECKS": "mtrack",
+      "FEX_HOSTFEATURES": "enablecrypto",
+      "MACRUNNER_FEX_OVERLAY": "${ENGINE}/fex",
+      "MACRUNNER_FEX_DIV_OVERFLOW_DE": "1",
+      "MACRUNNER_FEX_EFLAGS_KEEP": "1",
+      "MACRUNNER_FEX_SHLD16_CF": "1",
+      "MACRUNNER_FEX_HW_TSO": "2",
+      "FEX_TSOENABLED": "1",
+      "MACRUNNER_FEX_DIV_PROVEN_HIGH": "1",
+      "MACRUNNER_FEX_APPLE_AFP": "1",
+      "MACRUNNER_HB_X87_FIX_POP_TAG": "1",
+      "MACRUNNER_HB_X87_FIX_ENV_TAGS": "1",
+      "MACRUNNER_HB_X87_FIX_FIP_CS32": "1",
+      "MACRUNNER_FEX_SUSPEND_BACKEDGE": "1",
+      "MACRUNNER_HB_JIT_HOST_GUARD": "1",
+      "MACRUNNER_FEX_WRITABLE_VALIDATION": "2",
+      "MACRUNNER_FEX_RANGE_CACHE": "1",
+      "MACRUNNER_FEX_CODEBUF_MAX": "1",
+      "MACRUNNER_FEX_MONO_BP_PRECISE": "1"
+    },
+    "applicability": "2026-10-05 offline CI-equivalent check: 55/55 common patches on pinned upstream, plus the six WOW64 patches in their explicit order on a separate 53-patch base, then 0160/0161; each check/apply exit 0; no submodule edits; no build or runtime launch."
   }
 }

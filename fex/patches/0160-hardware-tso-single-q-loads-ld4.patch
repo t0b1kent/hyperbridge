@@ -1,0 +1,190 @@
+diff --git a/FEXCore/Source/Interface/Context/Context.h b/FEXCore/Source/Interface/Context/Context.h
+index 55e355f9a..e2966c9a3 100644
+--- a/FEXCore/Source/Interface/Context/Context.h
++++ b/FEXCore/Source/Interface/Context/Context.h
+@@ -437,6 +437,10 @@ public:
+     return MemcpyAtomicTSOEmulationEnabled;
+   }
+ 
++  bool HasHardwareTSOSupport() const {
++    return SupportsHardwareTSO;
++  }
++
+   void SetHardwareTSOSupport(bool HardwareTSOSupported) override {
+     SupportsHardwareTSO = HardwareTSOSupported;
+     UpdateAtomicTSOEmulationConfig();
+diff --git a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+index dea725b61..fe0b2935f 100644
+--- a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+@@ -661,7 +661,18 @@ void Arm64Emitter::PopCalleeSavedRegisters() {
+   }};
+ 
+   for (const auto& [rt, rt2, rt3, rt4] : FPRs) {
+-    ld4(ARMEmitter::SubRegSize::i64Bit, rt, rt2, rt3, rt4, 0, ARMEmitter::Reg::rsp, 32);
++    if (EmitterCTX->HasHardwareTSOSupport()) {
++      // Preserve the upper lanes, unlike LDR D. Keep SP aligned for every load;
++      // r19 is restored below, just as it is used during the matching push.
++      add(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::r19, ARMEmitter::Reg::rsp, 0);
++      ld1(ARMEmitter::SubRegSize::i64Bit, rt, 0, ARMEmitter::Reg::r19, 8);
++      ld1(ARMEmitter::SubRegSize::i64Bit, rt2, 0, ARMEmitter::Reg::r19, 8);
++      ld1(ARMEmitter::SubRegSize::i64Bit, rt3, 0, ARMEmitter::Reg::r19, 8);
++      ld1(ARMEmitter::SubRegSize::i64Bit, rt4, 0, ARMEmitter::Reg::r19, 8);
++      add(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::rsp, ARMEmitter::Reg::rsp, 32);
++    } else {
++      ld4(ARMEmitter::SubRegSize::i64Bit, rt, rt2, rt3, rt4, 0, ARMEmitter::Reg::rsp, 32);
++    }
+   }
+ 
+   constexpr static std::array<std::pair<ARMEmitter::XRegister, ARMEmitter::XRegister>, 6> CalleeSaved = {{
+@@ -901,7 +912,14 @@ void Arm64Emitter::FillStaticRegs(FillStaticRegOptions Options) {
+         }
+       }
+     } else {
+-      if (Options.GPRFillMask && Options.FPRFillMask == ~0U) {
++      if (EmitterCTX->HasHardwareTSOSupport()) {
++        for (size_t i = 0; i < StaticFPRegisters.size(); ++i) {
++          const auto Reg = StaticFPRegisters[i];
++          if ((1U << Reg.Idx()) & Options.FPRFillMask) {
++            ldr(Reg.Q(), STATE.R(), ARRAY_OFFSETOF(Core::CpuStateFrame, State.xmm.sse.data, i));
++          }
++        }
++      } else if (Options.GPRFillMask && Options.FPRFillMask == ~0U) {
+         // Optimize the common case where we can fill four registers per instruction.
+         // Use one of the filling static registers before we fill it.
+         // Load the sse offset in to the temporary register
+@@ -919,7 +937,7 @@ void Arm64Emitter::FillStaticRegs(FillStaticRegOptions Options) {
+           const auto Reg2 = StaticFPRegisters[i + 1];
+ 
+           if (((1U << Reg1.Idx()) & Options.FPRFillMask) && ((1U << Reg2.Idx()) & Options.FPRFillMask)) {
+-            ldp<ARMEmitter::IndexType::OFFSET>(Reg1.Q(), Reg2.Q(), STATE.R(), ARRAY_OFFSETOF(FEXCore::Core::CpuStateFrame, State.xmm.sse.data, i));
++            LoadQPair(Reg1.Q(), Reg2.Q(), STATE.R(), ARRAY_OFFSETOF(FEXCore::Core::CpuStateFrame, State.xmm.sse.data, i));
+           } else if (((1U << Reg1.Idx()) & Options.FPRFillMask)) {
+             ldr(Reg1.Q(), STATE.R(), ARRAY_OFFSETOF(FEXCore::Core::CpuStateFrame, State.xmm.sse.data, i));
+           } else if (((1U << Reg2.Idx()) & Options.FPRFillMask)) {
+@@ -1006,6 +1024,42 @@ void Arm64Emitter::PushGeneralRegisters(ARMEmitter::Register TmpReg, std::span<c
+   }
+ }
+ 
++void Arm64Emitter::LoadQPair(ARMEmitter::QRegister First, ARMEmitter::QRegister Second, ARMEmitter::Register Base,
++                           int32_t Offset, bool PostIndex) {
++  if (!EmitterCTX->HasHardwareTSOSupport()) {
++    if (PostIndex) {
++      ldp<ARMEmitter::IndexType::POST>(First, Second, Base, Offset);
++    } else {
++      ldp<ARMEmitter::IndexType::OFFSET>(First, Second, Base, Offset);
++    }
++    return;
++  }
++
++  if (PostIndex) {
++    // Load both values before writeback, including backwards REP copies.
++    ldr(First, Base, 0);
++    ldr(Second, Base, 16);
++    if (Offset >= 0) {
++      add(ARMEmitter::Size::i64Bit, Base, Base, Offset);
++    } else {
++      sub(ARMEmitter::Size::i64Bit, Base, Base, -Offset);
++    }
++  } else if (Offset >= 0) {
++    ldr(First, Base, Offset);
++    ldr(Second, Base, Offset + 16);
++  } else if (Offset >= -256) {
++    ldur(First, Base, Offset);
++    ldur(Second, Base, Offset + 16);
++  } else {
++    // A Q-pair's signed immediate has a wider negative range than LDUR.
++    // These registers are emitter temporaries, never allocated guest GPRs.
++    const auto Address = Base == TMP1.R() ? TMP2 : TMP1;
++    sub(ARMEmitter::Size::i64Bit, Address.R(), Base, -Offset);
++    ldr(First, Address.R(), 0);
++    ldr(Second, Address.R(), 16);
++  }
++}
++
+ void Arm64Emitter::PopVectorRegisters(bool SVE256Regs, std::span<const ARMEmitter::VRegister> VRegs) {
+   if (SVE256Regs) {
+     size_t i = 0;
+@@ -1025,6 +1079,12 @@ void Arm64Emitter::PopVectorRegisters(bool SVE256Regs, std::span<const ARMEmitte
+       add(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::rsp, ARMEmitter::Reg::rsp, 32 * 4);
+     }
+   } else {
++    if (EmitterCTX->HasHardwareTSOSupport()) {
++      for (const auto Reg : VRegs) {
++        ldr<ARMEmitter::IndexType::POST>(Reg.Q(), ARMEmitter::Reg::rsp, 16);
++      }
++      return;
++    }
+     size_t i = 0;
+     for (; i < (VRegs.size() % 4); i += 2) {
+       const auto Reg1 = VRegs[i];
+diff --git a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
+index 5ad6e7b19..051281abe 100644
+--- a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
+@@ -122,6 +122,11 @@ public:
+ protected:
+   FEXCore::Context::ContextImpl* EmitterCTX;
+ 
++  // On hardware-TSO hosts, a Q pair is substantially slower than two single loads.
++  // Preserve the original instruction exactly when hardware TSO is not admitted.
++  void LoadQPair(ARMEmitter::QRegister First, ARMEmitter::QRegister Second, ARMEmitter::Register Base, int32_t Offset,
++                 bool PostIndex = false);
++
+   std::span<const ARMEmitter::Register> StaticRegisters {};
+   std::span<const ARMEmitter::Register> GeneralRegisters {};
+   std::span<const ARMEmitter::Register> GeneralRegistersNotPreserved {};
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+index 99d642e86..afdb17e8d 100644
+--- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -957,14 +957,14 @@ void Dispatcher::EmitF64Sin() {
+   msr(ARMEmitter::SystemRegister::NZCV, TMP1);
+ 
+   // Restore q2-q5 and return.
+-  ldp<ARMEmitter::IndexType::OFFSET>(ARMEmitter::QReg::q4, ARMEmitter::QReg::q5, ARMEmitter::Reg::rsp, 32);
+-  ldp<ARMEmitter::IndexType::POST>(ARMEmitter::QReg::q2, ARMEmitter::QReg::q3, ARMEmitter::Reg::rsp, 64);
++  LoadQPair(ARMEmitter::QReg::q4, ARMEmitter::QReg::q5, ARMEmitter::Reg::rsp, 32);
++  LoadQPair(ARMEmitter::QReg::q2, ARMEmitter::QReg::q3, ARMEmitter::Reg::rsp, 64, true);
+   ret();
+ 
+   // Fallback path.
+   (void)Bind(&Fallback);
+-  ldp<ARMEmitter::IndexType::OFFSET>(ARMEmitter::QReg::q4, ARMEmitter::QReg::q5, ARMEmitter::Reg::rsp, 32);
+-  ldp<ARMEmitter::IndexType::POST>(ARMEmitter::QReg::q2, ARMEmitter::QReg::q3, ARMEmitter::Reg::rsp, 64);
++  LoadQPair(ARMEmitter::QReg::q4, ARMEmitter::QReg::q5, ARMEmitter::Reg::rsp, 32);
++  LoadQPair(ARMEmitter::QReg::q2, ARMEmitter::QReg::q3, ARMEmitter::Reg::rsp, 64, true);
+   str<ARMEmitter::IndexType::PRE>(ARMEmitter::XReg::lr, ARMEmitter::Reg::rsp, -16);
+   ldr(TMP1, STATE_PTR(CpuStateFrame, Pointers.FallbackHandlerPointers[FEXCore::Core::OPINDEX_F64SIN].ABIHandler));
+   ldr(TMP4, STATE_PTR(CpuStateFrame, Pointers.FallbackHandlerPointers[FEXCore::Core::OPINDEX_F64SIN].Func));
+diff --git a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+index b89399982..a5931863a 100644
+--- a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+@@ -70,7 +70,7 @@ DEF_OP(LoadContextPair) {
+     switch (IROp->Size) {
+     case IR::OpSize::i32Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.S(), Dst2.S(), STATE, Op->Offset); break;
+     case IR::OpSize::i64Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.D(), Dst2.D(), STATE, Op->Offset); break;
+-    case IR::OpSize::i128Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.Q(), Dst2.Q(), STATE, Op->Offset); break;
++    case IR::OpSize::i128Bit: LoadQPair(Dst1.Q(), Dst2.Q(), STATE, Op->Offset); break;
+     default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: {}", IROp->Size); break;
+     }
+   }
+@@ -797,7 +797,7 @@ DEF_OP(LoadMemPair) {
+     switch (IROp->Size) {
+     case IR::OpSize::i32Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.S(), Dst2.S(), Addr, Op->Offset); break;
+     case IR::OpSize::i64Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.D(), Dst2.D(), Addr, Op->Offset); break;
+-    case IR::OpSize::i128Bit: ldp<ARMEmitter::IndexType::OFFSET>(Dst1.Q(), Dst2.Q(), Addr, Op->Offset); break;
++    case IR::OpSize::i128Bit: LoadQPair(Dst1.Q(), Dst2.Q(), Addr, Op->Offset); break;
+     default: LOGMAN_MSG_A_FMT("Unhandled LoadMemPair size: {}", IROp->Size); break;
+     }
+   }
+@@ -2185,7 +2185,7 @@ DEF_OP(MemCpy) {
+       str<ARMEmitter::IndexType::POST>(TMP4, TMP2, Size);
+       break;
+     case 32:
+-      ldp<ARMEmitter::IndexType::POST>(VTMP1.Q(), VTMP2.Q(), TMP3, Size);
++      LoadQPair(VTMP1.Q(), VTMP2.Q(), TMP3.R(), Size, true);
+       stp<ARMEmitter::IndexType::POST>(VTMP1.Q(), VTMP2.Q(), TMP2, Size);
+       break;
+     default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;

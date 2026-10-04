@@ -1,0 +1,142 @@
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index 3896abc2a..ca3fe8220 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -851,7 +851,10 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+   this->DebugData = DebugData;
+   this->IR = IR;
+   RequiresFarARM64Jumps = false;
+-  SSANodeMultiplier = 24;
++  // Darwin single-vector TSO loads enlarge validation exits. Reserve the
++  // measured first-restart capacity up front; the guard still handles outliers.
++  // Keep the release-0160 estimate unchanged when the host-page gate is off.
++  SSANodeMultiplier = FEXCore::Utils::JITGuardPageSize() == FEXCore::Utils::FEX_PAGE_SIZE ? 24 : 48;
+ 
+   // Prepare restart via long jump in case branch encoding fails.
+   // This uses UncheckedLongJump since we don't implement std::longjmp in WoA setups
+@@ -879,13 +882,14 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+ 
+   // Fairly excessive buffer range to make sure we don't overflow
+   // One page baseline, plus SSANodeMultipler bytes, plus another page for guard page.
+-  const uint32_t DesiredBufferRange = AlignUp(FEXCore::Utils::FEX_PAGE_SIZE * 2 + SSACount * SSANodeMultiplier, FEXCore::Utils::FEX_PAGE_SIZE);
++  const auto GuardSize = FEXCore::Utils::JITGuardPageSize();
++  const uint32_t DesiredBufferRange = AlignUp(FEXCore::Utils::FEX_PAGE_SIZE + GuardSize + SSACount * SSANodeMultiplier, GuardSize);
+ 
+   // JIT output is first written to a temporary buffer and later relocated to the CodeBuffer.
+   // This minimizes lock contention of CodeBufferWriteMutex.
+   auto TempCodeBufferInfo = TempCodeBufferAllocator.ReownOrClaimBufferWithSize(DesiredBufferRange);
+   auto TempCodeBuffer = TempCodeBufferInfo.Ptr;
+-  const uint32_t UsableBufferRange = TempCodeBufferInfo.Size - FEXCore::Utils::FEX_PAGE_SIZE;
++  const uint32_t UsableBufferRange = TempCodeBufferInfo.Size - GuardSize;
+ 
+   SetBuffer(TempCodeBuffer, UsableBufferRange);
+ 
+diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+index f3171d4eb..474bd05f2 100644
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+@@ -22,8 +22,9 @@ CodeBuffer::CodeBuffer(size_t Size)
+   LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");
+ 
+   // Protect the last page of the allocated buffer to trigger SIGSEGV on write access
+-  uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, FEXCore::Utils::FEX_PAGE_SIZE);
+-  if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_PAGE_SIZE,
++  const auto GuardSize = FEXCore::Utils::JITGuardPageSize();
++  uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, GuardSize);
++  if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), GuardSize,
+                                           FEXCore::Allocator::ProtectOptions::None)) {
+     LogMan::Msg::EFmt("Failed to mprotect last page of code buffer.");
+   }
+diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.h b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.h
+index 0eaddcff7..0b7410072 100644
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.h
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.h
+@@ -35,7 +35,7 @@ struct CodeBuffer {
+ 
+   /// Returns the number of bytes available for storing code
+   size_t UsableSize() const {
+-    return AllocatedSize - FEXCore::Utils::FEX_PAGE_SIZE;
++    return AllocatedSize - FEXCore::Utils::JITGuardPageSize();
+   }
+ };
+ 
+diff --git a/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h b/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
+index 1c0c8b805..1c7b4b086 100644
+--- a/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
++++ b/FEXCore/include/FEXCore/Utils/ThreadPoolAllocator.h
+@@ -417,8 +417,9 @@ public:
+ private:
+   void* Alloc(size_t Size) override {
+     auto Ptr = FEXCore::Allocator::VirtualAlloc(Size);
+-    uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, FEXCore::Utils::FEX_PAGE_SIZE);
+-    if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_PAGE_SIZE,
++    const auto GuardSize = FEXCore::Utils::JITGuardPageSize();
++    uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, GuardSize);
++    if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), GuardSize,
+                                             FEXCore::Allocator::ProtectOptions::None)) {
+       LogMan::Msg::EFmt("Failed to mprotect last page of code buffer.");
+     }
+diff --git a/FEXCore/include/FEXCore/Utils/TypeDefines.h b/FEXCore/include/FEXCore/Utils/TypeDefines.h
+index ec03ac6cd..3fa43edfb 100644
+--- a/FEXCore/include/FEXCore/Utils/TypeDefines.h
++++ b/FEXCore/include/FEXCore/Utils/TypeDefines.h
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: MIT
+ #pragma once
+ #include <cstddef>
++#include <cstdlib>
+ 
+ namespace FEXCore::Utils {
+ // FEX assumes an operating page size of 4096
+@@ -9,4 +10,20 @@ namespace FEXCore::Utils {
+ constexpr size_t FEX_PAGE_SIZE = 4096;
+ constexpr size_t FEX_PAGE_SHIFT = 12;
+ constexpr size_t FEX_PAGE_MASK = ~(FEX_PAGE_SIZE - 1);
++
++// Guest pages stay 4 KiB. A JIT overflow guard must occupy a complete host
++// protection page: Wine cannot make one 4 KiB subpage inaccessible while its
++// 16 KiB Darwin neighbours remain writable. The gate is initialized by buffer
++// allocation, before the signal path can read it; no signal-time getenv/init.
++inline size_t JITGuardPageSize() {
++#if defined(FEX_WINE_DARWIN) || (defined(__APPLE__) && defined(ARCHITECTURE_arm64))
++  static const bool HostGuard = [] {
++    const char* Value = std::getenv("MACRUNNER_HB_JIT_HOST_GUARD");
++    return Value && Value[0] == '1' && !Value[1];
++  }();
++  return HostGuard ? 16384 : FEX_PAGE_SIZE;
++#else
++  return FEX_PAGE_SIZE;
++#endif
++}
+ } // namespace FEXCore::Utils
+diff --git a/Source/Windows/Common/JITGuardPage.h b/Source/Windows/Common/JITGuardPage.h
+index 007d49892..6762976b0 100644
+--- a/Source/Windows/Common/JITGuardPage.h
++++ b/Source/Windows/Common/JITGuardPage.h
+@@ -4,14 +4,20 @@
+ #include <FEXCore/Utils/LongJump.h>
+ 
+ namespace FEX::Windows::JITGuardPage {
+-static constexpr bool IsAddressInJITGuardPage(uintptr_t GuardPage, uintptr_t Address) {
+-  return GuardPage != 0 && Address >= GuardPage && Address < GuardPage + FEXCore::Utils::FEX_PAGE_SIZE;
++static constexpr bool IsAddressInGuardSpan(uintptr_t GuardPage, uintptr_t Address, uintptr_t Span) {
++  return GuardPage != 0 && Address >= GuardPage && Address - GuardPage < Span;
+ }
+ 
+-static_assert(!IsAddressInJITGuardPage(0, 0));
+-static_assert(IsAddressInJITGuardPage(0x1000, 0x1000));
+-static_assert(IsAddressInJITGuardPage(0x1000, 0x1fff));
+-static_assert(!IsAddressInJITGuardPage(0x1000, 0x2000));
++static inline bool IsAddressInJITGuardPage(uintptr_t GuardPage, uintptr_t Address) {
++  return IsAddressInGuardSpan(GuardPage, Address, FEXCore::Utils::JITGuardPageSize());
++}
++
++static_assert(!IsAddressInGuardSpan(0, 0, 4096));
++static_assert(IsAddressInGuardSpan(0x1000, 0x1000, 4096));
++static_assert(IsAddressInGuardSpan(0x1000, 0x1fff, 4096));
++static_assert(!IsAddressInGuardSpan(0x1000, 0x2000, 4096));
++static_assert(IsAddressInGuardSpan(0x4000, 0x7fff, 16384));
++static_assert(!IsAddressInGuardSpan(0x4000, 0x8000, 16384));
+ 
+ static inline bool HandleJITGuardPage(FEXCore::Core::InternalThreadState* Thread, void* Address, uint64_t* GPRs, __uint128_t* FPRs, uint64_t* PC) {
+   if (IsAddressInJITGuardPage(Thread->JITGuardPage, reinterpret_cast<uintptr_t>(Address))) {

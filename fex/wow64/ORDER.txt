@@ -1,0 +1,6 @@
+patches/0070-WOW64-suspend-release-registry-lock-while-waiting.patch
+patches/0071-WOW64-teardown-use-local-suspend-contract.patch
+patches/0052-port-Darwin-host-interrupt-page.patch
+patches/0050-cooperative-suspend-backedges.patch
+patches/0053-wow64-suspend-backedge-continuations-PRODUCT.patch
+patches/0087-wow64-preserve-owner-context-reentry.patch

@@ -1,0 +1,220 @@
+Subject: [PATCH] Publish WOW64 continuations at gated backward control transfers
+
+Family: CondJump NZCV/CBZ/CBNZ/TBZ/TBNZ, Jump/stitching, fast return.
+Gate absent/0 retains old control transfer behavior; 1/2 explicit experiments.
+WOW64 fault at page+16 identifies a published RIP; unprotect whole base page.
+ARM64EC product DLL remains byte-identical to the tested x64 review.
+Bounded protection diagnostic is outside the handler; no first-use work in handler.
+R1/live evidence and residual R2/bounded-loop debt are listed in handoff reports.
+Target 1.0.8; default decision belongs to owner. Audit completed: yes.
+
+diff --git a/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h b/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h
+--- a/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h
++++ b/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h
+@@ -7,7 +7,7 @@
+ namespace FEXCore::Utils {
+ // Read during IR construction/code generation, never from a signal handler.
+ inline unsigned MacRunnerSuspendBackedgeMode() {
+-#ifdef ARCHITECTURE_arm64ec
++#if defined(ARCHITECTURE_arm64ec) || defined(_WIN32)
+   static const unsigned Mode = [] {
+     const char* Value = std::getenv("MACRUNNER_FEX_SUSPEND_BACKEDGE");
+     return Value && (Value[0] == '1' || Value[0] == '2') && !Value[1]
+@@ -29,4 +29,5 @@
+ // Synthesized blocks inside one x86 instruction have no guest continuation PC.
+ // Decoder-created blocks always supply an explicit relative guest address.
+ inline constexpr uint32_t NoGuestSuspendBoundary = UINT32_MAX;
++inline constexpr size_t PublishedSuspendFaultOffset = 16;
+ }
+diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -623,6 +623,7 @@
+   void EmitTFCheck();
+ 
+   void EmitSuspendInterruptCheck();
++  void EmitSuspendInterruptFaultCheck(bool PublishedContinuation);
+   void EmitSuspendInterruptCheckAt(uint64_t GuestRIP);
+   void EmitSuspendInterruptCheckAt(ARMEmitter::Register GuestRIP);
+ 
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -669,6 +669,20 @@
+   }
+ #endif
+ 
++#if defined(_WIN32) && !defined(ARCHITECTURE_arm64ec)
++  static std::atomic_flag AnnouncedWOW64 = ATOMIC_FLAG_INIT;
++  if (!AnnouncedWOW64.test_and_set(std::memory_order_relaxed)) {
++    char Line[128];
++    const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
++      "mr-suspend-backedge: gate={} atomics={} checkpoint=FAULT+16 fault_check={} fault_offset={}\n",
++      FEXCore::Utils::MacRunnerSuspendBackedgeMode(), ctx->HostFeatures.SupportsAtomics ? 1 : 0,
++      ctx->Config.NeedsPendingInterruptFaultCheck ? 1 : 0,
++      offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState));
++    Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  }
++#endif
++
+   RAPass = Thread->PassManager->GetPass<IR::RegisterAllocationPass>("RA");
+ 
+   RAPass->AddRegisters(IR::RegClass::GPR, GeneralRegisters.size());
+@@ -810,17 +824,33 @@
+   (void)Bind(&l_TFUnset);
+ }
+ 
+-void Arm64JITCore::EmitSuspendInterruptCheck() {
++#ifndef ARCHITECTURE_arm64ec
++void Arm64JITCore::EmitSuspendInterruptFaultCheck(bool PublishedContinuation) {
+   if (CTX->Config.NeedsPendingInterruptFaultCheck) {
+     // Trigger a fault if there are any pending interrupts
+     // Used only for suspend on WIN32 at the moment
+     constexpr size_t InterruptPageOffset =
+       offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState);
++    static_assert(InterruptPageOffset + FEXCore::Utils::PublishedSuspendFaultOffset <= 65520);
++    const size_t Offset = InterruptPageOffset + (PublishedContinuation ? FEXCore::Utils::PublishedSuspendFaultOffset : 0);
++    if (Offset <= 32760) {
++      str(ARMEmitter::XReg::zr, STATE, Offset);
++    } else {
++      // Need to use vector 128-bit store for this range.
++      // Doesn't matter which register we use to store.
++      str(ARMEmitter::QReg::q0, STATE, Offset);
++    }
++  }
++}
++#endif
++
++void Arm64JITCore::EmitSuspendInterruptCheck() {
++  if (CTX->Config.NeedsPendingInterruptFaultCheck) {
++    constexpr size_t InterruptPageOffset =
++      offsetof(FEXCore::Core::InternalThreadState, InterruptFaultPage) - offsetof(FEXCore::Core::InternalThreadState, BaseFrameState);
+     if constexpr (InterruptPageOffset <= 32760) {
+       str(ARMEmitter::XReg::zr, STATE, InterruptPageOffset);
+     } else {
+-      // Need to use vector 128-bit store for this range.
+-      // Doesn't matter which register we use to store.
+       str(ARMEmitter::QReg::q0, STATE, InterruptPageOffset);
+     }
+   }
+@@ -839,6 +869,14 @@
+ // These new safepoints publish a completed guest continuation. brk #0xCAFD
+ // differs from entrypoint #0xCAFE: its RIP must not be guessed from host PC.
+ void Arm64JITCore::EmitSuspendInterruptCheckAt(uint64_t GuestRIP) {
++#ifndef ARCHITECTURE_arm64ec
++  if (CTX->Config.NeedsPendingInterruptFaultCheck) {
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, GuestRIP);
++    str(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
++    EmitSuspendInterruptFaultCheck(true);
++    return;
++  }
++#endif
+ #ifdef ARCHITECTURE_arm64ec
+   ARMEmitter::ForwardLabel Continue;
+   ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
+@@ -851,6 +889,13 @@
+ }
+ 
+ void Arm64JITCore::EmitSuspendInterruptCheckAt(ARMEmitter::Register GuestRIP) {
++#ifndef ARCHITECTURE_arm64ec
++  if (CTX->Config.NeedsPendingInterruptFaultCheck) {
++    str(GuestRIP.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
++    EmitSuspendInterruptFaultCheck(true);
++    return;
++  }
++#endif
+ #ifdef ARCHITECTURE_arm64ec
+   ARMEmitter::ForwardLabel Continue;
+   // Before the call-ret pop: TMP2 still has no live host target.
+diff --git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+@@ -346,9 +346,23 @@
+     }
+   };
+ 
+-#ifdef ARCHITECTURE_arm64ec
+   if (FEXCore::Utils::MacRunnerSuspendBackedgeEnabled() && GuestBoundary &&
+       (TrueTargetLabel->Backward.Location || FalseTargetLabel->Backward.Location)) {
++#ifndef ARCHITECTURE_arm64ec
++    if (CTX->Config.NeedsPendingInterruptFaultCheck) {
++      ARMEmitter::BiDirectionalLabel Taken;
++      EmitCondition(&Taken);
++      EmitSuspendInterruptCheckAt(Entry + FalseBlock->GuestEntryOffset);
++      b_OrRestart(FalseTargetLabel);
++      BindOrRestart(&Taken);
++      EmitSuspendInterruptCheckAt(Entry + TrueBlock->GuestEntryOffset);
++      b_OrRestart(TrueTargetLabel);
++      PendingTargetLabel = nullptr;
++      PendingSuspendRIP.reset();
++      return;
++    }
++#endif
++#ifdef ARCHITECTURE_arm64ec
+     ARMEmitter::ForwardLabel Cold, Publish;
+     ARMEmitter::BiDirectionalLabel Taken;
+     ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
+@@ -373,8 +387,8 @@
+     PendingTargetLabel = nullptr;
+     PendingSuspendRIP.reset();
+     return;
+-  }
+ #endif
++  }
+   EmitCondition(TrueTargetLabel);
+ 
+   PendingTargetLabel = FalseTargetLabel;
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -19,6 +19,7 @@
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Utils/Allocator.h>
+ #include <FEXCore/Utils/AllocatorHooks.h>
++#include <FEXCore/Utils/MacRunnerSuspend.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/Threads.h>
+ #include <FEXCore/Utils/Profiler.h>
+@@ -305,12 +306,14 @@
+   return RtlWow64SetThreadContext(Thread, &TmpWowContext);
+ }
+ 
+-void ReconstructThreadState(TLS TLS, CONTEXT* Context) {
++void ReconstructThreadState(TLS TLS, CONTEXT* Context, bool PublishedContinuation = false) {
+   const auto& Config = SignalDelegator->GetConfig();
+   auto* Thread = TLS.ThreadState();
+   auto& State = Thread->CurrentFrame->State;
+ 
+-  State.rip = CTX->RestoreRIPFromHostPC(Thread, Context->Pc);
++  if (!PublishedContinuation) {
++    State.rip = CTX->RestoreRIPFromHostPC(Thread, Context->Pc);
++  }
+ 
+   // Spill all SRA GPRs
+   for (size_t i = 0; i < Config.SRAGPRCount; i++) {
+@@ -397,17 +400,20 @@
+ };
+ 
+ bool HandleSuspendInterrupt(TLS TLS, CONTEXT* Context, uint64_t FaultAddress) {
+-  if (FaultAddress != reinterpret_cast<uint64_t>(&TLS.ThreadState()->InterruptFaultPage)) {
++  const uint64_t FaultPage = reinterpret_cast<uint64_t>(&TLS.ThreadState()->InterruptFaultPage);
++  const bool PublishedContinuation = FaultAddress == FaultPage + FEXCore::Utils::PublishedSuspendFaultOffset;
++  if (FaultAddress != FaultPage && !PublishedContinuation) {
+     return false;
+   }
+ 
+-  void* TmpAddress = reinterpret_cast<void*>(FaultAddress);
++  void* TmpAddress = reinterpret_cast<void*>(FaultPage);
+   SIZE_T TmpSize = sizeof(TLS.ThreadState()->InterruptFaultPage);
+   ULONG TmpProt;
+   NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize, PAGE_READWRITE, &TmpProt);
+ 
+-  // Since interrupts only happen at the start of blocks, the reconstructed state should be entirely accurate
+-  ReconstructThreadState(TLS, Context);
++  // Entry faults restore RIP from host PC; marked backedges have already
++  // published the completed guest continuation before the faulting store.
++  ReconstructThreadState(TLS, Context, PublishedContinuation);
+ 
+   // Yield to the suspender
+   UnlockJITContext(TLS);

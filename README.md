@@ -35,7 +35,7 @@ three); lower is better, the best value is in bold. Hollow Knight rows are still
 | `call`+`ret` / indirect `call` | 1.91 / 2.23 | **1.46 / 1.48** | 1.93 / 2.25 | — |
 | SSE results matching x86 hardware (of 74) | 12 ² | **38** | 16 | — |
 | SSE4.2, AES, PCLMULQDQ reported in `CPUID` | yes (since 1.0.5) | yes | yes | — |
-| Hardware x86 memory ordering (TSO) | ready, planned on by default in 1.0.8 ³ | not examined | yes | not needed |
+| Hardware x86 memory ordering (TSO) | on by default in 1.0.8; October 3 measurement below ³ | not examined | yes | not needed |
 | Hollow Knight start-up: Unity's own `Loaded All Assemblies` time | 2.22 s ⁴ | 0.26 s | 0.41 s | **0.17 s** |
 | Hollow Knight in King's Pass: FPS · CPU time per frame | 113–117 · 14.9–15.0 ms ⁴ | not comparable (virtual GPU) | 113–119 · 15.4–16.1 ms | **120 · 6.4–6.8 ms** |
 
@@ -67,14 +67,18 @@ are not affected. Per-run values and spreads are in the full results.
 
 Experimental. The measurements below are from one machine (Apple M1 Pro, macOS 27).
 
-**Updated October 3, 2026.** The current MacRunner development preview is
-**[1.0.7](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.7)**, released October 3: the first release signed
+**Updated October 5, 2026.** The current MacRunner development preview is
+**[1.0.8](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.8)**, with engine 0161.
+The [patch series, shipped hashes and reproduction scope](fex/README.md) and the
+[dated 1.0.8 measurements](COMPARISON.md#october-5-2026-macrunner-108) are recorded separately.
+
+**October 3 snapshot:** [1.0.7](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.7) was the first release signed
 with a Developer ID and notarized by Apple. 32-bit Windows programs start (experimental): one Wine runtime and one signed
 loader serve both 64-bit and 32-bit programs, and Heroes of Might and Magic III reaches its main menu (without sound, with
 a shifted picture). .NET 6 games can start: Stardew Valley reaches its main menu. 16-bit `SHLD`/`SHRD` now set the carry
 flag as hardware does. Floating-point and alias/W^X failures remain; this is not full x86 equivalence.
 
-Ready for the next release: **hardware x86 memory ordering (TSO)**, measured at 25–26 % less CPU time per frame in
+Prepared for 1.0.8 in that October 3 snapshot: **hardware x86 memory ordering (TSO)**, measured at 25–26 % less CPU time per frame in
 Hollow Knight's menu and about 20 % less in ABZU, with Hollow Knight, Stardew Valley, ABZU, Divinity: Original Sin and
 Heroes III reaching their menus on it; and a fix for 256-bit AVX register halves lost when translated code is restarted
 after a self-modification check (it broke a .NET runtime check and a plain `memcpy`).

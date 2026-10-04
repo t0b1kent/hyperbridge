@@ -1,0 +1,54 @@
+Subject: [PATCH 0071] WOW64: use implemented local suspend contract before teardown
+
+Product port for ENGINE-108, to be applied after 0070.
+Wine 11.0 native PE has no RtlWow64SuspendThread export. Route non-self target
+teardown through BTCpuSuspendLocalThread, synchronize native CONTEXT_CONTROL,
+and request explicit GET/SET_CONTEXT handle rights before destroying JIT state.
+No lane diagnostics, guest execution lease, or core completion prototype included.
+
+Family: WOW64 suspend and target teardown.
+Members: BTCpuThreadTerm; BTCpuSuspendLocalThread; native context synchronization.
+Algorithm is byte-identical to the 44b9 field candidate in BTCpuThreadTerm.
+0050-0054 are not source or link prerequisites; loop checkpoint coverage is
+a separate functional guarantee and must not be inferred from this product port.
+See HANDOFF.md and VALIDATION.json for exact scope and required product rerun.
+
+diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -725,12 +725,15 @@
+   }
+ }
+ 
++NTSTATUS BTCpuSuspendLocalThread(HANDLE Thread, ULONG* Count);
++
+ void BTCpuThreadTerm(HANDLE Thread, LONG ExitCode) {
+   if (!FEX::Windows::ValidateHandleAccess(Thread, THREAD_TERMINATE)) {
+     return;
+   }
+ 
+-  auto ThreadDup = FEX::Windows::DupHandle(Thread, THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME);
++  auto ThreadDup = FEX::Windows::DupHandle(
++    Thread, THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT);
+ 
+   THREAD_BASIC_INFORMATION Info;
+   if (auto Err = NtQueryInformationThread(*ThreadDup, ThreadBasicInformation, &Info, sizeof(Info), nullptr); Err) {
+@@ -740,8 +743,16 @@
+   const auto ThreadTID = reinterpret_cast<uint64_t>(Info.ClientId.UniqueThread);
+   bool Self = ThreadTID == GetCurrentThreadId();
+   if (!Self) {
+-    // If we are suspending a thread that isn't ourselves, try to suspend it first so we know internal JIT locks aren't being held.
+-    RtlWow64SuspendThread(*ThreadDup, NULL);
++    // Wine 11.0 has no RtlWow64SuspendThread export. Use our existing guest
++    // suspend protocol so the context is materialized and JIT locks released.
++    if (BTCpuSuspendLocalThread(*ThreadDup, nullptr)) {
++      return;
++    }
++    // Native suspend is asynchronous: synchronize before destroying target state.
++    CONTEXT SuspendContext {.ContextFlags = CONTEXT_CONTROL};
++    if (NtGetContextThread(*ThreadDup, &SuspendContext)) {
++      return;
++    }
+   }
+ 
+   auto [Err, TLS] = GetThreadTLS(*ThreadDup);

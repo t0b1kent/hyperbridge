@@ -1,0 +1,476 @@
+Subject: [PATCH] Add gated guest continuations for EC conditional backedges
+
+Family: CondJump NZCV/CBZ/CBNZ/TBZ/TBNZ, Jump stitching and fast-ret.
+Gate absent/0: old behavior; 1: guest-live flags; 2: exact NZCV experiment.
+R1 probes: each mode 150000 suspensions, arithmetic/control state exact.
+REP and non-LSE retry loops excluded by curator scope; LSE NEG/CAS debt explicit.
+Not a complete GetContext R2 implementation; see R2-OBSERVABILITY-DEBT.md.
+Target release: 1.0.8. WOW64 and timing remain pending; REVIEW snapshot.
+
+diff --git a/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h b/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h
+new file mode 100644
+--- /dev/null
++++ b/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h
+@@ -0,0 +1,32 @@
++// SPDX-License-Identifier: MIT
++// Modifications (c) 2026 MacRunner contributors, MIT
++#pragma once
++#include <cstdlib>
++#include <cstdint>
++
++namespace FEXCore::Utils {
++// Read during IR construction/code generation, never from a signal handler.
++inline unsigned MacRunnerSuspendBackedgeMode() {
++#ifdef ARCHITECTURE_arm64ec
++  static const unsigned Mode = [] {
++    const char* Value = std::getenv("MACRUNNER_FEX_SUSPEND_BACKEDGE");
++    return Value && (Value[0] == '1' || Value[0] == '2') && !Value[1]
++             ? static_cast<unsigned>(Value[0] - '0') : 0U;
++  }();
++  return Mode;
++#else
++  return 0;
++#endif
++}
++inline bool MacRunnerSuspendBackedgeEnabled() {
++  return MacRunnerSuspendBackedgeMode() != 0;
++}
++// Mode 1 keeps the existing guest-visible flag liveness; mode 2 also retains
++// flags that are dead for the guest but observable in a suspended context.
++inline bool MacRunnerSuspendBackedgeExactFlags() {
++  return MacRunnerSuspendBackedgeMode() == 2;
++}
++// Synthesized blocks inside one x86 instruction have no guest continuation PC.
++// Decoder-created blocks always supply an explicit relative guest address.
++inline constexpr uint32_t NoGuestSuspendBoundary = UINT32_MAX;
++}
+diff --git a/FEXCore/Source/Interface/IR/IREmitter.h b/FEXCore/Source/Interface/IR/IREmitter.h
+--- a/FEXCore/Source/Interface/IR/IREmitter.h
++++ b/FEXCore/Source/Interface/IR/IREmitter.h
+@@ -417,7 +417,8 @@
+    *
+    * @return OrderedNode
+    */
+-  IRPair<IROp_CodeBlock> CreateCodeNode(bool EntryPoint = false, uint32_t GuestEntryOffset = 0) {
++  // Internal instruction loops are not guest instruction boundaries.
++  IRPair<IROp_CodeBlock> CreateCodeNode(bool EntryPoint = false, uint32_t GuestEntryOffset = UINT32_MAX) {
+     SetWriteCursor(nullptr); // Orphan from any previous nodes
+ 
+     auto ID = ViewIR().GetHeader()->BlockCount++;
+diff --git a/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp b/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
+--- a/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
+@@ -14,6 +14,7 @@
+ #include <FEXCore/IR/IR.h>
+ #include <FEXCore/Utils/CompilerDefs.h>
+ #include <FEXCore/Utils/MathUtils.h>
++#include <FEXCore/Utils/MacRunnerSuspend.h>
+ #include <FEXCore/Utils/Profiler.h>
+ #include <FEXCore/fextl/deque.h>
+ #include <FEXCore/fextl/vector.h>
+@@ -101,6 +102,7 @@
+   Ref Node;
+   uint8_t Flags;
+   bool InWorklist;
++  uint32_t EmissionOrder {};
+ };
+ 
+ struct ControlFlowGraph {
+@@ -137,6 +139,21 @@
+   void RecordEdge(uint32_t From, OrderedNodeWrapper To) {
+     auto Info = Get(To);
+     Info->Predecessors.push_back(From);
++  }
++
++  bool SuspendEdge(IROp_CodeBlock* From, OrderedNodeWrapper To) {
++    auto Target = IR.GetOp<IR::IROp_CodeBlock>(To);
++    return FEXCore::Utils::MacRunnerSuspendBackedgeExactFlags() &&
++           Target->GuestEntryOffset != FEXCore::Utils::NoGuestSuspendBoundary &&
++           Get(Target)->EmissionOrder <= Get(From)->EmissionOrder;
++  }
++
++  bool SuspendEdge(IROp_CodeBlock* From, const IROp_CondJump* Op) {
++    auto True = IR.GetOp<IR::IROp_CodeBlock>(Op->TrueBlock);
++    auto False = IR.GetOp<IR::IROp_CodeBlock>(Op->FalseBlock);
++    return True->GuestEntryOffset != FEXCore::Utils::NoGuestSuspendBoundary &&
++           False->GuestEntryOffset != FEXCore::Utils::NoGuestSuspendBoundary &&
++           (SuspendEdge(From, Op->TrueBlock) || SuspendEdge(From, Op->FalseBlock));
+   }
+ 
+   void AddWorklist(fextl::deque<uint32_t>& Worklist, uint32_t Block) {
+@@ -156,7 +173,7 @@
+   FlagInfo Classify(IROp_Header* Node);
+   unsigned FlagsForCondClassType(CondClass Cond);
+   bool EliminateDeadCode(IREmitter* IREmit, Ref CodeNode, IROp_Header* IROp);
+-  void FoldBranch(IREmitter* IREmit, IRListView& CurrentIR, IROp_CondJump* Op, Ref CodeNode);
++  void FoldBranch(IREmitter* IREmit, IRListView& CurrentIR, IROp_CondJump* Op, Ref CodeNode, bool PreserveFlags);
+   CondClass X86ToArmFloatCond(CondClass X86);
+   bool ProcessBlock(IREmitter* IREmit, IRListView& CurrentIR, Ref Block, ControlFlowGraph& CFG);
+   void OptimizeParity(IREmitter* IREmit, IRListView& CurrentIR, ControlFlowGraph& CFG);
+@@ -473,7 +490,8 @@
+   }
+ }
+ 
+-void DeadFlagCalculationEliminination::FoldBranch(IREmitter* IREmit, IRListView& CurrentIR, IROp_CondJump* Op, Ref CodeNode) {
++void DeadFlagCalculationEliminination::FoldBranch(IREmitter* IREmit, IRListView& CurrentIR, IROp_CondJump* Op, Ref CodeNode,
++                                                bool PreserveFlags) {
+   // Skip past StoreRegisters at the end -- they don't touch flags.
+   auto PrevWrap = CodeNode->Header.Previous;
+   while (CurrentIR.GetOp<IR::IROp_Header>(PrevWrap)->Op == OP_STOREREGISTER ||
+@@ -483,6 +501,10 @@
+ 
+   auto Prev = CurrentIR.GetOp<IR::IROp_Header>(PrevWrap);
+   if (Prev->Op == OP_AXFLAG) {
++    // AXFLAG's guest representation is also required by reconstruction.
++    if (PreserveFlags) {
++      return;
++    }
+     // Pattern match a branch fed by AXFLAG.
+     CondClass ArmCond = X86ToArmFloatCond(Op->Cond);
+     if (ArmCond == CondClass::AL) {
+@@ -515,7 +537,11 @@
+   // The compare/test/axflag sets flags but does not write registers. Flags are
+   // dead after the jump. The jump does not read flags anymore.  There is no
+   // intervening instruction. Therefore the compare is dead.
+-  IREmit->Remove(CurrentIR.GetNode(PrevWrap));
++  // The branch may still use CBZ/CBNZ, but an asynchronous context reader also
++  // consumes flags at a suspend edge. Keep the original guest flag producer.
++  if (!PreserveFlags) {
++    IREmit->Remove(CurrentIR.GetNode(PrevWrap));
++  }
+ }
+ 
+ /**
+@@ -539,8 +565,14 @@
+   if (ExitOp->Op == IR::OP_CONDJUMP) {
+     auto Op = ExitOp->C<IR::IROp_CondJump>();
+     FlagsRead = CFG.Get(Op->TrueBlock)->Flags | CFG.Get(Op->FalseBlock)->Flags;
++    if (CFG.SuspendEdge(BlockIROp, Op)) {
++      FlagsRead = FLAG_ALL;
++    }
+   } else if (ExitOp->Op == IR::OP_JUMP) {
+     FlagsRead = CFG.Get(ExitOp->Args[0])->Flags;
++    if (CFG.SuspendEdge(BlockIROp, ExitOp->Args[0])) {
++      FlagsRead = FLAG_ALL;
++    }
+   }
+ 
+   // Iterate the block in reverse
+@@ -691,6 +723,7 @@
+   CFG.Init(Worklist, CurrentIR.GetHeader()->BlockCount);
+ 
+   // Gather CFG
++  uint32_t EmissionOrder = 0;
+   for (auto [BlockNode, BlockHeader] : CurrentIR.GetBlocks()) {
+     auto Block = BlockHeader->C<IROp_CodeBlock>();
+     auto CodeLast = CurrentIR.at(Block->Last);
+@@ -706,6 +739,7 @@
+     }
+ 
+     CFG.Get(Block->ID)->Node = BlockNode;
++    CFG.Get(Block->ID)->EmissionOrder = EmissionOrder++;
+   }
+ 
+   // After processing a block, if we made progress, we must process its
+@@ -737,8 +771,9 @@
+       auto Op = ExitOp->CW<IR::IROp_CondJump>();
+       uint32_t FlagsOut = CFG.Get(Op->TrueBlock)->Flags | CFG.Get(Op->FalseBlock)->Flags;
+ 
+-      if ((FlagsOut & FLAG_NZCV) == 0 && Op->FromNZCV) {
+-        FoldBranch(IREmit, CurrentIR, Op, ExitNode);
++      const bool PreserveFlags = CFG.SuspendEdge(BlockIROp, Op);
++      if (((FlagsOut & FLAG_NZCV) == 0 || PreserveFlags) && Op->FromNZCV) {
++        FoldBranch(IREmit, CurrentIR, Op, ExitNode, PreserveFlags);
+       }
+     }
+   }
+diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -24,6 +24,7 @@
+ #include <FEXCore/fextl/string.h>
+ #include <FEXCore/fextl/vector.h>
+ #include <FEXCore/Utils/LongJump.h>
++#include <FEXCore/Utils/MacRunnerSuspend.h>
+ 
+ #include <CodeEmitter/Emitter.h>
+ 
+@@ -83,6 +84,7 @@
+   uint32_t SSANodeMultiplier {24};
+ 
+   ARMEmitter::BiDirectionalLabel* PendingTargetLabel {};
++  std::optional<uint64_t> PendingSuspendRIP {};
+   ARMEmitter::BiDirectionalLabel* PendingCallReturnTargetLabel {};
+   FEXCore::Context::ContextImpl* CTX {};
+   const FEXCore::IR::IRListView* IR {};
+@@ -621,6 +623,8 @@
+   void EmitTFCheck();
+ 
+   void EmitSuspendInterruptCheck();
++  void EmitSuspendInterruptCheckAt(uint64_t GuestRIP);
++  void EmitSuspendInterruptCheckAt(ARMEmitter::Register GuestRIP);
+ 
+   void EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF);
+ 
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -34,11 +34,17 @@
+ #include <FEXCore/Utils/Profiler.h>
+ #include <FEXCore/Utils/Telemetry.h>
+ #include <FEXCore/Utils/TypeDefines.h>
++#include <FEXCore/fextl/fmt.h>
+ #include <FEXCore/HLE/SyscallHandler.h>
+ 
+ #include <cstdio>
++#include <atomic>
+ #include <cstring>
+ #include <unistd.h>
++
++namespace FEX::Windows::Logging {
++void Raw(const char* Message);
++}
+ 
+ namespace {
+ struct DivRem {
+@@ -650,6 +656,19 @@
+   , CTX {ctx}
+   , TempCodeBufferAllocator(ctx->CPUBackendAllocator, 0) {
+ 
++#ifdef ARCHITECTURE_arm64ec
++  // Bounded startup proof of the feature path, before guest code or signals.
++  static std::atomic_flag Announced = ATOMIC_FLAG_INIT;
++  if (!Announced.test_and_set(std::memory_order_relaxed)) {
++    char Line[128];
++    const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
++      "mr-suspend-backedge: gate={} atomics={} checkpoint=CAFD\n",
++      FEXCore::Utils::MacRunnerSuspendBackedgeMode(), ctx->HostFeatures.SupportsAtomics ? 1 : 0);
++    Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  }
++#endif
++
+   RAPass = Thread->PassManager->GetPass<IR::RegisterAllocationPass>("RA");
+ 
+   RAPass->AddRegisters(IR::RegClass::GPR, GeneralRegisters.size());
+@@ -814,6 +833,32 @@
+   (void)cbz(ARMEmitter::Size::i32Bit, TMP2, &l_NoSuspend);
+   brk(SuspendMagic);
+   (void)Bind(&l_NoSuspend);
++#endif
++}
++
++// These new safepoints publish a completed guest continuation. brk #0xCAFD
++// differs from entrypoint #0xCAFE: its RIP must not be guessed from host PC.
++void Arm64JITCore::EmitSuspendInterruptCheckAt(uint64_t GuestRIP) {
++#ifdef ARCHITECTURE_arm64ec
++  ARMEmitter::ForwardLabel Continue;
++  ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
++  cbz(ARMEmitter::Size::i32Bit, TMP2.W(), &Continue);
++  LoadConstant(ARMEmitter::Size::i64Bit, TMP1, GuestRIP);
++  str(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
++  brk(0xCAFD);
++  Bind(&Continue);
++#endif
++}
++
++void Arm64JITCore::EmitSuspendInterruptCheckAt(ARMEmitter::Register GuestRIP) {
++#ifdef ARCHITECTURE_arm64ec
++  ARMEmitter::ForwardLabel Continue;
++  // Before the call-ret pop: TMP2 still has no live host target.
++  ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
++  cbz(ARMEmitter::Size::i32Bit, TMP2.W(), &Continue);
++  str(GuestRIP.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
++  brk(0xCAFD);
++  Bind(&Continue);
+ #endif
+ }
+ 
+@@ -926,6 +971,7 @@
+ 
+   PendingTargetLabel = nullptr;
+   PendingCallReturnTargetLabel = nullptr;
++  PendingSuspendRIP.reset();
+ 
+   for (auto [BlockNode, BlockHeader] : IR->GetBlocks()) {
+     auto BlockIROp = BlockHeader->CW<FEXCore::IR::IROp_CodeBlock>();
+@@ -941,7 +987,11 @@
+       // if there's a pending branch, and it is not fall-through
+       if (PendingTargetLabel && PendingTargetLabel != Target) {
+         if (PendingTargetLabel->Backward.Location) {
+-          EmitSuspendInterruptCheck();
++          if (PendingSuspendRIP) {
++            EmitSuspendInterruptCheckAt(*PendingSuspendRIP);
++          } else {
++            EmitSuspendInterruptCheck();
++          }
+         }
+         b_OrRestart(PendingTargetLabel);
+         PendingTargetLabel = nullptr;
+@@ -974,6 +1024,8 @@
+       }
+       PendingTargetLabel = nullptr;
+ 
++      PendingSuspendRIP.reset();
++
+       BindOrRestart(Target);
+     }
+ 
+@@ -997,7 +1049,11 @@
+   // Make sure last branch is generated. It certainly can't be eliminated here.
+   if (PendingTargetLabel) {
+     if (PendingTargetLabel->Backward.Location) {
+-      EmitSuspendInterruptCheck();
++      if (PendingSuspendRIP) {
++        EmitSuspendInterruptCheckAt(*PendingSuspendRIP);
++      } else {
++        EmitSuspendInterruptCheck();
++      }
+     }
+     b_OrRestart(PendingTargetLabel);
+   }
+diff --git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+@@ -236,6 +236,9 @@
+     auto RipReg = GetReg(Op->NewRIP);
+ 
+     if (Op->Hint == IR::BranchHint::Return) {
++      if (FEXCore::Utils::MacRunnerSuspendBackedgeEnabled()) {
++        EmitSuspendInterruptCheckAt(RipReg);
++      }
+       // First try to pop from the call-ret stack, otherwise follow the normal path (but ending in a ret)
+       ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
+       sub(TMP1, TMP1, RipReg.X());
+@@ -294,16 +297,28 @@
+   const auto Op = IROp->C<IR::IROp_Jump>();
+ 
+   PendingTargetLabel = JumpTarget(Op->TargetBlock);
++  auto Target = IR->GetOp<IR::IROp_CodeBlock>(Op->TargetBlock);
++  PendingSuspendRIP = FEXCore::Utils::MacRunnerSuspendBackedgeEnabled() &&
++                              Target->GuestEntryOffset != FEXCore::Utils::NoGuestSuspendBoundary
++                        ? std::optional<uint64_t> {Entry + Target->GuestEntryOffset} : std::nullopt;
+ }
+ 
+ DEF_OP(CondJump) {
+   auto Op = IROp->C<IR::IROp_CondJump>();
+ 
+   auto TrueTargetLabel = JumpTarget(Op->TrueBlock);
+-
+-  if (Op->FromNZCV) {
+-    b_OrRestart(MapCC(Op->Cond), TrueTargetLabel);
+-  } else {
++  auto FalseTargetLabel = JumpTarget(Op->FalseBlock);
++  auto TrueBlock = IR->GetOp<IR::IROp_CodeBlock>(Op->TrueBlock);
++  auto FalseBlock = IR->GetOp<IR::IROp_CodeBlock>(Op->FalseBlock);
++  const bool GuestBoundary = TrueBlock->GuestEntryOffset != FEXCore::Utils::NoGuestSuspendBoundary &&
++                             FalseBlock->GuestEntryOffset != FEXCore::Utils::NoGuestSuspendBoundary;
++
++  // The same condition emitter selects the cold continuation and the hot edge.
++  // Loads, branches and stores below preserve NZCV and every allocated register.
++  auto EmitCondition = [&](ARMEmitter::BiDirectionalLabel* Target) {
++    if (Op->FromNZCV) {
++      b_OrRestart(MapCC(Op->Cond), Target);
++    } else {
+     uint64_t Const;
+     const bool isConst = IsInlineConstant(Op->Cmp2, &Const);
+ 
+@@ -315,22 +330,56 @@
+ 
+     if (Op->Cond == IR::CondClass::EQ) {
+       LOGMAN_THROW_A_FMT(Const == 0, "CondJump: Expected 0 source");
+-      cbz_OrRestart(Size, Reg, TrueTargetLabel);
++      cbz_OrRestart(Size, Reg, Target);
+     } else if (Op->Cond == IR::CondClass::NEQ) {
+       LOGMAN_THROW_A_FMT(Const == 0, "CondJump: Expected 0 source");
+-      cbnz_OrRestart(Size, Reg, TrueTargetLabel);
++      cbnz_OrRestart(Size, Reg, Target);
+     } else if (Op->Cond == IR::CondClass::TSTZ) {
+       LOGMAN_THROW_A_FMT(Const < 64, "CondJump: Expected valid bit source");
+-      tbz_OrRestart(Reg, Const, TrueTargetLabel);
++      tbz_OrRestart(Reg, Const, Target);
+     } else if (Op->Cond == IR::CondClass::TSTNZ) {
+       LOGMAN_THROW_A_FMT(Const < 64, "CondJump: Expected valid bit source");
+-      tbnz_OrRestart(Reg, Const, TrueTargetLabel);
++      tbnz_OrRestart(Reg, Const, Target);
+     } else {
+       LOGMAN_THROW_A_FMT(false, "CondJump expected simple condition");
+     }
+-  }
+-
+-  PendingTargetLabel = JumpTarget(Op->FalseBlock);
++    }
++  };
++
++#ifdef ARCHITECTURE_arm64ec
++  if (FEXCore::Utils::MacRunnerSuspendBackedgeEnabled() && GuestBoundary &&
++      (TrueTargetLabel->Backward.Location || FalseTargetLabel->Backward.Location)) {
++    ARMEmitter::ForwardLabel Cold, Publish;
++    ARMEmitter::BiDirectionalLabel Taken;
++    ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
++    cbnz(ARMEmitter::Size::i32Bit, TMP2.W(), &Cold);
++    // Hot paths branch straight to their guest blocks. Neither traverses the
++    // cold publication; both backwards outcomes share this single poll.
++    EmitCondition(TrueTargetLabel);
++    b_OrRestart(FalseTargetLabel);
++    Bind(&Cold);
++    EmitCondition(&Taken);
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, Entry + FalseBlock->GuestEntryOffset);
++    b(&Publish);
++    BindOrRestart(&Taken);
++    LoadConstant(ARMEmitter::Size::i64Bit, TMP1, Entry + TrueBlock->GuestEntryOffset);
++    Bind(&Publish);
++    str(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
++    brk(0xCAFD);
++    // Normally the trap transfers to the dispatcher. Preserve branch semantics
++    // even if the trap handler returns immediately after the BRK.
++    EmitCondition(TrueTargetLabel);
++    b_OrRestart(FalseTargetLabel);
++    PendingTargetLabel = nullptr;
++    PendingSuspendRIP.reset();
++    return;
++  }
++#endif
++  EmitCondition(TrueTargetLabel);
++
++  PendingTargetLabel = FalseTargetLabel;
++  PendingSuspendRIP = FEXCore::Utils::MacRunnerSuspendBackedgeEnabled() && GuestBoundary
++                        ? std::optional<uint64_t> {Entry + FalseBlock->GuestEntryOffset} : std::nullopt;
+ }
+ 
+ DEF_OP(Syscall) {
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -447,11 +447,14 @@
+   return false;
+ }
+ 
+-static void ReconstructThreadState(FEXCore::Core::InternalThreadState* Thread, ARM64_NT_CONTEXT& Context) {
++static void ReconstructThreadState(FEXCore::Core::InternalThreadState* Thread, ARM64_NT_CONTEXT& Context,
++                                   bool PublishedContinuation = false) {
+   const auto& Config = SignalDelegator->GetConfig();
+   auto& State = Thread->CurrentFrame->State;
+ 
+-  State.rip = CTX->RestoreRIPFromHostPC(Thread, Context.Pc);
++  if (!PublishedContinuation) {
++    State.rip = CTX->RestoreRIPFromHostPC(Thread, Context.Pc);
++  }
+ 
+   // Spill all SRA GPRs
+   for (size_t i = 0; i < Config.SRAGPRCount; i++) {
+@@ -908,8 +911,12 @@
+ 
+   // The JIT (in CompileBlock) emits code to check the suspend doorbell at the start of every block, and run the following instruction if it is set:
+   static constexpr uint32_t SuspendTrapMagic {0xD4395FC0}; // brk #0xCAFE
+-  if (Exception->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION && *reinterpret_cast<uint32_t*>(NativeContext->Pc) == SuspendTrapMagic) {
+-    Exception::ReconstructThreadState(Thread, *NativeContext);
++  static constexpr uint32_t SuspendContinuationMagic {0xD4395FA0}; // brk #0xCAFD
++  const uint32_t Trap = Exception->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION
++                          ? *reinterpret_cast<uint32_t*>(NativeContext->Pc) : 0;
++  if (Exception->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION &&
++      (Trap == SuspendTrapMagic || Trap == SuspendContinuationMagic)) {
++    Exception::ReconstructThreadState(Thread, *NativeContext, Trap == SuspendContinuationMagic);
+     *NativeContext = Exception::StoreStateToPackedECContext(Thread, NativeContext->Fpcr, NativeContext->Fpsr);
+     LogMan::Msg::DFmt("Suspending: RIP: {:X} SP: {:X}", NativeContext->Pc, NativeContext->Sp);
+     CPUArea.Area->InSimulation = 0;

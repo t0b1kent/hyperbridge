@@ -1,0 +1,230 @@
+Subject: [PATCH 0065] EXPERIMENT: Apple compat AFPCR DAZ/FTZ restore family
+
+Gate: MACRUNNER_FEX_APPLE_AFP=1 plus verified native-thread compat admission.
+Distinct from Arm FEAT_AFP; default off.
+Native hardware sentinel: hw2-afpcr-native-20261003T081732Z, 3 equal runs.
+
+--- a/CodeEmitter/CodeEmitter/Emitter.h
++++ b/CodeEmitter/CodeEmitter/Emitter.h
+@@ -361,6 +361,8 @@
+   RNDRRS = GenSystemReg<0b11, 0b011, 0b0010, 0b0100, 0b001>,
+   NZCV = GenSystemReg<0b11, 0b011, 0b0100, 0b0010, 0b000>,
+   FPCR = GenSystemReg<0b11, 0b011, 0b0100, 0b0100, 0b000>,
++  // Apple x86 FP mode (ACTLR.EnAFP), distinct from Arm FEAT_AFP.
++  AFPCR_EL0 = GenSystemReg<3, 6, 15, 2, 5>,
+   FPSR = GenSystemReg<0b11, 0b011, 0b0100, 0b0100, 0b001>, // MacRunner: x87 fast path saves/restores the cumulative flags
+   TPIDRRO_EL0 = GenSystemReg<0b11, 0b011, 0b1101, 0b0000, 0b011>,
+   CNTFRQ_EL0 = GenSystemReg<0b11, 0b011, 0b1110, 0b0000, 0b000>,
+--- a/FEXCore/include/FEXCore/Core/HostFeatures.h
++++ b/FEXCore/include/FEXCore/Core/HostFeatures.h
+@@ -53,6 +53,9 @@
+ 
+   // Float exception behaviour
+   bool SupportsAFP {};
++  // Requires verified thread_set_x86_64_compat admission on every JIT thread.
++  // This controls AFPCR.DAZ/FTZ only; it must not enable Arm AFP optimizations.
++  bool SupportsAppleAFP {};
+   bool SupportsFloatExceptions {};
+ 
+   // Changes code generation slightly.
+--- a/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
+@@ -153,6 +153,15 @@
+ 
+   // Now save the new FPCR
+   msr(ARMEmitter::SystemRegister::FPCR, TMP1);
++
++  if (Op->SetDAZ && CTX->HostFeatures.SupportsAppleAFP) {
++    // Apple compat ignores FPCR.FZ. MXCSR.DAZ and FTZ are independent.
++    mrs(TMP1, ARMEmitter::SystemRegister::AFPCR_EL0);
++    bfxil(ARMEmitter::Size::i64Bit, TMP1, MXCSR, 6, 1);
++    lsr(ARMEmitter::Size::i64Bit, TMP2, MXCSR, 15);
++    bfi(ARMEmitter::Size::i64Bit, TMP1, TMP2, 1, 1);
++    msr(ARMEmitter::SystemRegister::AFPCR_EL0, TMP1);
++  }
+ }
+ 
+ DEF_OP(PushRoundingMode) {
+@@ -161,6 +170,10 @@
+ 
+   // Save the old rounding mode
+   mrs(Dest, ARMEmitter::SystemRegister::FPCR);
++  if (CTX->HostFeatures.SupportsAppleAFP) {
++    mrs(TMP2, ARMEmitter::SystemRegister::AFPCR_EL0);
++    bfi(ARMEmitter::Size::i64Bit, Dest, TMP2, 32, 2);
++  }
+ 
+   // vixl simulator doesn't support anything beyond ties-to-even rounding
+   if (!CTX->Config.DisableVixlIndirectCalls) [[unlikely]] {
+@@ -186,6 +199,14 @@
+ DEF_OP(PushFPCRNoFlush) {
+   auto Dest = GetReg(Node);
+   mrs(Dest, ARMEmitter::SystemRegister::FPCR);
++  if (CTX->HostFeatures.SupportsAppleAFP) {
++    // Pair the temporary software DAZ/FTZ scope with PopRoundingMode.
++    // FPCR has no architectural upper 32 bits; reserve bits32..33 in the token.
++    mrs(TMP2, ARMEmitter::SystemRegister::AFPCR_EL0);
++    bfi(ARMEmitter::Size::i64Bit, Dest, TMP2, 32, 2);
++    and_(ARMEmitter::Size::i64Bit, TMP1, TMP2, ~uint64_t(3));
++    msr(ARMEmitter::SystemRegister::AFPCR_EL0, TMP1);
++  }
+   // ARM FZ without AFP flushes inputs as well as outputs. Guest SSE controls
+   // these independently through software DAZ input and FTZ output selection.
+   and_(ARMEmitter::Size::i64Bit, TMP1, Dest, ~(uint64_t(1) << 24));
+@@ -215,7 +236,16 @@
+ 
+ DEF_OP(PopRoundingMode) {
+   auto Op = IROp->C<IR::IROp_PopRoundingMode>();
+-  msr(ARMEmitter::SystemRegister::FPCR, GetReg(Op->FPCR));
++  auto Saved = GetReg(Op->FPCR);
++  if (CTX->HostFeatures.SupportsAppleAFP) {
++    mrs(TMP1, ARMEmitter::SystemRegister::AFPCR_EL0);
++    bfxil(ARMEmitter::Size::i64Bit, TMP1, Saved, 32, 2);
++    msr(ARMEmitter::SystemRegister::AFPCR_EL0, TMP1);
++    and_(ARMEmitter::Size::i64Bit, TMP1, Saved, uint64_t(0xffffffff));
++    msr(ARMEmitter::SystemRegister::FPCR, TMP1);
++  } else {
++    msr(ARMEmitter::SystemRegister::FPCR, Saved);
++  }
+ }
+ 
+ DEF_OP(Print) {
+--- a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+@@ -697,6 +697,22 @@
+ 
+ void Arm64Emitter::FillSpecialRegs(ARMEmitter::Register TmpReg, ARMEmitter::Register TmpReg2, const FillSpecialRegsOptions& Options) {
+ #ifndef VIXL_SIMULATOR
++  if (EmitterCTX->HostFeatures.SupportsAppleAFP && Options.SetFIZ) {
++    // Restore from guest state at every full entry/refill, including context resume.
++    ldr(TmpReg2.W(), STATE.R(), offsetof(FEXCore::Core::CPUState, mxcsr));
++    rbit(ARMEmitter::Size::i32Bit, TmpReg2, TmpReg2);
++    lsr(ARMEmitter::Size::i32Bit, TmpReg2, TmpReg2, 17);
++    mrs(TmpReg, ARMEmitter::SystemRegister::FPCR);
++    bfi(ARMEmitter::Size::i64Bit, TmpReg, TmpReg2, 22, 2);
++    msr(ARMEmitter::SystemRegister::FPCR, TmpReg);
++
++    mrs(TmpReg, ARMEmitter::SystemRegister::AFPCR_EL0);
++    ldr(TmpReg2.W(), STATE.R(), offsetof(FEXCore::Core::CPUState, mxcsr));
++    bfxil(ARMEmitter::Size::i64Bit, TmpReg, TmpReg2, 6, 1);
++    lsr(ARMEmitter::Size::i64Bit, TmpReg2, TmpReg2, 15);
++    bfi(ARMEmitter::Size::i64Bit, TmpReg, TmpReg2, 1, 1);
++    msr(ARMEmitter::SystemRegister::AFPCR_EL0, TmpReg);
++  }
+   if (EmitterCTX->HostFeatures.SupportsAFP) {
+     // Enable AFP features when filling JIT state.
+     mrs(TmpReg, ARMEmitter::SystemRegister::FPCR);
+@@ -741,6 +757,12 @@
+ 
+ void Arm64Emitter::SpillStaticRegs(ARMEmitter::Register TmpReg, SpillStaticRegOptions Options) {
+ #ifndef VIXL_SIMULATOR
++  if (EmitterCTX->HostFeatures.SupportsAppleAFP) {
++    // Native callees run with both denormal controls disabled. Fill restores them.
++    mrs(TmpReg, ARMEmitter::SystemRegister::AFPCR_EL0);
++    bic(ARMEmitter::Size::i64Bit, TmpReg, TmpReg, uint64_t(3));
++    msr(ARMEmitter::SystemRegister::AFPCR_EL0, TmpReg);
++  }
+   if (EmitterCTX->HostFeatures.SupportsAFP) {
+     // Disable AFP features when spilling registers.
+     //
+--- a/Source/Windows/Common/FEXUnixLib.h
++++ b/Source/Windows/Common/FEXUnixLib.h
+@@ -7,6 +7,7 @@
+ #include "wine/unixlib.h"
+ 
+ extern "C" uint32_t MacRunnerHardwareTSOMode;
++extern "C" bool MacRunnerAppleAFPEnabled;
+ 
+ namespace FEX::Windows::UnixLib {
+ extern decltype(__wine_unix_call_dispatcher) UnixCallDispatcher;
+--- a/Source/Windows/Common/FEXUnixLib.cpp
++++ b/Source/Windows/Common/FEXUnixLib.cpp
+@@ -3,6 +3,7 @@
+ #include <FEXCore/Utils/LogManager.h>
+ 
+ #include <cstdint>
++#include <cstdlib>
+ #include <windef.h>
+ #include <winbase.h>
+ #define __WINESRC__
+@@ -21,6 +22,7 @@
+ extern "C" IMAGE_DOS_HEADER __ImageBase;
+ extern "C" {
+ uint32_t MacRunnerHardwareTSOMode {};
++bool MacRunnerAppleAFPEnabled {};
+ }
+ 
+ namespace FEX::Windows::UnixLib {
+@@ -163,6 +165,9 @@
+   FEXUnixLib_SetHardwareTSOControlArgs Args {.Enable = true};
+   const auto Status = Call(FEXUnixLibFunctions::SetHardwareTSOControl, &Args);
+   MacRunnerHardwareTSOMode = Status == 1 || Status == 2 ? static_cast<uint32_t>(Status) : 0;
++  // Initialization is before InitCore; never look up environment in a signal path.
++  const char* AppleAFP = getenv("MACRUNNER_FEX_APPLE_AFP");
++  MacRunnerAppleAFPEnabled = MacRunnerHardwareTSOMode && AppleAFP && AppleAFP[0] == '1' && !AppleAFP[1];
+ #endif
+   return MacRunnerHardwareTSOMode;
+ }
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -410,7 +410,7 @@
+   }
+ 
+   if ((Context.ContextFlags & CONTEXT_FLOATING_POINT) == CONTEXT_FLOATING_POINT) {
+-    if (MRMxcsrFlagsEnabled) {
++    if (MRMxcsrFlagsEnabled || MacRunnerAppleAFPEnabled) {
+       State.mxcsr = Context.MxCsr & 0xFFFFU;
+     }
+     // Floating-point register state
+@@ -563,7 +563,8 @@
+     // Exact inverse of Wine unwind.h:fpcsr_to_mxcsr for the six status bits.
+     // Replace host status, rather than ORing potentially unrelated host IXC.
+     ECContext.Fpsr = (Flags & 1U) | ((Flags & 2U) << 6) | ((Flags & 0x3CU) >> 1);
+-    if (MRMxcsrContextControlEnabled) {
++  }
++  if ((MRMxcsrFlagsEnabled && MRMxcsrContextControlEnabled) || MacRunnerAppleAFPEnabled) {
+       const uint32_t Mxcsr = Thread->CurrentFrame->State.mxcsr;
+       // Packed EC context is a transport, not a hardware FPCR restore. Match
+       // Wine unwind.h:mxcsr_to_fpcsr, including its independent DAZ/FZ bits.
+@@ -573,7 +574,6 @@
+                        ((Mxcsr & 0x400U) ? 0U : 0x400U) | ((Mxcsr & 0x800U) ? 0U : 0x800U) |
+                        ((Mxcsr & 0x1000U) ? 0U : 0x1000U) | ((Mxcsr & 0x2000U) << 10) |
+                        ((Mxcsr & 0x4000U) << 8) | ((Mxcsr & 0x8000U) << 9);
+-    }
+   }
+ 
+   return ECContext;
+@@ -806,6 +806,7 @@
+ 
+   {
+     auto HostFeatures = FEX::Windows::CPUFeatures::FetchHostFeatures(IsWine, FEXCore::HostFeatures::HostTypeEnum::Arm64ec);
++    HostFeatures.SupportsAppleAFP = MacRunnerAppleAFPEnabled;
+     if (FEXCore::HBX87::Stats::Enabled()) {
+       FEX::Windows::Logging::Raw(HostFeatures.SupportsAtomics ?
+         "[hb-x87-stats-init] advertised_lse=1\n" : "[hb-x87-stats-init] advertised_lse=0; use LL/SC\n");
+--- a/Source/Windows/WOW64/Module.cpp
++++ b/Source/Windows/WOW64/Module.cpp
+@@ -230,6 +230,7 @@
+ 
+   // Floating-point register state
+   const auto* XSave = reinterpret_cast<XSAVE_FORMAT*>(Context->ExtendedRegisters);
++  if (MacRunnerAppleAFPEnabled) State.mxcsr = XSave->MxCsr & 0xFFFFU;
+ 
+   CTX->SetXMMRegistersFromState(Thread, reinterpret_cast<const __uint128_t*>(XSave->XmmRegisters), nullptr);
+   memcpy(State.mm, XSave->FloatRegisters, sizeof(State.mm));
+@@ -272,6 +273,7 @@
+   // Floating-point register state
+ 
+   auto* XSave = reinterpret_cast<XSAVE_FORMAT*>(Context->ExtendedRegisters);
++  if (MacRunnerAppleAFPEnabled) XSave->MxCsr = State.mxcsr;
+ 
+   CTX->ReconstructXMMRegisters(Thread, reinterpret_cast<__uint128_t*>(XSave->XmmRegisters), nullptr);
+   memcpy(XSave->FloatRegisters, State.mm, sizeof(State.mm));
+@@ -613,6 +615,7 @@
+ 
+   {
+     auto HostFeatures = FEX::Windows::CPUFeatures::FetchHostFeatures(IsWine, FEXCore::HostFeatures::HostTypeEnum::Wow64);
++    HostFeatures.SupportsAppleAFP = MacRunnerAppleAFPEnabled;
+     if (FEXCore::HBX87::Stats::Enabled()) {
+       FEX::Windows::Logging::Raw(HostFeatures.SupportsAtomics ?
+         "[hb-x87-stats-init] advertised_lse=1\n" : "[hb-x87-stats-init] advertised_lse=0; use LL/SC\n");

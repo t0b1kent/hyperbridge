@@ -1,0 +1,44 @@
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index 2a681d884..17c1922e2 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -1025,9 +1025,10 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+         // It is potentially correctness bearing in that sense, but that is a
+         // side effect here and (if that behaviour is required) we should handle
+         // that more explicitly later.
+-        Thread->OpDispatcher->FlushRegisterCache(true);
++        const bool FaultBoundary = Thread->OpDispatcher->CanHaveSideEffects(TableInfo, DecodedInfo);
++        Thread->OpDispatcher->FlushRegisterCache(true, false, FaultBoundary);
+ 
+-        if (ExtendedDebugInfo || Thread->OpDispatcher->CanHaveSideEffects(TableInfo, DecodedInfo)) {
++        if (ExtendedDebugInfo || FaultBoundary) {
+           Thread->OpDispatcher->_GuestOpcode(InstAddress - GuestRIP);
+         }
+ 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+index 4fa1fa855..11f40e155 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -1182,7 +1182,7 @@ public:
+     _StoreContext(Size, Class, Value, Offset);
+   }
+ 
+-  void FlushRegisterCache(bool SRAOnly = false, bool MMXOnly = false) {
++  void FlushRegisterCache(bool SRAOnly = false, bool MMXOnly = false, bool FaultBoundary = false) {
+     // At block boundaries, fix up the carry flag.
+     if (!SRAOnly) {
+       RectifyCarryInvert(CFInvertedABI);
+@@ -1209,6 +1209,13 @@ public:
+       const uint64_t FPRMask = ((1ull << (FPR15Index - FPR0Index + 1)) - 1) << FPR0Index;
+ 
+       Mask &= (GPRMask | FPRMask);
++      if (FaultBoundary) {
++        // Split AVX upper halves have no SRA host-register mapping. An inline
++        // SMC fault restarts the guest instruction from CPUState, so pending
++        // upper halves must reach memory before a faultable instruction.
++        const uint64_t AVXHighMask = ((1ull << (AVXHigh15Index - AVXHigh0Index + 1)) - 1) << AVXHigh0Index;
++        Mask |= AVXHighMask;
++      }
+       Bits &= Mask;
+     }
+ 

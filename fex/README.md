@@ -8,8 +8,9 @@ Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earl
 
 - Upstream: `https://github.com/FEX-Emu/FEX`, commit `fd141ed6d721d03062619e4702bca1a0c93b6dd9`
   (6 Aug 2026, right after the FEX-2608 release).
-- Series: `patches/0001-…` to `patches/0049-…`, applied in file-name order. MacRunner 1.0.7 ships all 49;
-  the patches after 0019 marked EXPERIMENT are behind switches that are off by default.
+- Series: 55 patches in `patches/`, applied in file-name order: 0001–0049, 0055, 0056, 0065, 0075,
+  0160 and 0161. MacRunner 1.0.8 ships this 64-bit chain and the separate [WOW64 chain](wow64/README.md).
+  An EXPERIMENT label describes a source switch; the shipped defaults are specified below.
 - Build: `fex/build.sh <work-dir> [patch-count]` (llvm-mingw for the Windows halves, Xcode
   clang for the unix libraries). `MANIFEST.json` lists the expected output hashes.
 
@@ -43,6 +44,43 @@ Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earl
 | 0033–0047 | Guarded x87: fast arithmetic through the host's double with a fall-back to the exact path, x87 tag/status/FIP handling, guarded subnormal loads, FST/FSTP stores and FSCALE; 0036–0037 are tests (all off by default) | no |
 | 0048 | Floating-point switches default off; ARM64EC integer-width correction | no |
 | 0049 | Hook and alias correctness switched on automatically when the .NET runtime (`coreclr.dll`, `clrjit.dll`) is mapped | no |
+| 0055 | Darwin hardware TSO: enter the per-thread x86 compatibility mode at the Windows/host boundaries, retaining software ordering if admission fails; MacRunner 1.0.8 requests `MACRUNNER_FEX_HW_TSO=2`, `FEX_TSOENABLED=1` | no |
+| 0056 | Spill the split upper AVX register halves before an inline self-modifying-code fault can restart the guest instruction from saved state; no new switch | no |
+| 0065 | Restore independent MXCSR DAZ/FTZ state through Apple's compatibility AFPCR at load/restore and JIT entry/exit boundaries; distinct from Arm FEAT_AFP, requires native-thread admission; MacRunner 1.0.8 sets `MACRUNNER_FEX_APPLE_AFP=1` | no |
+| 0075 | BLSR/BLSMSK: the CF zero-test uses the operand width, ignoring bits 63:32 for a 32-bit operand (upstream `635befb4`); no new switch | no |
+| 0160 | After hardware-TSO admission, use single Q-register loads in the affected validation, spill/refill and copy paths; keep the software-TSO instruction path otherwise | no |
+| 0161 | Size, align and protect the JIT code-buffer guard using the host page size, and reserve more initial temporary capacity on that path; MacRunner 1.0.8 sets `MACRUNNER_HB_JIT_HOST_GUARD=1` | no |
+
+The third column above retains its historical meaning (MacRunner 1.0.2). All six new rows are shipped
+in 1.0.8. Its `ENGINE.json` also sets `FEX_SMCCHECKS=mtrack`, `FEX_HOSTFEATURES=enablecrypto`,
+`MACRUNNER_FEX_DIV_OVERFLOW_DE=1`, `MACRUNNER_FEX_SHLD16_CF=1`, `MACRUNNER_FEX_DIV_PROVEN_HIGH=1`,
+`MACRUNNER_FEX_EFLAGS_KEEP=1`, `MACRUNNER_FEX_WRITABLE_VALIDATION=2`, `MACRUNNER_FEX_RANGE_CACHE=1`,
+`MACRUNNER_FEX_CODEBUF_MAX=1`, `MACRUNNER_FEX_MONO_BP_PRECISE=1` and
+`MACRUNNER_FEX_SUSPEND_BACKEDGE=1`. Hardware-TSO request/selection does not establish architectural
+readback in a benchmark; see the dated limits in [COMPARISON.md](../COMPARISON.md).
+
+## MacRunner 1.0.8: separate 32-bit chain and reproduction
+
+The WOW64 additions are in [`wow64/patches/`](wow64/patches/), with an explicit
+[`ORDER.txt`](wow64/ORDER.txt): 0070, 0071, the product port of 0052, 0050, 0053, then 0087.
+They fix suspend/teardown locking, isolate the Darwin interrupt page, add cooperative backedge
+continuations, and preserve the current context owner on Get/Set reentry. Apply them to a separate
+tree after the common 0001–0049/0055/0056/0065/0075 base, followed by common 0160 and 0161.
+They are deliberately outside `patches/`: CI applies that directory in lexical order, which is
+not the WOW64 dependency order. [WOW64 instructions and verification](wow64/README.md).
+
+On October 5 the 55-patch common series passed the same sequential `git apply --check` / `git apply`
+test as CI on the pinned upstream. The separate WOW64 sequence also passed, including 0160/0161.
+The local archive contained no populated submodules; no patch touches a submodule.
+
+A clean Xcode Cloud Mac rebuilt both PE modules from the release source and the REPRO-109 recipe:
+`xtajit64.dll` and `xtajit.dll` match the shipped 1.0.8 bytes exactly. The unix libraries match the
+measured functions and material sections, but their whole-file hashes differ; this is not a
+byte-exact native rebuild or a semantic proof. The cloud run was `NOT_GOLDEN`; install was skipped,
+signing was not performed, and no game data was included. Full output hashes, tools and scope are
+in [`MANIFEST.json`](MANIFEST.json). The generic `build.sh` applies only `patches/`; it does not apply
+the separate WOW64 chain or implement the complete release reproduction recipe. No byte-exact
+1.0.8 result is promised from that script alone.
 
 0014–0018 were checked with the HB<->FEX oracle (72 219 x86-64 cases plus 133 division idioms, FEXCore
 built natively on macOS, one binary with the gates off and on): only the targeted cases change —
