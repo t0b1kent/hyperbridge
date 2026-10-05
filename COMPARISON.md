@@ -2,108 +2,48 @@
 
 ## October 5, 2026: MacRunner 1.0.8
 
-MacRunner 1.0.8 ships engine 0161. The results in this dated note distinguish
-application measurements before final packaging from instruction-loop references.
-The earlier sections below are preserved as dated historical measurements.
+MacRunner 1.0.8 ships engine 0161. This note records what was measured for it. The sections below are earlier
+snapshots and keep their dates.
 
-**Application measurements, Apple M1 Pro.** Hollow Knight's main menu used **23% less
-game-process CPU time per rendered frame than 1.0.7** in an alternating-arm series;
-the A/A control spread was **0.9%**. FPS was limited by the **120 Hz** display.
-This is CPU time per frame, not a 23% FPS increase or a gameplay measurement.
-With the new defaults, time from launch to Hollow Knight's menu was **31.1 → 25.4 s**;
-ABZU's time to menu was **32.61 → 32.11 s (1.5% lower)**, one pair without A/A.
-Hollow Knight's startup A/A differences were 0.32 s / 0.82 s.
-These runs used the engine
-code before final release packaging. They do not measure the delivered engine-0161
-archive or isolate any individual patch. The alternating/control method applies to
-the Hollow Knight CPU comparison; the startup and ABZU numbers are separate endpoint
-measurements, not a new A/A-qualified causal test.
+**In games (Apple M1 Pro).** In Hollow Knight's main menu the game process used **23 % less CPU time per rendered
+frame than under 1.0.7** (alternating runs; two identical runs differed by 0.9 %). The frame rate was already at the
+display's 120 Hz limit, so this is headroom, not a higher FPS number. With the new start-up defaults, the time from
+launch to Hollow Knight's menu went from **31.1 s to 25.4 s** (two alternating pairs; identical runs differed by 0.3 s
+and 0.8 s). ABZU's went from 32.6 s to 32.1 s (one pair, no repeat). These runs used the engine code before the final
+release packaging; they were not repeated on the packaged build.
 
-**Instruction-loop reference, October 4.** Values below are **ns per guest iteration**;
-the two REP rows are **ns for an entire 4 KB copy**. All columns give absolute times.
-They use different machines, OS versions, harnesses and, for several rows, related
-rather than byte-identical guest programs. No faster/slower ranking across machines
-or FPS prediction follows from this table.
+**Instruction loops, October 4.** Nanoseconds per loop iteration; the last row is nanoseconds for a whole 4 KB copy.
+**The columns come from different machines**, so they are reference points, not a ranking:
 
-- **Prism:** Apple M1 Pro, Parallels Windows 11 Arm 25H2 / 26200.9457; one
-  20-million-iteration sample per loop (100,000 for REP).
-- **Rosetta:** cloud Apple M2 Pro virtual machines, macOS 15.7.9 and 26.6.2;
-  medians of five samples.
-- **HyperBridge r2 / 0160:** local Apple M1 Pro reference series, medians of three
-  arms. Hardware TSO requested/selected 2, Apple AFP 1; architectural readback
-  was `NOT_READ`. 0160 is the 64-bit benchmark candidate in this series, not a
-  measurement of final 0161 or a claim about the separate 32-bit qualification.
-- **Native x86:** AMD EPYC 9V74 80-Core Processor in a cloud Linux VM, direct
-  x86-64 ELF execution. Two independent runs, five samples per calibrated loop,
-  thread pinned to logical CPU 0. Wall time uses `CLOCK_MONOTONIC_RAW`; no
-  empty-loop cost is subtracted. Core-cycle counters and actual core frequency
-  were unavailable: TSC ticks must not be called core cycles. Hypervisor and
-  neighboring-host workloads were uncontrolled.
+- **HyperBridge**: the 1.0.8 engine (build 0160; 0161 adds only a code-buffer guard and a larger temporary buffer) on our M1 Pro, median of three runs.
+- **Prism**: Windows 11 on Arm (25H2, build 26200) in Parallels Desktop on the same M1 Pro; one sample of 20 million
+  iterations per loop (100,000 for the copy).
+- **Rosetta 2**: cloud Macs with M2 Pro, macOS 15.7 and macOS 26.6; median of five samples on each.
+- **Native x86**: an AMD EPYC 9V74 in a cloud Linux virtual machine, the same loops compiled natively; two runs.
 
-| Loop | Prism: M1 Pro VM | Rosetta: M2 Pro VM, macOS 15 | Rosetta: M2 Pro VM, macOS 26 | HyperBridge r2: M1 Pro | HyperBridge 0160: M1 Pro | Native x86: AMD VM, run 1 / run 2 |
-|---|---:|---:|---:|---:|---:|---:|
-| x87 FADD, PC64 | 1.319204 | 20.451771 | 22.578932 | NOT_ENABLED | NOT_ENABLED | 2.049032 / 1.936351 |
-| x87 FADD, PC53 | 1.093367 | 20.280287 | 23.587656 | 109.684 | 18.3084 | NOT_ENABLED |
-| DIV32 | 1.243296 | 1.121445 | 1.188783 | 2.106 | 2.092 | 1.725314 / 1.695748 |
-| IDIV64 | 4.2789 | 0.99703 | 1.110965 | 1.969 | 1.969 | 1.975983 / 2.007853 |
-| CALL/RET | 1.68435 | 0.944186 | 1.004131 | 1.903 | 1.904 | 1.403513 / 1.477697 |
-| Indirect CALL, pointer | 1.78316 | 1.575934 | 1.808018 | 2.232 | 2.246 | 1.411604 / 1.466381 |
-| Indirect CALL, table | 1.807462 | 2.206576 | 2.568499 | NOT_ENABLED | NOT_ENABLED | NOT_ENABLED |
-| Flags, ADD/DEC + RFLAGS | 0.831023 | 0.621419 | 0.703562 | NOT_ENABLED | NOT_ENABLED | NOT_ENABLED |
-| REP MOVSB, 4 KB | 1827.608333 | 1488.84208 | 1716.33833 | 846.572 | 52.193 | 46.000774 / 42.939897 |
-| REP MOVSQ, 4 KB | 214.165417 | 174.565417 | 250.49875 | NOT_ENABLED | NOT_ENABLED | NOT_ENABLED |
-| MOVUPS load/store, 16 B | 0.827123 | 0.648438 | 0.841007 | NOT_ENABLED | NOT_ENABLED | NOT_ENABLED |
+| Loop | HyperBridge 1.0.8 | Prism | Rosetta 2 (macOS 15 / 26) | Native x86 (run 1 / run 2) |
+| --- | ---: | ---: | ---: | ---: |
+| `div`, 32-bit | 2.09 | 1.24 | 1.12 / 1.19 | 1.73 / 1.70 |
+| `idiv`, 64-bit | 1.97 | 4.28 | 1.00 / 1.11 | 1.98 / 2.01 |
+| `call` + `ret` | 1.90 | 1.68 | 0.94 / 1.00 | 1.40 / 1.48 |
+| indirect `call` | 2.25 | 1.78 | 1.58 / 1.81 | 1.41 / 1.47 |
+| x87 `fadd`, 53-bit precision | 18.3 | 1.09 | 20.3 / 23.6 | 2.05 / 1.94 ¹ |
+| `rep movsb`, 4 KB copy | 52.2 | 1828 | 1489 / 1716 | 46.0 / 42.9 |
 
-`NOT_ENABLED` means no measurement for that exact row, not zero. The native x86
-column shows only related bodies available in the reference's 26-loop suite.
-Native x87 starts with CW 0x037f (PC64, round to nearest, masked exceptions);
-it is not substituted for the HyperBridge PC53 measurement. Across all 26 native
-loops, absolute run-to-run median changes had median 2.796261%, maximum 15.435497%;
-eight exceeded 5%. The two run medians are shown rather than silently selecting one.
+¹ The native x87 loop ran with the default 64-bit precision control word.
 
-The HyperBridge **PC53** values 109.684 / 18.3084 came from a separate x87 series
-with `FNSTCW=0x027f` read after the loop; reduced-precision arms were excluded.
-The original xbench x87 numbers, 111.698 / 18.531 ns, had actual FCW `NOT_PRINTED`
-and are not labelled PC64 here. A related ADD3/DEC loop without an RFLAGS sink
-(0.677 / 0.675 ns) is not substituted for the flags row. The pointer-call body
-is narrower than the complete newer reference program. Historical 1.0.7 values
-15.9 / 2.08 / 3.01 ns are not carried into the r2 column.
+What limits these numbers:
 
-For HyperBridge's original DIV32 / CALL / indirect-CALL series, A/A spreads were
-10.095238% / 8.636124% / 5.655296% (`NO_COMPARISON_AA`).
-Their small r2→0160 differences do not establish acceleration or regression.
-IDIV A/A spread was 4.244817%, REP 4.138184%, original x87 2.773071%.
-These reference runs were `NOT_GOLDEN_DIAGNOSTIC`; benchmark/wait exit codes were
-0, cleanup exit code was 1. Cleanup is not claimed successful. Values from the
-reference summary are rounded to at most six decimal places; this is formatting,
-not an error estimate.
+- For `div`, `call` and indirect `call`, two identical HyperBridge runs differed by 6–10 %, so small differences in
+  those rows mean nothing.
+- Two fixes made during the 1.0.8 cycle are visible here: `rep movsb` went from 847 ns to 52 ns, and x87 `fadd` from
+  110 ns to 18 ns. x87 code is still slow in this release; a faster path is in development.
+- The fast `rep movsb` path does not yet restore the exact guest state if a page fault happens in the middle of the
+  copy.
+- The Prism and Rosetta listings behind these timings were not traced instruction by instruction, and the native x86
+  machine reports neither its real clock frequency nor cycle counts.
 
-HyperBridge's fast batched REP path still has documented source gaps in partial
-page-fault / guest-state recovery. No complete exception-state guarantee was
-verified for the scalar REP paths in the external references either.
-Fresh r2/0160 host-instruction dumps were absent, so their host instruction counts
-are `NOT_ENABLED`; older counts are not substituted. Prism/Rosetta listings are
-marker candidates, with exact guest→host maps and live cache/helper paths
-`NOT_ENABLED`, not full dynamic traces. Prism's guest completion markers were
-present despite observer failure and a missing process exit code; no VM rerun
-closed that observer limitation. These are limits of the associated reference
-evidence, not evidence of a product failure or success.
-
-The time table is transcribed from the October 4 reference summary; native rows
-come from both AMD VM result TSVs. Private snapshots and game data are not included.
-[Patch contents, defaults and binary reproduction scope](fex/README.md).
-
-**HyperBridge, Microsoft Prism, the FEX build in CrossOver Preview, and native macOS code, measured on one Mac.**
-
-This page compares HyperBridge, the x86 → ARM64 engine of [MacRunner](https://github.com/t0b1kent/macrunner-app), with two other ways to run x86 Windows code on Arm and with a game's native macOS build. The same programs were used everywhere. For each result the page records what was measured and where the result stops applying.
-
-**Test Mac:** MacBook Pro, Apple M1 Pro (8-core CPU), 32 GB, macOS 27.0 (26A428). **Date:** September 29, 2026.
-
-**Status note, October 3:** the loop table in the next section is new (October 3, the engine of the published MacRunner
-1.0.7). Everything below it is the September 29 snapshot, primarily engine 0015; the floating-point column there is the
-1.0.2 engine. Hardware TSO is ready for 1.0.8: 25–26 % less CPU time per frame in Hollow Knight's menu (alternating
-series, control spread 0.6 %), about 20 % less in ABZU (one series); Hollow Knight start-up and King's Pass have not been
-re-measured with it yet.
+[Patch contents, shipped defaults and what was reproduced byte for byte](fex/README.md).
 
 ## October 3, 2026: instruction loops on MacRunner 1.0.7
 

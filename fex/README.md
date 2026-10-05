@@ -73,11 +73,11 @@ On October 5 the 55-patch common series passed the same sequential `git apply --
 test as CI on the pinned upstream. The separate WOW64 sequence also passed, including 0160/0161.
 The local archive contained no populated submodules; no patch touches a submodule.
 
-A clean Xcode Cloud Mac rebuilt both PE modules from the release source and the REPRO-109 recipe:
+A clean Xcode Cloud Mac rebuilt both PE modules from the release source with our reproduction recipe (not yet published):
 `xtajit64.dll` and `xtajit.dll` match the shipped 1.0.8 bytes exactly. The unix libraries match the
 measured functions and material sections, but their whole-file hashes differ; this is not a
-byte-exact native rebuild or a semantic proof. The cloud run was `NOT_GOLDEN`; install was skipped,
-signing was not performed, and no game data was included. Full output hashes, tools and scope are
+byte-exact native rebuild or a semantic proof. The cloud run was a diagnostic build: nothing was installed or
+signed, and no game data was involved. Full output hashes, tools and scope are
 in [`MANIFEST.json`](MANIFEST.json). The generic `build.sh` applies only `patches/`; it does not apply
 the separate WOW64 chain or implement the complete release reproduction recipe. No byte-exact
 1.0.8 result is promised from that script alone.
