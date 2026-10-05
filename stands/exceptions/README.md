@@ -1,0 +1,36 @@
+# Exception delivery probes (Windows x86-64)
+
+Published October 6, 2026. MIT-licensed source of four small programs that deliberately raise processor exceptions and print
+what a Windows x86-64 program observes: the exception code and parameters, the faulting address, the register and flag
+context handed to vectored and structured handlers, and the x87/SSE state before and after a handled exception.
+
+They exist to answer one question for an x86-to-ARM translator: *does a translated program see the same thing that it sees
+on a real x86-64 processor under Windows?* The workflow in `.github/workflows/exceptions-windows.yml` builds the probes
+with a pinned llvm-mingw toolchain and runs them on GitHub-hosted Windows x64 machines; the outputs are kept as workflow
+artifacts and serve as the reference. The same binaries can then be run under a translator and compared field by field.
+
+| Program | What it covers |
+| --- | --- |
+| `exception_context64-v1` | access violations, breakpoint, divide error, invalid opcode, privileged instructions, single step, guard page, `RaiseException`; context capture; flag bits |
+| `exception_context64-v3` | 64 kinds: the above plus `int` forms, non-canonical addresses, misaligned SSE operands, debug registers set from a handler, x87 state across a handled exception, fast-fail |
+| `exception_context64-v4` | the `int 2d` cells of v3 with a bounded stop, to tell apart "next byte skipped" from "next byte executed" |
+| `eflags_highbits64` | which upper flag bits survive `pushfq`/`popfq` |
+
+## Running it yourself
+
+On Windows x64 with llvm-mingw (release 20260505, UCRT, x86_64) unpacked:
+
+```powershell
+.\stands\exceptions\run-windows.ps1 -Toolchain C:\path\to\llvm-mingw-20260505-ucrt-x86_64 -Out C:\path\to\output
+```
+
+Every cell runs in its own process with a time limit. `outcomes.txt` in each output directory lists the exit code of every
+run; the text files next to it hold the raw program output. `machine.txt` records the processor name and the Windows build.
+
+## Limits
+
+- GitHub-hosted machines are virtual machines; the processor model is whatever the pool provides and is recorded per run.
+  Exception delivery is done by the real Windows kernel on a real x86-64 processor, but CPUID answers and timing may be
+  shaped by the hypervisor.
+- A green workflow means the probes ran, not that any translator matches them. The comparison is a separate step.
+- No compiled files, game data or third-party code are stored here.

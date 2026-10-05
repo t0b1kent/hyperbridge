@@ -7,6 +7,7 @@ Published October 2, 2026. The CPU and 32-bit stands contain our MIT-licensed so
 | CPU | x64 block comparison, independent VEX and MXCSR rules, mutation controls | [CPU README](cpu/README.md) |
 | 32-bit | x86 state/memory comparison at two guest bases, independent integer x87 rules | [32-bit README](x86-32/README.md) |
 | Synthetic CPU | 408 generated x86-64 cells run in a native FEXCore build of `fex/patches` and compared with Unicorn; runs in CI on every patch change | [Synthetic README](synthetic/README.md) |
+| Exceptions | what a Windows x86-64 program observes when the processor raises an exception: codes, addresses, handler context, x87/SSE state; built and run on Windows x64 machines in CI | [Exceptions README](exceptions/README.md) |
 
 Run the reference examples from each stand's directory. Native replay needs a separately prepared compatible FEX build. A synthetic example does not qualify the private multi-title gates. Read the limits before interpreting a PASS: ABI integration, full games and product FPS are outside these stands.
 
