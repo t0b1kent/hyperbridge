@@ -18,48 +18,57 @@ Since 28 September 2026, HyperBridge has two parts:
 
 ## How HyperBridge compares
 
-The same programs on one Mac (Apple M1 Pro, macOS 27). Loop rows: **3 October 2026**, the engine of the published
-[MacRunner 1.0.7](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.7), **Microsoft Prism** (Windows 11 on Arm
-in a Parallels Desktop virtual machine) and the **FEX build in CrossOver Preview**, measured in one session. Loop times
-are nanoseconds per iteration, the median of three alternating runs of [`xbench`](bench/xbench/) (the same binary in all
-three); lower is better, the best value is in bold. Hollow Knight rows are still the September 29 measurement.
+The same programs on one Mac (Apple M1 Pro, macOS 27). Loop rows: **5 October 2026**, the engine inside the published
+[MacRunner 1.0.8](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.8) package, **Microsoft Prism** (Windows 11 on Arm
+in a Parallels Desktop virtual machine) and the **FEX build in CrossOver Preview**, measured in one session of alternating
+runs of [`xbench`](bench/xbench/) (the same binary in all three). Loop times are nanoseconds per iteration; lower is
+better, the best value is in bold (values within 2 % of the best share it). The Mac was busy with other work during the
+session, so each value is the fastest of eight runs: other load can only slow a loop down. Prism and CrossOver did not
+change since the quiet session of October 3, and they come out within 4 % of that day's values, except CrossOver's
+`rep movsb` (738 against 855).
 
-| | HyperBridge (MacRunner 1.0.7) | Microsoft Prism | CrossOver Preview (FEX) | Native macOS |
+| | HyperBridge (MacRunner 1.0.8) | Microsoft Prism | CrossOver Preview (FEX) | Native macOS |
 | --- | ---: | ---: | ---: | ---: |
-| `rep movsb`, 4 KB copy | **51** | 1 572 | 855 | — |
-| x87 `fadd` | 15.9 | **0.94** | 111 | — |
-| `cvttss2si` / `cvttsd2si` (float → integer) | **0.67 / 0.67** | 1.02 / 1.02 | 0.72 / 0.72 | — |
-| `addsubps` | **0.95** | 2.26 | 0.96 | — |
-| 12 other integer and SSE loops | same as CrossOver (within 4 %) | 2 % faster to 36 % slower | same as HyperBridge | — |
-| `div r32` / `idiv r64` | 2.08 / 3.01 ¹ | 1.06 / 1.88 | **0.88 / 0.72** | — |
-| `call`+`ret` / indirect `call` | 1.91 / 2.23 | **1.46 / 1.48** | 1.93 / 2.25 | — |
+| `rep movsb`, 4 KB copy | **52** | 1 617 | 738 | — |
+| x87 `fadd` | 18.5 | **0.95** | 113 | — |
+| `cvttss2si` / `cvttsd2si` (float → integer) | **0.65 / 0.66** | 1.02 / 1.00 | 0.71 / 0.71 | — |
+| `addsubps` | **0.95** | 2.24 | **0.94** | — |
+| 12 other integer and SSE loops | same as CrossOver (within 4 %) | 1 % faster to 39 % slower | same as HyperBridge | — |
+| `div r32` / `idiv r64` | 2.16 / 1.96 ¹ | 1.03 / 1.95 | **0.88 / 0.70** | — |
+| `call`+`ret` / indirect `call` | 1.91 / 2.20 | **1.47 / 1.48** | 1.91 / 2.22 | — |
 | SSE results matching x86 hardware (of 74) | 12 ² | **38** | 16 | — |
 | SSE4.2, AES, PCLMULQDQ reported in `CPUID` | yes (since 1.0.5) | yes | yes | — |
-| Hardware x86 memory ordering (TSO) | on by default in 1.0.8; October 3 measurement below ³ | not examined | yes | not needed |
-| Hollow Knight start-up: Unity's own `Loaded All Assemblies` time | 2.22 s ⁴ | 0.26 s | 0.41 s | **0.17 s** |
-| Hollow Knight in King's Pass: FPS · CPU time per frame | 113–117 · 14.9–15.0 ms ⁴ | not comparable (virtual GPU) | 113–119 · 15.4–16.1 ms | **120 · 6.4–6.8 ms** |
+| Hardware x86 memory ordering (TSO) | yes, by default since 1.0.8 ³ | not examined | yes | not needed |
+| Hollow Knight start-up: Unity's own `Loaded All Assemblies` time | 0.34–0.43 s ⁴ | 0.26 s | 0.41 s | **0.17 s** |
+| Hollow Knight in King's Pass: FPS · CPU time per frame | not re-measured on 1.0.8 ⁵ | not comparable (virtual GPU) | 113–119 · 15.4–16.1 ms | **120 · 6.4–6.8 ms** |
 
-¹ Slower than in the September 29 build (1.01 / 0.97): since 1.0.6 the exact overflow check
-(`MACRUNNER_FEX_DIV_OVERFLOW_DE=1`) is on by default, so that a division overflow raises the same exception as on
-Windows. Patch 0017 (`MACRUNNER_FEX_DIV_PROVEN_HIGH`, exact) brings `cqo; idiv` from 3.05 to 2.01 ns; it is off in 1.0.7.
-² Measured on the engine of MacRunner 1.0.2; not re-measured for 1.0.7. A switchable exact mode exists; it stays off by
+¹ The exact overflow check (`MACRUNNER_FEX_DIV_OVERFLOW_DE=1`, on since 1.0.6) makes a division overflow raise the same
+exception as on Windows. Since 1.0.8 `MACRUNNER_FEX_DIV_PROVEN_HIGH` (patch 0017, exact) is on as well: `cqo; idiv` went
+from 3.01 ns in 1.0.7 to 1.96 ns. `div r32` did not change.
+² Measured on the engine of MacRunner 1.0.2; not re-measured since. A switchable exact mode exists; it stays off by
 default because it costs about 3 ns per SSE instruction.
-³ Measured on MacRunner 1.0.7 with hardware TSO switched on: Hollow Knight's main menu needs 25–26 % less CPU time per
-frame (alternating series, control spread 0.6 %), ABZU about 20 % less (one series). `MACRUNNER_FEX_HW_TSO=0` turns it off.
-⁴ September 29, engine 0015, software memory ordering. Re-measurement on 1.0.7 with hardware TSO is scheduled.
+³ Against 1.0.7, which ordered memory in software, Hollow Knight's main menu needs 23 % less CPU time per frame
+(alternating runs, control spread 0.9 %). `MACRUNNER_FEX_HW_TSO=0` turns the hardware mode off.
+⁴ October 5, two runs of the 1.0.8 engine code before the final packaging, with the start-up defaults that ship in 1.0.8
+(1.23 s and 1.30 s without them; 2.22 s on September 29). Prism, CrossOver and native values are from September 29.
+⁵ The September 29 measurement, on engine 0015 with software memory ordering, was 113–117 FPS and 14.9–15.0 ms.
 
-**Where HyperBridge is ahead.** `rep movsb` copies 17 times faster than in CrossOver's FEX and 31 times faster than in
-Prism. x87 arithmetic runs 7 times faster than in CrossOver's FEX. Float → integer conversions are 7 % faster than in
-CrossOver's FEX and 1.5 times faster than in Prism; `addsubps` is 2.4 times faster than in Prism. On the 12 other simple
-loops HyperBridge matches CrossOver's FEX within 4 % and is faster than Prism on 9 of them, by up to 36 %.
+**Where HyperBridge is ahead.** `rep movsb` copies about 14 times faster than in CrossOver's FEX and 31 times faster
+than in Prism. x87 arithmetic runs 6 times faster than in CrossOver's FEX. Float → integer conversions are 7 % faster
+than in CrossOver's FEX and 1.5 times faster than in Prism; `addsubps` is 2.4 times faster than in Prism. On the 12
+other simple loops HyperBridge matches CrossOver's FEX within 4 % and is faster than Prism on 6 of them, by up to 39 %;
+the other 6 are within 1 %.
 
-**Where it is behind.** Prism needs 17 times less time per x87 `fadd`, 24 % less per call and return and 34 % less per
-indirect call, and matches x86 floating-point results more often. CrossOver's FEX divides 2.4 times (`div r32`) and
-4.2 times (`idiv r64`) faster (see ¹). In the September 29 measurement Hollow Knight started much slower (2.2 s against 0.41 s);
-most of that gap was software memory ordering, which the hardware TSO mode now replaces.
+**Where it is behind.** Prism needs 19 times less time per x87 `fadd`, 23 % less per call and return and 33 % less per
+indirect call, and matches x86 floating-point results more often. `div r32` is 2.1 times faster in Prism and 2.5 times
+faster in CrossOver's FEX; `idiv r64` now equals Prism but is 2.8 times faster in CrossOver's FEX (see ¹). Hollow
+Knight's assembly loading is now in the range CrossOver's FEX showed on September 29 (0.41 s), still behind Prism
+(0.26 s) and the native build (0.17 s).
 
-In five loop rows one of the three HyperBridge runs was disturbed by background load (spread 68–97 %); the medians above
-are not affected. Per-run values and spreads are in the full results.
+**What changed since 1.0.7.** `idiv r64` is 35 % faster. x87 `fadd` is 16 % slower (18.5 ns against 15.9 ns); a
+faster x87 path is in development. With the new start-up defaults Hollow Knight loads its assemblies in 0.34–0.43 s
+against 1.23–1.30 s without them on the same engine code. The other loops are within about 4 % of the October 3 values,
+which is below what two separate sessions can resolve.
 
 [Full results, conditions and limits →](COMPARISON.md)
 

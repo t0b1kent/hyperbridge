@@ -12,6 +12,49 @@ launch to Hollow Knight's menu went from **31.1 s to 25.4 s** (two alternating p
 and 0.8 s). ABZU's went from 32.6 s to 32.1 s (one pair, no repeat). These runs used the engine code before the final
 release packaging; they were not repeated on the packaged build.
 
+**Instruction loops, October 5, one session on the released package.** Same Mac (Apple M1 Pro, macOS 27); the same
+`xbench.exe` (SHA-256 `cc743db6…`) in all three environments. HyperBridge is the engine inside the published MacRunner
+1.0.8 package (`xtajit64.dll` `eb13ea53…`), started with the package's own settings, under its own Wine. Prism is
+Windows 11 on Arm build 26200 in Parallels Desktop. CrossOver Preview 20260821 (`xtajit64.dll` `fc0f0a37…`), arm64
+bottle. Two alternating series, 11:24–11:30 and 11:38–11:58 local time, eight runs per environment (orders
+`P H C C H P P H C` and `P H C C H P H C P C P H P H C`).
+
+The Mac was busy during both series (load average 7–13; before 12 of the 15 runs of the second series less than 60 % of
+the processor was idle), and some single runs were slowed by half or more. Other load can only slow a loop down, so the table
+gives **the fastest of the eight runs** for each environment — within a run, the fastest sample `xbench` reports — and,
+next to it, the median of the eight per-run minima as a measure of how much the runs scattered. The same rule is applied
+to all three environments. As a check of the method: Prism and CrossOver did not change since the quiet session of
+October 3 (below), and their fastest values here are within 4 % of that day's medians, except CrossOver's `rep movsb`
+(738 against 855). Values are ns per iteration; the last two rows are ns per 4 KB copy and per `fadd`.
+
+| Loop | Prism | runs | HyperBridge 1.0.8 | runs | CrossOver | runs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| empty loop (`dec`/`jnz`) | 0.750 | 8 (median of run minima 0.772) | 0.680 | 8 (median of run minima 0.708) | **0.679** | 8 (median of run minima 0.704) |
+| `add` | 0.751 | 8 (median of run minima 0.786) | **0.672** | 8 (median of run minima 0.724) | 0.676 | 8 (median of run minima 0.724) |
+| `imul` | 0.962 | 8 (median of run minima 1.006) | 0.974 | 8 (median of run minima 1.020) | **0.959** | 8 (median of run minima 1.008) |
+| `cvttss2si` | 1.016 | 8 (median of run minima 1.040) | **0.654** | 8 (median of run minima 0.708) | 0.707 | 8 (median of run minima 0.757) |
+| `cvtss2si` | 1.024 | 8 (median of run minima 1.066) | 0.737 | 8 (median of run minima 0.776) | **0.710** | 8 (median of run minima 0.744) |
+| `cvttsd2si` (64-bit) | 1.003 | 8 (median of run minima 1.058) | **0.659** | 8 (median of run minima 0.716) | 0.707 | 8 (median of run minima 0.750) |
+| `cvttps2dq` | 0.747 | 8 (median of run minima 0.766) | 0.684 | 8 (median of run minima 0.714) | **0.669** | 8 (median of run minima 0.722) |
+| `cvtdq2ps` | 0.958 | 8 (median of run minima 1.011) | 0.951 | 8 (median of run minima 0.990) | **0.939** | 8 (median of run minima 1.006) |
+| `addsubps` | 2.237 | 8 (median of run minima 2.328) | 0.947 | 8 (median of run minima 0.986) | **0.938** | 8 (median of run minima 1.004) |
+| `addss` (dependent chain) | 1.596 | 8 (median of run minima 1.656) | 1.580 | 8 (median of run minima 1.632) | **1.563** | 8 (median of run minima 1.682) |
+| `mulps` | 1.272 | 8 (median of run minima 1.329) | 1.269 | 8 (median of run minima 1.334) | **1.252** | 8 (median of run minima 1.389) |
+| `pshufb` | 0.753 | 8 (median of run minima 0.774) | 0.695 | 8 (median of run minima 0.708) | **0.680** | 8 (median of run minima 0.728) |
+| `xor edx,edx` + `div ecx` | 1.031 | 8 (median of run minima 1.079) | 2.164 | 8 (median of run minima 2.199) | **0.880** | 8 (median of run minima 0.917) |
+| `cqo` + `idiv rcx` | 1.949 | 8 (median of run minima 2.064) | 1.959 | 8 (median of run minima 2.065) | **0.704** | 8 (median of run minima 0.752) |
+| `crc32` | **0.941** | 8 (median of run minima 1.019) | 0.945 | 8 (median of run minima 1.033) | 0.948 | 8 (median of run minima 1.018) |
+| `popcnt` | 1.031 | 8 (median of run minima 1.072) | **0.784** | 8 (median of run minima 0.834) | 0.786 | 8 (median of run minima 0.831) |
+| `lock xadd` | **7.017** | 8 (median of run minima 7.544) | 7.061 | 8 (median of run minima 7.494) | 7.109 | 8 (median of run minima 7.518) |
+| `call` / `ret` | **1.472** | 8 (median of run minima 1.547) | 1.913 | 8 (median of run minima 1.999) | 1.911 | 8 (median of run minima 2.018) |
+| `call r11` (indirect) | **1.481** | 8 (median of run minima 1.598) | 2.203 | 8 (median of run minima 2.325) | 2.219 | 8 (median of run minima 2.329) |
+| `rep movsb`, 4 KB copy | 1 617 | 8 (median of run minima 1 721) | **52.0** | 8 (median of run minima 54.8) | 738 | 8 (median of run minima 871) |
+| x87 `fadd` | **0.950** | 8 (median of run minima 1.040) | 18.5 | 8 (median of run minima 19.1) | 113 | 8 (median of run minima 117) |
+
+Against the October 3 table for 1.0.7 (medians of three runs in a quiet session): `cqo` + `idiv rcx` went from 3.01 to
+1.96 ns (patch 0017, `MACRUNNER_FEX_DIV_PROVEN_HIGH`, is on by default in 1.0.8), x87 `fadd` from 15.9 to 18.5 ns, and
+the other loops are within about 4 %, which two separate sessions cannot resolve.
+
 **Instruction loops, October 4.** Nanoseconds per loop iteration; the last row is nanoseconds for a whole 4 KB copy.
 **The columns come from different machines**, so they are reference points, not a ranking:
 
