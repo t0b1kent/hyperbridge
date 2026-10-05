@@ -52,8 +52,22 @@ if [ ! -d "$src/.git" ]; then
 
   patches=("$here"/patches/*.patch)
   if [ -n "$count" ]; then patches=("${patches[@]:0:$count}"); fi
-  GIT_COMMITTER_NAME="fex/build.sh" GIT_COMMITTER_EMAIL="build@localhost" \
-    git -C "$src" am -q --keep-non-patch --committer-date-is-author-date "${patches[@]}"
+  # Patches up to 0049 are mailbox files (git format-patch) and keep their author and date.
+  # Later patches are published as plain diffs, byte-identical to the MacRunner release source
+  # archive; they are applied and recorded with a fixed identity and date so the result is the
+  # same on every machine.
+  for p in "${patches[@]}"; do
+    if head -n 1 "$p" | grep -q '^From [0-9a-f]\{40\} '; then
+      GIT_COMMITTER_NAME="fex/build.sh" GIT_COMMITTER_EMAIL="build@localhost" \
+        git -C "$src" am -q --keep-non-patch --committer-date-is-author-date "$p"
+    else
+      git -C "$src" apply --index "$p"
+      GIT_AUTHOR_NAME="fex/build.sh" GIT_AUTHOR_EMAIL="build@localhost" \
+      GIT_COMMITTER_NAME="fex/build.sh" GIT_COMMITTER_EMAIL="build@localhost" \
+      GIT_AUTHOR_DATE="2026-10-05T00:00:00Z" GIT_COMMITTER_DATE="2026-10-05T00:00:00Z" \
+        git -C "$src" commit -q -m "$(basename "$p" .patch)"
+    fi
+  done
 fi
 git -C "$src" log --oneline -1
 
