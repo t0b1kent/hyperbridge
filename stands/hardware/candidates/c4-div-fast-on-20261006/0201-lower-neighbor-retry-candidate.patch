@@ -1,0 +1,56 @@
+diff --git a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+--- a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
++++ b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+@@ -342,6 +342,19 @@
+   return Result;
+ }
+ 
++// Once upper is committed, retry only lower on nonoperand container conflicts.
++// Does not establish atomicity against accesses to guest operand bits.
++template<typename T>
++static bool StoreLowerPreservingNeighbors(T& Expected, T Desired, uint64_t Addr, T GuestMask,
++                                          bool (*Store)(T&, T, uint64_t)) {
++  const T OriginalGuestBits = Expected & GuestMask;
++  while (true) {
++    if (Store(Expected, Desired, Addr)) return true;
++    if ((Expected & GuestMask) != OriginalGuestBits) return false;
++    Desired = (Desired & GuestMask) | (Expected & static_cast<T>(~GuestMask));
++  }
++}
++
+ static bool RunCASPAL(uint64_t* GPRs, uint32_t Size, uint32_t DesiredReg1, uint32_t DesiredReg2, uint32_t ExpectedReg1,
+                       uint32_t ExpectedReg2, uint32_t AddressReg, uint32_t* StrictSplitLockMutex) {
+   if (MacRunnerSplitAtomicExact) StrictSplitLockMutex = &MacRunnerExactSplitLock;
+@@ -425,7 +438,9 @@
+ 
+         if (TmpExpected == TmpActual) {
+           if (StoreCAS64(TmpExpectedUpper, TmpDesiredUpper, AddrUpper)) {
+-            if (StoreCAS64(TmpExpectedLower, TmpDesiredLower, Addr)) {
++            if (MacRunnerSplitAtomicExact ?
++                StoreLowerPreservingNeighbors(TmpExpectedLower, TmpDesiredLower, Addr, static_cast<uint64_t>(Mask), StoreCAS64) :
++                StoreCAS64(TmpExpectedLower, TmpDesiredLower, Addr)) {
+               // Stored successfully
+               return true;
+             } else {
+@@ -971,7 +986,9 @@
+         uint32_t TmpDesiredUpper = TmpDesired >> 32;
+ 
+         if (StoreCAS32(TmpExpectedUpper, TmpDesiredUpper, AddrUpper)) {
+-          if (StoreCAS32(TmpExpectedLower, TmpDesiredLower, Addr)) {
++          if (MacRunnerSplitAtomicExact ?
++              StoreLowerPreservingNeighbors(TmpExpectedLower, TmpDesiredLower, Addr, static_cast<uint32_t>(Mask), StoreCAS32) :
++              StoreCAS32(TmpExpectedLower, TmpDesiredLower, Addr)) {
+             // Stored successfully
+             return Expected;
+           } else {
+@@ -1209,7 +1226,9 @@
+       bool Tear = false;
+       if (TmpExpected == TmpActual) {
+         if (StoreCAS64(TmpExpectedUpper, TmpDesiredUpper, AddrUpper)) {
+-          if (StoreCAS64(TmpExpectedLower, TmpDesiredLower, Addr)) {
++          if (MacRunnerSplitAtomicExact ?
++              StoreLowerPreservingNeighbors(TmpExpectedLower, TmpDesiredLower, Addr, static_cast<uint64_t>(Mask), StoreCAS64) :
++              StoreCAS64(TmpExpectedLower, TmpDesiredLower, Addr)) {
+             // Stored successfully
+             return Expected;
+           } else {

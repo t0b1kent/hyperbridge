@@ -1,0 +1,49 @@
+diff --git a/FEXCore/Source/Interface/Core/CodeCache.cpp b/FEXCore/Source/Interface/Core/CodeCache.cpp
+--- a/FEXCore/Source/Interface/Core/CodeCache.cpp
++++ b/FEXCore/Source/Interface/Core/CodeCache.cpp
+@@ -302,7 +302,7 @@ struct CodeCacheHeader {
+   static constexpr std::array<char, 4> ExpectedMagic = {'F', 'X', 'C', 'C'};
+ };
+ 
+-static std::array<uint8_t,20> CurrentCacheVersion() {
++static std::array<uint8_t,20> CurrentCacheVersion(bool Guest64) {
+   std::array<uint8_t,20> Version;
+   static_assert(GIT_HASH.size()==Version.size());
+   std::ranges::copy(GIT_HASH,Version.begin());
+@@ -326,6 +326,18 @@ static std::array<uint8_t,20> CurrentCacheVersion() {
+       if(Phase && Phase[0]>='1' && Phase[0]<='7' && !Phase[1]) Version[10]^=Phase[0];
+     }
+   }
++  if (Guest64 && FEXCore::HBX87::Guest64Enabled()) {
++    // 0214: FAST64 changes emitted regions independently of INLINE_REGION.
++    // OFF, Guest32, and older readers must not accept this code cache.
++    Version[9] ^= 0x64;
++    constexpr uint8_t Guest64Revision[8]={'X','8','7','G','0','0','0','1'};
++    for(unsigned i=0;i<8;++i) Version[12+i]^=Guest64Revision[i];
++    if(!FEXCore::HBX87::InlineRegionEnabled() && !FEXCore::HBX87::StaticRegsEnabled()) {
++      if(FEXCore::HBX87::Stats::Enabled()) Version[11]^=0x53;
++      const char* Phase=std::getenv("MACRUNNER_HB_X87_REGION_FAULT_PHASE");
++      if(Phase && Phase[0]>='1' && Phase[0]<='7' && !Phase[1]) Version[10]^=Phase[0];
++    }
++  }
+   return Version;
+ }
+ 
+@@ -340,7 +352,7 @@ bool CodeCache::SaveData(Core::InternalThreadState& Thread, int fd, const Execut
+   // Write file header
+   CodeCacheHeader header {};
+   static_assert(GIT_HASH.size() == sizeof(header.FEXVersion));
+-  std::ranges::copy(CurrentCacheVersion(), header.FEXVersion);
++  std::ranges::copy(CurrentCacheVersion(CTX.Config.Is64BitMode()), header.FEXVersion);
+   header.NumBlocks = LookupCache.BlockList.size();
+   header.NumCodePages = LookupCache.CodePages.size();
+   header.CodeBufferSize = FEXCore::AlignUp(CTX.LatestOffset, Utils::FEX_PAGE_SIZE);
+@@ -604,7 +616,7 @@ CodeCache::LoadCache(std::span<std::byte> CacheFile, const ExecutableFileInfo& F
+     return nullptr;
+   }
+ 
+-  const auto ExpectedVersion=CurrentCacheVersion();
++  const auto ExpectedVersion=CurrentCacheVersion(CTX.Config.Is64BitMode());
+   if (!std::ranges::equal(header.FEXVersion, ExpectedVersion)) {
+     LogMan::Msg::IFmt("Cache generated from old FEX version {:02x}, current is {:02x}; skipping", fmt::join(header.FEXVersion, ""),
+                        fmt::join(ExpectedVersion, ""));

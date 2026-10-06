@@ -1,0 +1,214 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -62,7 +62,17 @@
+ int MacRunnerDivProvenHighMode() {
+   static const int Mode = [] {
+     const char* Value = getenv("MACRUNNER_FEX_DIV_PROVEN_HIGH");
+     return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
+   }();
+   return Mode;
++}
++
++// A faulting unlocked RMW store must still expose the previous guest flags.
++// This diagnostic mode commits the existing flag recipe only after the store.
++static bool MacRunnerRMWFlagsAfterStore() {
++  static const bool Enabled = [] {
++    const char* Value = getenv("MACRUNNER_FEX_RMW_FLAGS_AFTER_STORE");
++    return Value && Value[0] == '1' && !Value[1];
++  }();
++  return Enabled;
+ }
+@@ -3172,6 +3182,7 @@
+   Ref Result;
+   const auto Size = GetSrcBitSize(Op);
+   const bool IsLocked = DestIsLockedMem(Op);
++  const bool StoredBeforeFlags = !IsLocked && !Op->Dest.IsGPR() && MacRunnerRMWFlagsAfterStore();
+ 
+   if (IsLocked) {
+     HandledLock = true;
+@@ -3180,6 +3191,11 @@
+     Dest = _AtomicFetchAdd(OpSizeFromSrc(Op), Constant(1), DestAddress);
+   } else {
+     Dest = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = Size >= 32});
++  }
++
++  if (StoredBeforeFlags) {
++    Result = Add(std::max(OpSizeFromSrc(Op), OpSize::i32Bit), Dest, 1);
++    StoreResultGPR(Op, Result);
+   }
+ 
+   CalculateDeferredFlags();
+@@ -3201,7 +3217,7 @@
+     Result = CalculateFlags_ADD(OpSizeFromSrc(Op), Dest, Constant(1), false);
+   }
+ 
+-  if (!IsLocked) {
++  if (!IsLocked && !StoredBeforeFlags) {
+     StoreResultGPR(Op, Result);
+   }
+ }
+@@ -3211,6 +3227,7 @@
+   Ref Result;
+   const auto Size = GetSrcBitSize(Op);
+   const bool IsLocked = DestIsLockedMem(Op);
++  const bool StoredBeforeFlags = !IsLocked && !Op->Dest.IsGPR() && MacRunnerRMWFlagsAfterStore();
+ 
+   if (IsLocked) {
+     HandledLock = true;
+@@ -3221,6 +3238,11 @@
+     Dest = _AtomicFetchAdd(OpSizeFromSrc(Op), Constant(Size == 64 ? -1 : ((1ULL << Size) - 1)), DestAddress);
+   } else {
+     Dest = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = Size >= 32});
++  }
++
++  if (StoredBeforeFlags) {
++    Result = Sub(std::max(OpSizeFromSrc(Op), OpSize::i32Bit), Dest, 1);
++    StoreResultGPR(Op, Result);
+   }
+ 
+   CalculateDeferredFlags();
+@@ -3242,7 +3264,7 @@
+     Result = CalculateFlags_SUB(OpSizeFromSrc(Op), Dest, Constant(1), false);
+   }
+ 
+-  if (!IsLocked) {
++  if (!IsLocked && !StoredBeforeFlags) {
+     StoreResultGPR(Op, Result);
+   }
+ }
+@@ -5024,17 +5046,32 @@
+   }
+ 
+   const auto OpSize = RoundedSize;
++  const bool StoredBeforeFlags = !DestIsLockedMem(Op) && !Op->Dest.IsGPR() && MacRunnerRMWFlagsAfterStore();
++  if (StoredBeforeFlags && ALUIROp == IR::IROps::OP_ANDWITHFLAGS) {
++    ALUIROp = IR::IROps::OP_AND;
++  }
+   uint64_t Mask = Size == OpSize::i64Bit ? ~0ull : ((1ull << IR::OpSizeAsBits(Size)) - 1);
+   if (IsConst && Const == Mask && !DestIsLockedMem(Op) && ALUIROp == IR::IROps::OP_XOR && Size >= OpSize::i32Bit) {
+     Result = _Not(OpSize, Dest);
+   } else if (IsConst && Const == Mask && !DestIsLockedMem(Op) && ALUIROp == IR::IROps::OP_AND) {
+     Result = Dest;
++  } else if (StoredBeforeFlags && ALUIROp == IR::IROps::OP_ADD) {
++    // The stored result must use the arithmetic emitter's immediate contract.
++    // DeriveOp(_AndWithFlags) can inline a negative logical immediate that is
++    // not encodable by ADD. It was dead before the flags result replaced it.
++    Result = Add(OpSize, Dest, Src);
++  } else if (StoredBeforeFlags && ALUIROp == IR::IROps::OP_SUB) {
++    Result = Sub(OpSize, Dest, Src);
+   } else {
+     DeriveOp(ALUOp, ALUIROp, _AndWithFlags(OpSize, Dest, Src));
+     Result = ALUOp;
+   }
+ 
+-  // Flags set
++  if (StoredBeforeFlags) {
++    StoreResultGPR_WithOpSize(Op, Op->Dest, Result, ResultSize, OpSize::iInvalid, MemoryAccessType::DEFAULT);
++  }
++
++  // Flags set. In the precise RMW mode the faultable store has completed.
+   switch (ALUIROp) {
+   case FEXCore::IR::IROps::OP_ADD: Result = CalculateFlags_ADD(Size, Dest, Src); break;
+   case FEXCore::IR::IROps::OP_SUB: Result = CalculateFlags_SUB(Size, Dest, Src); break;
+@@ -5053,7 +5090,7 @@
+   default: break;
+   }
+ 
+-  if (!DestIsLockedMem(Op)) {
++  if (!DestIsLockedMem(Op) && !StoredBeforeFlags) {
+     StoreResultGPR_WithOpSize(Op, Op->Dest, Result, ResultSize, OpSize::iInvalid, MemoryAccessType::DEFAULT);
+   }
+ }
+diff --git a/FEXCore/Source/Interface/IR/Passes/RegisterAllocationPass.cpp b/FEXCore/Source/Interface/IR/Passes/RegisterAllocationPass.cpp
+--- a/FEXCore/Source/Interface/IR/Passes/RegisterAllocationPass.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/RegisterAllocationPass.cpp
+@@ -18,6 +18,7 @@
+ #include <FEXCore/fextl/vector.h>
+ #include <bit>
+ #include <cstdint>
++#include <cstdlib>
+ #include <array>
+ #include <cstdlib>
+ 
+@@ -26,5 +27,53 @@
+ namespace FEXCore::IR {
+ namespace {
++  // Same guest-memory family as 0176. A fault reads the old fixed PF/AF
++  // state, even without an explicit LoadPF/LoadAF in the normal IR path.
++  bool MayFaultGuestMemoryForFlags(IROps Op) {
++    switch (Op) {
++    case OP_LOADMEM:
++    case OP_LOADMEMPAIR:
++    case OP_STOREMEM:
++    case OP_STOREMEMPAIR:
++    case OP_STOREMEMX87SVEOPTPREDICATE:
++    case OP_LOADMEMX87SVEOPTPREDICATE:
++    case OP_LOADMEMTSO:
++    case OP_STOREMEMTSO:
++    case OP_VLOADVECTORMASKED:
++    case OP_VSTOREVECTORMASKED:
++    case OP_VLOADVECTORGATHERMASKED:
++    case OP_VLOADVECTORGATHERMASKEDQPS:
++    case OP_VLOADVECTORELEMENT:
++    case OP_VSTOREVECTORELEMENT:
++    case OP_VBROADCASTFROMMEM:
++    case OP_PUSH:
++    case OP_PUSHTWO:
++    case OP_RMWHANDLE:
++    case OP_POP:
++    case OP_POPTWO:
++    case OP_MEMSET:
++    case OP_MEMCPY:
++    case OP_CACHELINECLEAR:
++    case OP_CACHELINECLEAN:
++    case OP_CACHELINEZERO:
++    case OP_VSTORENONTEMPORAL:
++    case OP_VSTORENONTEMPORALPAIR:
++    case OP_VLOADNONTEMPORAL:
++    case OP_CAS:
++    case OP_CASPAIR:
++    case OP_ATOMICSWAP:
++    case OP_ATOMICFETCHADD:
++    case OP_ATOMICFETCHSUB:
++    case OP_ATOMICFETCHAND:
++    case OP_ATOMICFETCHCLR:
++    case OP_ATOMICFETCHOR:
++    case OP_ATOMICFETCHXOR:
++    case OP_ATOMICFETCHNEG:
++      return true;
++    default:
++      return false;
++    }
++  }
++
+   // A scalar conversion already clears its unused lanes. When the legacy SSE
+   // destination is proven zero, inserting into that zero vector is redundant.
+   // Keep guest register stores in place: memory faults still observe the state
+@@ -694,7 +743,10 @@
+ void ConstrainedRAPass::Run(IREmitter* IREmit_) {
+   FEXCORE_PROFILE_SCOPED("PassManager::RA");
+ 
++  const char* RMWFlagsMode = std::getenv("MACRUNNER_FEX_RMW_FLAGS_AFTER_STORE");
++  const bool PreciseRMWFlags = RMWFlagsMode && RMWFlagsMode[0] == '1' && !RMWFlagsMode[1];
++
+   CVTSIZeroFolded = FoldZeroCVTSI(IREmit_);
+   IREmit = IREmit_;
+   auto IR_ = IREmit->ViewIR();
+   IR = &IR_;
+@@ -613,6 +665,15 @@
+ 
+           PreferredReg[IR->GetID(Node).Value] = Reg;
+           GetClass(Reg)->RegToSSA[Reg.Reg] = CodeNode;
++        }
++
++        if (PreciseRMWFlags && MayFaultGuestMemoryForFlags(IROp->Op)) {
++          // The implicit fault reader forbids hoisting an AF/PF assignment
++          // across memory, including assignment of a faultable load's result.
++          // Keep the other fixed-register affinities unchanged.
++          auto& Fixed = Classes[FEXCore::ToUnderlying(RegClass::GPRFixed)];
++          Fixed.RegToSSA[Fixed.Count - 2] = CodeNode;
++          Fixed.RegToSSA[Fixed.Count - 1] = CodeNode;
+         }
+ 
+         // Coalescing an SRA store is equivalent to hoisting the store,

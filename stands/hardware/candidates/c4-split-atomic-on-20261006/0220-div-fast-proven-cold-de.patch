@@ -1,0 +1,164 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -66,6 +66,18 @@
+   }();
+   return Mode;
+ }
++
++// Experimental only: leave the accepted engine and the existing gate-off IR untouched.
++// Proven register DIV/IDIV branches to cold #DE blocks before either output is written.
++// ARM zero division does not trap; signed overflow also needs an explicit check.
++int MacRunnerDivFastMode() {
++  static const int Mode = [] {
++    const char* Value = getenv("MACRUNNER_FEX_DIV_FAST");
++    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
++  }();
++  return Mode;
++}
++std::atomic<uint64_t> MacRunnerDivFastUsed {0};
+ 
+ namespace FEXCore::IR {
+ 
+@@ -3891,11 +3903,15 @@
+   return Fault ? _Select(GetGPROpSize(), OpSize::i64Bit, CondClass::NEQ, Fault, Constant(0), Old, New) : New;
+ }
+ 
+-void OpDispatchBuilder::RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond, bool ClassifyCause) {
++void OpDispatchBuilder::RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond, bool ClassifyCause,
++                                         bool ColdTail, uint16_t KnownCause) {
+   const auto GPRSize = GetGPROpSize();
+ 
+-  auto FaultBlock = CreateNewCodeBlockAfter(GetCurrentBlock());
+-  auto ContinueBlock = CreateNewCodeBlockAfter(FaultBlock);
++  const auto PreviousBlock = GetCurrentBlock();
++  auto FaultBlock = CreateNewCodeBlockAfter(PreviousBlock);
++  // Inserting the continuation second after PreviousBlock places it before the
++  // fault block. The normal branch falls through, rather than jumping over #DE.
++  auto ContinueBlock = ColdTail ? CreateNewCodeBlockAfter(PreviousBlock) : CreateNewCodeBlockAfter(FaultBlock);
+ 
+   CondJump(Value, Constant(0), FaultBlock, ContinueBlock, Cond);
+ 
+@@ -3934,11 +3950,38 @@
+     StartNewBlock();
+     Raise(1);
+   } else {
+-    Raise(0);
++    Raise(KnownCause);
+   }
+ 
+   SetCurrentCodeBlock(ContinueBlock);
+   StartNewBlock();
++}
++
++void OpDispatchBuilder::RaiseProvenDivideErrorBeforeWrite(FEXCore::X86Tables::DecodedOp Op, bool Signed) {
++  const auto Size = OpSizeFromSrc(Op);
++  // These conditions are established by the caller; memory divisors retain the
++  // old single-read implementation, because FEX SSA definitions are block-local.
++  LOGMAN_THROW_A_FMT(Op->Dest.IsGPR() && Size >= OpSize::i32Bit, "DIV-FAST requires a proven register dividend");
++  CalculateDeferredFlags();
++  RaiseDivideErrorIf(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags), CondClass::EQ, false, true, 0);
++  if (Signed) {
++    // On #DE the original guest flags must remain recoverable. Flag-free EOR,
++    // ADD, ORR, CBZ costs four instructions rather than CMN/CCMP/B.EQ's three,
++    // and avoids unconditional MRS/MSR of NZCV on the successful division path.
++    const uint64_t IntMin = uint64_t {1} << (IR::OpSizeAsBits(Size) - 1);
++    Ref NotIntMin = _Xor(Size, LoadGPRRegister(X86State::REG_RAX), Constant(IntMin));
++    Ref NotMinusOne = _Add(Size, LoadSourceGPR(Op, Op->Dest, Op->Flags), Constant(1));
++    RaiseDivideErrorIf(Op, _Or(Size, NotIntMin, NotMinusOne), CondClass::EQ, false, true, 1);
++  }
++  const uint64_t Used = MacRunnerDivFastUsed.fetch_add(1, std::memory_order_relaxed) + 1;
++  if ((Used & (Used - 1)) == 0) {
++    char Line[160];
++    const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
++      "macrunner-fex-div-fast: used={} rip={:x} op={} size={} cold-tail=1 flags-preserved=1\n",
++      Used, Op->PC, Signed ? "idiv" : "div", unsigned {IR::OpSizeAsBits(Size)});
++    Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  }
+ }
+ 
+ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+@@ -3957,9 +4000,13 @@
+   const bool OverflowDE = MacRunnerDivOverflowMode();
+   // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): decided before the zero-divisor branch below ends the block.
+   const bool ProvenHigh = DivHighHalfProven(Op, false);
++  const bool L4 = OverflowDE && ProvenHigh && MacRunnerDivFastMode() && Op->Dest.IsGPR();
+   Ref Divisor {};
+   Ref Fault {};
+-  if (OverflowDE) {
++  if (L4) {
++    RaiseProvenDivideErrorBeforeWrite(Op, false);
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++  } else if (OverflowDE) {
+     CalculateDeferredFlags();
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+     Fault = ProvenHigh ? DivideErrorConditionProven(Op, Divisor, false) : DivideErrorCondition(Op, Divisor, false);
+@@ -4003,7 +4050,7 @@
+     StoreGPRRegister(X86State::REG_RDX, KeepOnDivideError(Fault, Src2, Remainder), Size);
+   }
+ 
+-  if (OverflowDE) {
++  if (OverflowDE && !L4) {
+     RaiseDivideErrorIf(Op, Fault, CondClass::NEQ, true);
+   }
+ }
+@@ -4023,9 +4070,13 @@
+   const bool OverflowDE = MacRunnerDivOverflowMode();
+   // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): decided before the zero-divisor branch below ends the block.
+   const bool ProvenHigh = DivHighHalfProven(Op, true);
++  const bool L4 = OverflowDE && ProvenHigh && MacRunnerDivFastMode() && Op->Dest.IsGPR();
+   Ref Divisor {};
+   Ref Fault {};
+-  if (OverflowDE) {
++  if (L4) {
++    RaiseProvenDivideErrorBeforeWrite(Op, true);
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++  } else if (OverflowDE) {
+     CalculateDeferredFlags();
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+     Fault = ProvenHigh ? DivideErrorConditionProven(Op, Divisor, true) : DivideErrorCondition(Op, Divisor, true);
+@@ -4070,7 +4121,7 @@
+     StoreGPRRegister(X86State::REG_RDX, KeepOnDivideError(Fault, Src2, Remainder), Size);
+   }
+ 
+-  if (OverflowDE) {
++  if (OverflowDE && !L4) {
+     RaiseDivideErrorIf(Op, Fault, CondClass::NEQ, true);
+   }
+ }
+@@ -4940,6 +4991,18 @@
+   // garbage on the input. The zero extension would be pointless.
+   Ref Src = LoadSourceGPR(Op, Op->Src[SrcIndex], Op->Flags, {.Align = OpSize::i8Bit, .AllowUpperGarbage = true});
+   StoreResultGPR(Op, Src, OpSize::i8Bit);
++  if (MacRunnerDivFastMode() && MacRunnerDivProvenHighMode() && Op->Dest.IsGPR() && !Op->Dest.Data.GPR.HighBits &&
++      OpSizeFromDst(Op) >= OpSize::i32Bit) {
++    const auto Dest = Op->Dest.Data.GPR.GPR;
++    if (Dest == X86State::REG_RDX && Op->Src[SrcIndex].IsLiteral() && Op->Src[SrcIndex].Literal() == 0) {
++      MacRunnerZeroRDXEnd = Op->PC + Op->InstSize;
++    } else if (Dest == X86State::REG_RAX && MacRunnerZeroRDXEnd != 0 && MacRunnerZeroRDXEnd == Op->PC) {
++      // The measured xbench idiom inserts MOV EAX between XOR EDX and DIV ECX.
++      // This single adjacent MOV cannot change RDX. Do not extend sign proofs:
++      // changing RAX after CDQ/CQO could invalidate the high-half relationship.
++      MacRunnerZeroRDXEnd = Op->PC + Op->InstSize;
++    }
++  }
+ }
+ 
+ void OpDispatchBuilder::MOVGPRNTOp(OpcodeArgs) {
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -473,7 +473,10 @@
+   Ref KeepOnDivideError(Ref Fault, Ref Old, Ref New);
+   // Raises #DE when Value <Cond> 0, then continues in a fresh block. MacRunner: with ClassifyCause the fault reports a
+   // zero divisor (ErrorRegister 0) apart from a quotient overflow (ErrorRegister 1).
+-  void RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond, bool ClassifyCause = false);
++  void RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond, bool ClassifyCause = false,
++                          bool ColdTail = false, uint16_t KnownCause = 0);
++  // Experimental default-off DIV-FAST: fault before write-back, register divisor only.
++  void RaiseProvenDivideErrorBeforeWrite(FEXCore::X86Tables::DecodedOp Op, bool Signed);
+   void BSFOp(OpcodeArgs);
+   void BSROp(OpcodeArgs);
+   void CMPXCHGOp(OpcodeArgs);
+

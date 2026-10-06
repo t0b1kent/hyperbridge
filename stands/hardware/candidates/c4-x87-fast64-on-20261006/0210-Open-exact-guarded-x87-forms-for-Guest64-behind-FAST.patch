@@ -1,0 +1,103 @@
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -1256,7 +1256,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+       // A PE32 bank crosses GPR leaf blocks too: their fallthrough RIP
+       // and flags remain observable on asynchronous recovery.
+       bool X87RecoveryBoundaries = FEXCore::HBX87::StaticRegsEnabled() && !Config.Is64BitMode();
+-      if (FEXCore::HBX87::InlineRegionEnabled() ||
++      if (FEXCore::HBX87::RegionEnabled(!Config.Is64BitMode()) ||
+           (FEXCore::HBX87::StaticRegsEnabled() && !Config.Is64BitMode())) {
+         const auto FirstX87 = reinterpret_cast<uintptr_t>(X86Tables::X87F80Ops.data());
+         for (size_t i = 0; i < InstsInBlock; ++i) {
+diff --git a/FEXCore/Source/Interface/Core/HBX87Emit.inl b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87Emit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+@@ -78,7 +78,7 @@ auto HBCount = [&](unsigned id, ARMEmitter::VRegister Value) {
+ // FPSR, precision reduction or exception state is touched. The usual x87
+ // push/stack fault handling remains in the frontend. FILD m64 uses its old
+ // exact integer IR; FI arithmetic shares these same 16/32-bit converter forms.
+-if (FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode() &&
++if (FEXCore::HBX87::ExactFormsEnabled(!CTX->Config.Is64BitMode()) &&
+     IROp->Op == IR::OP_F80CVTTOINT) {
+   const auto Cvt = IROp->C<IR::IROp_F80CVTToInt>();
+   if (Cvt->SrcSize == IR::OpSize::i16Bit || Cvt->SrcSize == IR::OpSize::i32Bit) {
+@@ -105,7 +105,7 @@ if (FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode() &&
+ }
+ // Exact binary32/64 -> F80 for normal or signed-zero inputs. Specials/subnormals
+ // retain the original converter. No additional guest memory read.
+-const bool HBStaticLoad = FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode();
++const bool HBStaticLoad = FEXCore::HBX87::ExactFormsEnabled(!CTX->Config.Is64BitMode());
+ if ((FEXCore::HBX87::Enabled() || HBStaticLoad) && IROp->Op==IR::OP_F80CVTTO) {
+   const auto Cvt=IROp->C<IR::IROp_F80CVTTo>();
+   if(Cvt->SrcSize==IR::OpSize::i32Bit || Cvt->SrcSize==IR::OpSize::i64Bit) {
+diff --git a/FEXCore/Source/Interface/Core/HBX87IR.h b/FEXCore/Source/Interface/Core/HBX87IR.h
+--- a/FEXCore/Source/Interface/Core/HBX87IR.h
++++ b/FEXCore/Source/Interface/Core/HBX87IR.h
+@@ -34,7 +34,18 @@ inline bool StaticRegsEnabled() {
+  static const bool v=Gate("MACRUNNER_HB_X87_STATIC_REGS");return v;
+ #endif
+ }
+-inline bool ArithmeticEnabled(bool Guest32 = false) { return Enabled() || InlineRegionEnabled() || (Guest32 && StaticRegsEnabled()); }
++// 0210: Guest64 exact forms keep RAW80 authoritative. Never reserve the
++// PE32 persistent bank: v24-v31 are Guest64 XMM8-XMM15.
++inline bool Guest64Enabled() {
++#ifdef VIXL_SIMULATOR
++ return false;
++#else
++ static const bool v=Gate("MACRUNNER_HB_X87_FAST64");return v;
++#endif
++}
++inline bool ExactFormsEnabled(bool Guest32) { return Guest32 ? StaticRegsEnabled() : Guest64Enabled(); }
++inline bool RegionEnabled(bool Guest32) { return InlineRegionEnabled() || (!Guest32 && Guest64Enabled()); }
++inline bool ArithmeticEnabled(bool Guest32 = false) { return Enabled() || InlineRegionEnabled() || ExactFormsEnabled(Guest32); }
+ inline constexpr uint8_t InlineExactKindBit = 0x80;
+ inline bool Supports(IR::IROps op) {
+   return op==IR::OP_F80ADD||op==IR::OP_F80SUB||op==IR::OP_F80MUL||op==IR::OP_F80DIV||op==IR::OP_F80SQRT;
+@@ -53,7 +64,7 @@ IR::Ref Emit(Builder& B,IR::IROps op,IR::Ref a,IR::Ref d,bool Guest32 = false) {
+   const auto Q=IR::OpSize::i128Bit, D=IR::OpSize::i64Bit;
+   GuardIR<Builder> g{B};
+   IR::Ref cw=B._LoadContextGPR(IR::OpSize::i16Bit,offsetof(FEXCore::Core::CPUState,FCW));
+-  if(InlineRegionEnabled() || (Guest32 && StaticRegsEnabled())) return B._HBX87FastCW(a,d,cw,uint8_t(k)|InlineExactKindBit);
++  if(InlineRegionEnabled() || ExactFormsEnabled(Guest32)) return B._HBX87FastCW(a,d,cw,uint8_t(k)|InlineExactKindBit);
+   static const bool early=Gate("MACRUNNER_HB_X87_EARLY_FCW");
+   if(early) return B._HBX87FastCW(a,d,cw,uint8_t(k));
+   IR::Ref as=B._VExtractToGPR(Q,D,a,0),ae=B._VExtractToGPR(Q,D,a,1);
+diff --git a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+@@ -5,7 +5,7 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+   using namespace FEXCore::Core::X87Region;
+   using Size = ARMEmitter::Size;
+   const bool StaticMode = FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode();
+-  if ((!FEXCore::HBX87::InlineRegionEnabled() && !StaticMode) || SingleInst ||
++  if ((!FEXCore::HBX87::RegionEnabled(!CTX->Config.Is64BitMode()) && !StaticMode) || SingleInst ||
+       X87Recipes.size()+(StaticMode ? 80 : 10)>MaxRecipes) return false;
+   const char* FaultSetting=std::getenv("MACRUNNER_HB_X87_REGION_FAULT_PHASE");
+   const unsigned FaultPhase=FaultSetting && FaultSetting[0]>='1' && FaultSetting[0]<='7' && !FaultSetting[1] ? FaultSetting[0]-'0' : 0;
+diff --git a/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl b/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+@@ -3,7 +3,7 @@
+ // FST/FSTP m32/m64: exact integer conversion, no speculative FP/NZCV writes.
+ // The static Guest32 mode reuses this converter for real memory forms; it does
+ // not require the DEC/JNZ arithmetic-loop qualifier or a double input value.
+-const bool HBStaticStore = FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode();
++const bool HBStaticStore = FEXCore::HBX87::ExactFormsEnabled(!CTX->Config.Is64BitMode());
+ if (((FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STORE")) || HBStaticStore) && IROp->Op == IR::OP_F80CVT &&
+     (IROp->Size == IR::OpSize::i32Bit || IROp->Size == IR::OpSize::i64Bit)) {
+   const bool D = IROp->Size == IR::OpSize::i64Bit;
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+@@ -104,8 +104,8 @@ void OpDispatchBuilder::FILD(OpcodeArgs) {
+   // implementation. Keep the normal push/tag path and the old IR byte-for-byte
+   // when STATIC is off. FILD m64 retains its existing exact integer IR: the
+   // common F80CVTToInt interpreter ABI only accepts 16/32-bit operands.
+-  if (!ReducedPrecisionMode && GetGPROpSize() == OpSize::i32Bit &&
+-      FEXCore::HBX87::StaticRegsEnabled() && ReadWidth != OpSize::i64Bit) {
++  if (!ReducedPrecisionMode &&
++      FEXCore::HBX87::ExactFormsEnabled(GetGPROpSize() == OpSize::i32Bit) && ReadWidth != OpSize::i64Bit) {
+     _PushStack(_F80CVTToInt(Data, ReadWidth), Invalid(), OpSize::iInvalid);
+     return;
+   }

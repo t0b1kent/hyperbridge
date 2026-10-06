@@ -1,0 +1,121 @@
+diff --git a/FEXCore/Source/Interface/Core/CodeCache.cpp b/FEXCore/Source/Interface/Core/CodeCache.cpp
+--- a/FEXCore/Source/Interface/Core/CodeCache.cpp
++++ b/FEXCore/Source/Interface/Core/CodeCache.cpp
+@@ -330,7 +330,7 @@ static std::array<uint8_t,20> CurrentCacheVersion(bool Guest64) {
+     // 0214: FAST64 changes emitted regions independently of INLINE_REGION.
+     // OFF, Guest32, and older readers must not accept this code cache.
+     Version[9] ^= 0x64;
+-    constexpr uint8_t Guest64Revision[8]={'X','8','7','G','0','0','0','1'};
++    constexpr uint8_t Guest64Revision[8]={'X','8','7','G','0','0','0','2'};
+     for(unsigned i=0;i<8;++i) Version[12+i]^=Guest64Revision[i];
+     if(!FEXCore::HBX87::InlineRegionEnabled() && !FEXCore::HBX87::StaticRegsEnabled()) {
+       if(FEXCore::HBX87::Stats::Enabled()) Version[11]^=0x53;
+diff --git a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+@@ -7,8 +7,25 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+  const auto A=GetVReg(Op->X80Src1),D=GetVReg(Op->X80Src2),Dst=GetVReg(Node);
+  const auto CW=GetReg(Op->ControlWord);
+  const bool InlineExact=(Op->Kind&FEXCore::HBX87::InlineExactKindBit)!=0;
+- const auto kind=static_cast<FEXCore::HBX87::Kind>(Op->Kind&~FEXCore::HBX87::InlineExactKindBit);
++ const auto kind=static_cast<FEXCore::HBX87::Kind>(Op->Kind&FEXCore::HBX87::ArithmeticKindMask);
+  LOGMAN_THROW_A_FMT(kind<=FEXCore::HBX87::Sqrt,"Invalid HB x87 opcode");
++ if(Op->Kind&FEXCore::HBX87::RegionOnlyKindBit) {
++   // Whole-block qualification already declined this candidate. Preserve
++   // the original RAW80 fallback, including FCW and sticky exception flags.
++   if(kind==FEXCore::HBX87::Sqrt) {
++     IR::IROp_F80SQRT Original; std::memset(&Original,0,sizeof(Original));
++     Original.Header=*IROp;Original.Header.Op=IR::OP_F80SQRT;
++     Original.X80Src=Op->X80Src1;
++     Op_Unhandled(&Original.Header,Node);
++   } else {
++     IR::IROp_F80Add Original; std::memset(&Original,0,sizeof(Original));
++     Original.Header=*IROp;
++     Original.Header.Op=kind==FEXCore::HBX87::Add?IR::OP_F80ADD:kind==FEXCore::HBX87::Sub?IR::OP_F80SUB:kind==FEXCore::HBX87::Mul?IR::OP_F80MUL:IR::OP_F80DIV;
++     Original.X80Src1=Op->X80Src1;Original.X80Src2=Op->X80Src2;
++     Op_Unhandled(&Original.Header,Node);
++   }
++   return;
++ }
+  ForwardLabel PreSlow,FPCRSlow,RangeSlow,Path53,Path24,Done;
+  ForwardLabel PC64Slow,RCSlow,UnmaskedSlow,ReservedSlow,Disabled24Slow;
+  // Exact operations preserve sticky FSW, and C1 must already be clear.
+diff --git a/FEXCore/Source/Interface/Core/HBX87IR.h b/FEXCore/Source/Interface/Core/HBX87IR.h
+--- a/FEXCore/Source/Interface/Core/HBX87IR.h
++++ b/FEXCore/Source/Interface/Core/HBX87IR.h
+@@ -50,8 +50,12 @@ inline bool Guest64Enabled() {
+ // experiment and the accepted Guest32 bank remain independent.
+ inline bool ExactFormsEnabled(bool Guest32) { return Guest32 && StaticRegsEnabled(); }
+ inline bool RegionEnabled(bool Guest32) { return InlineRegionEnabled() || (!Guest32 && Guest64Enabled()); }
+-inline bool ArithmeticEnabled(bool Guest32 = false) { return Enabled() || InlineRegionEnabled() || ExactFormsEnabled(Guest32); }
++inline bool ArithmeticEnabled(bool Guest32 = false) { return Enabled() || RegionEnabled(Guest32) || ExactFormsEnabled(Guest32); }
+ inline constexpr uint8_t InlineExactKindBit = 0x80;
++// 0215: retain a semantic candidate for whole-loop qualification without
++// emitting a guard, a double path, or speculative arithmetic per operation.
++inline constexpr uint8_t RegionOnlyKindBit = 0x40;
++inline constexpr uint8_t ArithmeticKindMask = 0x3f;
+ inline bool Supports(IR::IROps op) {
+   return op==IR::OP_F80ADD||op==IR::OP_F80SUB||op==IR::OP_F80MUL||op==IR::OP_F80DIV||op==IR::OP_F80SQRT;
+ }
+@@ -70,6 +74,7 @@ IR::Ref Emit(Builder& B,IR::IROps op,IR::Ref a,IR::Ref d,bool Guest32 = false) {
+   GuardIR<Builder> g{B};
+   IR::Ref cw=B._LoadContextGPR(IR::OpSize::i16Bit,offsetof(FEXCore::Core::CPUState,FCW));
+   if(InlineRegionEnabled() || ExactFormsEnabled(Guest32)) return B._HBX87FastCW(a,d,cw,uint8_t(k)|InlineExactKindBit);
++  if(!Guest32 && Guest64Enabled()) return B._HBX87FastCW(a,d,cw,uint8_t(k)|InlineExactKindBit|RegionOnlyKindBit);
+   static const bool early=Gate("MACRUNNER_HB_X87_EARLY_FCW");
+   if(early) return B._HBX87FastCW(a,d,cw,uint8_t(k));
+   IR::Ref as=B._VExtractToGPR(Q,D,a,0),ae=B._VExtractToGPR(Q,D,a,1);
+diff --git a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+@@ -83,9 +83,9 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+       if(Math || !HaveMarker) return false;
+       Math=Op->C<IR::IROp_HBX87FastCW>();
+       if(!(Math->Kind&FEXCore::HBX87::InlineExactKindBit) ||
+-          (Math->Kind&~FEXCore::HBX87::InlineExactKindBit)>unsigned(Arithmetic::Sqrt) || ExprFor(Math->ControlWord).T!=Expr::CW) return false;
++          (Math->Kind&FEXCore::HBX87::ArithmeticKindMask)>unsigned(Arithmetic::Sqrt) || ExprFor(Math->ControlWord).T!=Expr::CW) return false;
+       const auto A=V[GetVReg(Math->X80Src1).Idx()];
+-      const auto B=(Math->Kind&~FEXCore::HBX87::InlineExactKindBit)==unsigned(Arithmetic::Sqrt)?A:V[GetVReg(Math->X80Src2).Idx()];
++      const auto B=(Math->Kind&FEXCore::HBX87::ArithmeticKindMask)==unsigned(Arithmetic::Sqrt)?A:V[GetVReg(Math->X80Src2).Idx()];
+       if(!A.Known || A.Result || !B.Known || B.Result) return false;
+       ASlot=A.Slot; BSlot=B.Slot; MathPC=CurrentPC; MathIndex=Ops.size()-1;
+       V[GetVReg(Node).Idx()]={true,true,0}; break;
+@@ -132,7 +132,7 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+     default: return false;
+     }
+   }
+-  if(!Branch || (!StaticMode && ASlot==BSlot && (Math->Kind&~FEXCore::HBX87::InlineExactKindBit)!=unsigned(Arithmetic::Sqrt)) ||
++  if(!Branch || (!StaticMode && ASlot==BSlot && (Math->Kind&FEXCore::HBX87::ArithmeticKindMask)!=unsigned(Arithmetic::Sqrt)) ||
+       (DSlot!=ASlot && DSlot!=BSlot)) return false;
+   const auto FalseID=IR->GetOp<IR::IROp_CodeBlock>(Branch->FalseBlock)->ID;
+   for(auto [OtherNode,OtherHeader]:IR->GetBlocks()) {
+@@ -162,7 +162,7 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+   }
+   str(Counter.W(),ARMEmitter::Reg::rsp,0);
+   mrs(TMP1,ARMEmitter::SystemRegister::FPCR);str(TMP1.W(),ARMEmitter::Reg::rsp,4);
+-  LoadConstant(Size::i32Bit,TMP1,uint32_t(Math->Kind&~FEXCore::HBX87::InlineExactKindBit)|(ASlot<<8)|(BSlot<<16)|(DSlot<<24));
++  LoadConstant(Size::i32Bit,TMP1,uint32_t(Math->Kind&FEXCore::HBX87::ArithmeticKindMask)|(ASlot<<8)|(BSlot<<16)|(DSlot<<24));
+   str(TMP1.W(),ARMEmitter::Reg::rsp,8);
+   const auto Pushed=PushDynamicRegs(TMP1);
+   SpillStaticRegs(TMP1);
+@@ -202,7 +202,7 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+     };
+     Fault(1);LaterFault(7);
+     const auto D=DSlot==ASlot?VTMP1:VTMP2;
+-    const auto Op=Arithmetic(Math->Kind&~FEXCore::HBX87::InlineExactKindBit);
++    const auto Op=Arithmetic(Math->Kind&FEXCore::HBX87::ArithmeticKindMask);
+     if(Precision==Format::Binary53) {
+       switch(Op) {
+       case Arithmetic::Add: fadd(D.D(),VTMP1.D(),VTMP2.D());break;
+diff --git a/FEXCore/Source/Interface/Core/HBX87StaticRegionEmit.inl b/FEXCore/Source/Interface/Core/HBX87StaticRegionEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87StaticRegionEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87StaticRegionEmit.inl
+@@ -82,7 +82,7 @@ for (unsigned Top=0;Top<8;++Top) {
+     };
+     Fault(1);LaterFault(7);
+     const auto VA=ARMEmitter::VRegister(24+A),VB=ARMEmitter::VRegister(24+B),VD=ARMEmitter::VRegister(24+D);
+-    const auto Op=Arithmetic(Math->Kind&~FEXCore::HBX87::InlineExactKindBit);
++    const auto Op=Arithmetic(Math->Kind&FEXCore::HBX87::ArithmeticKindMask);
+     if (Narrow) {
+       switch (Op) {
+       case Arithmetic::Add:fadd(VD.S(),VA.S(),VB.S());break;

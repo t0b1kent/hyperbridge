@@ -1,0 +1,33 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -4041,8 +4041,12 @@
+     _UDiv(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
+ 
+     if (Size == OpSize::i32Bit) {
+-      Quotient = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Quotient);
+-      Remainder = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Remainder);
++      // FAST with invalid Upper emits W-register UDIV/MSUB: both outputs
++      // already zero-extend architecturally. Avoid two BFE copy nodes.
++      if (!L4) {
++        Quotient = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Quotient);
++        Remainder = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Remainder);
++      }
+       Size = OpSize::iInvalid;
+     }
+ 
+@@ -4112,8 +4116,11 @@
+     _Div(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
+ 
+     if (Size == OpSize::i32Bit) {
+-      Quotient = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Quotient);
+-      Remainder = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Remainder);
++      // See DIV: proven i32 SDIV/MSUB also write W-register outputs.
++      if (!L4) {
++        Quotient = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Quotient);
++        Remainder = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Remainder);
++      }
+       Size = OpSize::iInvalid;
+     }
+ 
+

@@ -1,0 +1,76 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -3987,6 +3987,29 @@
+   }
+ }
+ 
++void OpDispatchBuilder::RaiseUnsigned32DivideErrorBeforeWrite(FEXCore::X86Tables::DecodedOp Op) {
++  LOGMAN_THROW_A_FMT(Op->Dest.IsGPR() && OpSizeFromSrc(Op) == OpSize::i32Bit, "DIV-FAST general high requires unsigned r32");
++  CalculateDeferredFlags();
++  RaiseDivideErrorIf(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}),
++                     CondClass::EQ, false, true, 0, OpSize::i32Bit);
++  // Both operands are unsigned 32-bit values. Their 64-bit difference is in
++  // [-(2^32-1), 2^32-1], so its sign bit proves high < divisor without NZCV.
++  // Reload in this continuation: FEX SSA definitions do not cross blocks.
++  Ref High = _Bfe(OpSize::i64Bit, 32, 0, LoadGPRRegister(X86State::REG_RDX));
++  Ref Divisor = _Bfe(OpSize::i64Bit, 32, 0,
++                     LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}));
++  Ref Fits = _Bfe(OpSize::i64Bit, 1, 63, _Sub(OpSize::i64Bit, High, Divisor));
++  RaiseDivideErrorIf(Op, Fits, CondClass::EQ, false, true, 1, OpSize::i64Bit);
++  const uint64_t Used = MacRunnerDivFastUsed.fetch_add(1, std::memory_order_relaxed) + 1;
++  if ((Used & (Used - 1)) == 0) {
++    char Line[176];
++    const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
++      "macrunner-fex-div-fast: used={} rip={:x} op=div size=32 high=general cold-tail=1 flags-preserved=1\n", Used, Op->PC);
++    Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++    FEX::Windows::Logging::Raw(Line);
++  }
++}
++
+ void OpDispatchBuilder::DIVOp(OpcodeArgs) {
+   const auto GPRSize = GetGPROpSize();
+   auto Size = OpSizeFromSrc(Op);
+@@ -4003,11 +4026,16 @@
+   const bool OverflowDE = MacRunnerDivOverflowMode();
+   // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): decided before the zero-divisor branch below ends the block.
+   const bool ProvenHigh = DivHighHalfProven(Op, false);
+-  const bool L4 = OverflowDE && ProvenHigh && MacRunnerDivFastMode() && Op->Dest.IsGPR();
++  const bool L4 = OverflowDE && MacRunnerDivFastMode() && Op->Dest.IsGPR() &&
++                  (ProvenHigh || Size == OpSize::i32Bit);
+   Ref Divisor {};
+   Ref Fault {};
+   if (L4) {
+-    RaiseProvenDivideErrorBeforeWrite(Op, false);
++    if (ProvenHigh) {
++      RaiseProvenDivideErrorBeforeWrite(Op, false);
++    } else {
++      RaiseUnsigned32DivideErrorBeforeWrite(Op);
++    }
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true});
+   } else if (OverflowDE) {
+     CalculateDeferredFlags();
+@@ -4044,8 +4072,9 @@
+     _UDiv(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
+ 
+     if (Size == OpSize::i32Bit) {
+-      // FAST with invalid Upper emits W-register UDIV/MSUB: both outputs
+-      // already zero-extend architecturally. Avoid two BFE copy nodes.
++      // FAST with invalid Upper emits W-register UDIV/MSUB. General unsigned
++      // FAST first proves high < divisor, so its X-register quotient/remainder
++      // fit in32bits too. Both paths need no two BFE copy nodes.
+       if (!L4) {
+         Quotient = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Quotient);
+         Remainder = _Bfe(OpSize::i32Bit, IR::OpSizeAsBits(Size), 0, Remainder);
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -477,6 +477,8 @@
+                           bool ColdTail = false, uint16_t KnownCause = 0, OpSize CompareSize = OpSize::iInvalid);
+   // Experimental default-off DIV-FAST: fault before write-back, register divisor only.
+   void RaiseProvenDivideErrorBeforeWrite(FEXCore::X86Tables::DecodedOp Op, bool Signed);
++  // Unsigned EDX:EAX / r32: quotient fits iff EDX < divisor; no trial division.
++  void RaiseUnsigned32DivideErrorBeforeWrite(FEXCore::X86Tables::DecodedOp Op);
+   void BSFOp(OpcodeArgs);
+   void BSROp(OpcodeArgs);
+   void CMPXCHGOp(OpcodeArgs);
