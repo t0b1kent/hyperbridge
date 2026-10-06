@@ -18,6 +18,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--fex-source', default='build/stand-fex/src')
     ap.add_argument('--build-dir', default='build/stand-native')
+    ap.add_argument('--runner-source', default='stands/synthetic/runner.cpp')
+    ap.add_argument('--hardware-tso', action='store_true')
     args = ap.parse_args()
     source = (ROOT / args.fex_source).resolve()
     build = (ROOT / args.build_dir).resolve()
@@ -52,9 +54,12 @@ def main():
             path.write_text(text)
     command = ['cmake', '-S', 'stands/synthetic', '-B', str(build / 'cmake'), '-G', 'Ninja',
                '-DFEXSRC=' + str(native), '-DCMAKE_BUILD_TYPE=Release',
-               '-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0']
+               '-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0',
+               '-DSTAND_RUNNER_SOURCE=' + str((ROOT / args.runner_source).resolve())]
     if shutil.which('ccache'):
         command += ['-DCMAKE_C_COMPILER_LAUNCHER=ccache', '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache']
+    if args.hardware_tso:
+        command += ['-DSTAND_HARDWARE_TSO=ON']
     run(*command)
     run('cmake', '--build', str(build / 'cmake'), '--target', 'stand_runner', '-j2')
     print('RUNNER=' + str((build / 'cmake/Bin/stand_runner').relative_to(ROOT)))

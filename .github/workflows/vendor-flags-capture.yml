@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT
+name: vendor-flags-capture
+on:
+  workflow_call:
+    inputs:
+      attempt:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the ABI adapter without executing probes
+        run: python -m unittest discover -s stands/vendor-flags -p 'test_*.py' -v
+      - name: Pinned llvm-mingw dependency
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-x86_64.zip'
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
+          $hash = (Get-FileHash -Algorithm SHA256 llvm-mingw.zip).Hash.ToLower()
+          if ($hash -ne '3e6919b3da2b6bfc05d8caf0ab10d5c0be4ddbb873b3c33790a71fe43c09c51f') { throw "toolchain hash mismatch: $hash" }
+          Expand-Archive llvm-mingw.zip -DestinationPath toolchain
+      - name: Native probes and deterministic repeats
+        shell: pwsh
+        run: |
+          python stands/vendor-flags/capture.py --compiler "$PWD/toolchain/llvm-mingw-20260505-ucrt-x86_64/bin/x86_64-w64-mingw32-clang.exe" --work build/vendor-flags/work --out build/vendor-flags/report
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vendor-flags-reference-${{ inputs.attempt }}-${{ matrix.os }}
+          path: build/vendor-flags/report/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7

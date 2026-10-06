@@ -11,6 +11,7 @@
 #   FEX_UPSTREAM          FEX git URL or local mirror (default: https://github.com/FEX-Emu/FEX.git)
 #   FEX_SUBMODULE_MIRROR  optional directory with local clones of the six submodules, laid out as in
 #                         the FEX tree (External/fmt, ..., Source/Common/cpp-optparse)
+#   FEX_PREPARE_ONLY=1    prepare the pinned source and patch series, skip all binary builds
 #
 # Outputs in <work-dir>/out: xtajit64.dll (ARM64EC), xtajit.dll (WOW64), xtajit64.so and xtajit.so
 # (host unix libraries), plus SHA256SUMS.
@@ -19,14 +20,18 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=${1:?usage: fex/build.sh <work-dir> [patch-count]}
 count=${2:-}
-llvm_mingw=${LLVM_MINGW:?set LLVM_MINGW to the llvm-mingw toolchain root}
+if [ "${FEX_PREPARE_ONLY:-0}" = 1 ]; then
+  llvm_mingw=${LLVM_MINGW:-}
+else
+  llvm_mingw=${LLVM_MINGW:?set LLVM_MINGW to the llvm-mingw toolchain root}
+fi
 upstream=${FEX_UPSTREAM:-https://github.com/FEX-Emu/FEX.git}
 base=fd141ed6d721d03062619e4702bca1a0c93b6dd9
 
 mkdir -p "$work"
 work=$(cd "$work" && pwd)
 src=$work/src
-export PATH="$llvm_mingw/bin:$PATH"
+if [ -n "$llvm_mingw" ]; then export PATH="$llvm_mingw/bin:$PATH"; fi
 export LC_ALL=C TZ=UTC
 
 if [ ! -d "$src/.git" ]; then
@@ -70,6 +75,10 @@ if [ ! -d "$src/.git" ]; then
   done
 fi
 git -C "$src" log --oneline -1
+if [ "${FEX_PREPARE_ONLY:-0}" = 1 ]; then
+  printf '%s\n' 'Source prepared; PE/WOW64/UnixLib build and install skipped.'
+  exit 0
+fi
 
 # Embedded __FILE__ paths are mapped to a neutral prefix; link timestamps are fixed.
 configure() {

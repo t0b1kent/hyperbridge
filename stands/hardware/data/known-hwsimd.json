@@ -1,0 +1,65 @@
+{
+  "state": "MANUALLY_ACCEPTED",
+  "date": "2026-10-02T13:59:37Z",
+  "owner": "STAND-DIFF; решение о поведении продукта — КУРАТОР/владелец",
+  "baseline": "known-hwsimd-baseline.jsonl.gz",
+  "baseline_sha256": "e44060d12305fea953c1bf6a37a300645be97f32901c301acc939be859fe03d3",
+  "code_cache_sha256": "b5b04e2e22c539ca9b5f9adf590b17004489917e6e10ef7ac6eaf60f7d605e89",
+  "runner_sha256": "a0ca3824e0c5d84acde3e361c227f6489d105b18f482b37c170ac8afdaad00df",
+  "source_sha256": "fe39cc0a046f34c696fd47739648b2ab6a6f52cc2f5122f03ff9c0cff961b9fe",
+  "quick_checked": 3021,
+  "quick_traps": 253,
+  "full_checked": 919405,
+  "full_known": 18968,
+  "counts": {
+    "result": 18326,
+    "upper": 702,
+    "fault": 17132,
+    "flags": 24,
+    "rip": 17132
+  },
+  "evidence": "hwsimd-baseline-full.json; known-hwsimd-baseline.json; HWSIMD-RESULT.md",
+  "manual_triage": [
+    {
+      "class": "ALIGNMENT_GP_NOT_RAISED",
+      "rows": 17132,
+      "rule": "AMD raises #GP before changing architectural state for these unaligned legacy SSE/aligned loads; FEX completes the instruction. Expected trap and RIP, and any resulting register/memory/flag delta, are pinned row by row.",
+      "owner": "КУРАТОР назначает движковый лейн",
+      "product_fix": false
+    },
+    {
+      "class": "GATHER_PARTIAL_STATE_ZEN4",
+      "rows": 1728,
+      "rule": "Both raise #PF; completed lanes, mask clears and upper YMM differ from recorded AMD Zen4 state. FEX updates its gather mask after the complete loop. This registry describes one processor's partial-fault order and does not choose a universal CPU policy.",
+      "owner": "КУРАТОР/владелец — порядок partial gather",
+      "product_fix": false
+    },
+    {
+      "class": "MASKMOV_PARTIAL_STATE",
+      "rows": 108,
+      "rule": "Both raise #PF; FEX has already changed destination lanes, upper YMM or readable memory prefix that AMD left unchanged. Exact partial state and fault RIP are checked, not synthesized.",
+      "owner": "КУРАТОР назначает движковый лейн",
+      "product_fix": false
+    }
+  ],
+  "admission_rule": "Only the exact manually reviewed per-row comparison deltas in the hashed baseline are KNOWN. A new class, field or differing wrong bit is NEW; equality is FIXED; removing a subset of registered bad bits is PARTIAL_FIXED. No automatic admission.",
+  "boundaries": [
+    "270 rows lack the full primary memory result and are never credited as full EQUAL; readable prefixes and auxiliary state are checked.",
+    "576 masked_guard gather states have 648 disabled lanes in the host 16KiB lower-page blind region.",
+    "All success groups have zero mismatches; all 18968 admitted rows belong to the three fault classes above."
+  ],
+  "table_sha256": {
+    "out-arithmetic.txt.gz": "c459750b462d4b8492f69d315f8ccd2b3be11453fd431ec7f59ac6bf852877ce",
+    "out-crypto.txt.gz": "07038db7d285173db5c65dfcd8f2e4ca41ff9de74cf93da4c0dbd3379984f131",
+    "out-gather.txt.gz": "ebc7fef56732fdd861905dd781f9a7c2afaa74fe943b641482a261a97d193b2a",
+    "out-logic.txt.gz": "6f4fe63a06692f5bb7f17c2e88c01d3f1d468c874283857cd4954817576117e7",
+    "out-movement.txt.gz": "21867dfd9161d3536b4de55bbb9c8f9b58845a9b39209ac2c1bb0e1564cab95a",
+    "out-pack.txt.gz": "1b94bd2868c818a50ebb4a53b3676f93b4faf3c82b8fdfe506757f9d88c994be",
+    "out-permutation.txt.gz": "961c2fcd89eff3df9fd1fe1cd4eb49ea85a8c6bc9b653a48c8d4587ba5720e66",
+    "out-shifts.txt.gz": "9fb92fe14f485d80a9f58ae4773ea3c832dd789b2bf495db324741b7e0b74e62",
+    "out-strings.txt.gz": "b6248d3a338673d0b570446b0f49593474c325dadb49b3138686f73613a109ea",
+    "out-upper.txt.gz": "8252e82b6f09d99934bde1430e3b8bf47cbe311dc528a1828cb65171f25b44bb"
+  },
+  "instruction_map_sha256": "df7fb5886140ea69fe4f1c14e9ff7f1d57f94a0d65c83bf92537214ea80ee056",
+  "instruction_map_serialization": "sha256(json.dumps({form: code.hex()}, sort_keys=True, separators=(',',':')).encode()). This pins the historical instruction bytes without committing assembled files; gzip headers and disassembly spelling are irrelevant."
+}

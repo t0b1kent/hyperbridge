@@ -1,0 +1,191 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: hardware-gates
+
+on:
+  push:
+    paths: ['fex/**', 'stands/hardware/**', 'stands/synthetic/**', '.github/workflows/hardware-gates.yml']
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: 'Reviewed source candidate directory'
+        required: true
+        default: 'stands/hardware/candidates/release-1.0.8'
+      mode:
+        description: 'Full includes quick plus the complete hardware tables'
+        type: choice
+        options: [full, quick]
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-gates-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE: ${{ inputs.candidate || 'stands/hardware/candidates/published-ci' }}
+  MODE: ${{ github.event_name == 'push' && 'quick' || inputs.mode || 'full' }}
+  LC_ALL: C
+  TZ: UTC
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: python3 stands/hardware/plan.py --candidate "$CANDIDATE" --mode "$MODE"
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [accepted, negative]
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      CCACHE_DIR: ${{ github.workspace }}/build/hardware-ccache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: build/hardware-ccache
+          key: hardware-fexcore-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fex/patches/**') }}-${{ matrix.flavor }}-${{ hashFiles('stands/synthetic/**', 'stands/hardware/*.cpp', 'stands/hardware/*.h', 'stands/hardware/candidates/**', 'stands/hardware/controls/**') }}
+          restore-keys: |
+            hardware-fexcore-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fex/patches/**') }}-${{ matrix.flavor }}-
+      - name: Dependencies and protocol tests
+        run: |
+          test "$(uname -m)" = arm64
+          brew install cmake ninja ccache
+          python3 -m venv build/hardware-venv
+          build/hardware-venv/bin/python -m pip install capstone==5.0.7
+          python3 -m unittest discover -s stands/hardware/tests -v
+      - name: Build native runner from reviewed candidate
+        env:
+          FLAVOR: ${{ matrix.flavor }}
+        run: |
+          python3 stands/hardware/plan.py --candidate "$CANDIDATE" --prepare-only
+          build/hardware-venv/bin/python stands/hardware/build.py --candidate "$CANDIDATE" --flavor "$FLAVOR" > build/hardware-build.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-build-evidence-${{ matrix.flavor }}
+          path: |
+            build/hardware-build.log
+            build/hardware/bundle/BUILD.json
+            build/hardware/cache/simd-assembler.log
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hardware-runner-${{ matrix.flavor }}
+          path: build/hardware/runner.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  hardware:
+    needs: [plan, build]
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hardware-runner-accepted
+          path: build/hardware
+      - name: Restore executable permissions and native library
+        run: |
+          test "$(uname -m)" = arm64
+          mkdir -p build/hardware/bundle
+          tar -xzf build/hardware/runner.tar.gz -C build/hardware/bundle
+      - name: Hardware shard
+        env:
+          COMPONENT: ${{ matrix.component }}
+          ARM: ${{ matrix.arm }}
+          MODE: ${{ matrix.mode }}
+          INDEX: ${{ matrix.index }}
+          SHARDS: ${{ matrix.shards }}
+        run: |
+          python3 stands/hardware/plan.py --candidate "$CANDIDATE" --prepare-only
+          python3 stands/hardware/run.py --candidate "$CANDIDATE" --bundle build/hardware/bundle \
+            "--$COMPONENT" "--$MODE" --arm "$ARM" --shards "$SHARDS" --index "$INDEX" --out build/hardware/report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-cell-${{ matrix.component }}-${{ matrix.arm }}-${{ matrix.mode }}-${{ matrix.index }}
+          path: build/hardware/report/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
+
+  negative:
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hardware-runner-negative
+          path: build/hardware
+      - name: Restore deliberately broken translator
+        run: |
+          test "$(uname -m)" = arm64
+          mkdir -p build/hardware/bundle
+          tar -xzf build/hardware/runner.tar.gz -C build/hardware/bundle
+      - name: Require measured FAIL from the broken translator
+        run: |
+          python3 stands/hardware/plan.py --candidate "$CANDIDATE" --prepare-only
+          set +e
+          python3 stands/hardware/run.py --candidate "$CANDIDATE" --bundle build/hardware/bundle \
+            --hwflags --quick --arm on --flavor negative --out build/hardware/report
+          result=$?
+          set -e
+          test "$result" = 1
+          python3 -c 'import json,sys; sys.path.insert(0,"stands/hardware"); from merge import negative_check; assert negative_check(json.load(open("build/hardware/report/RESULT.json")))'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-cell-negative
+          path: build/hardware/report/
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
+
+  verdict:
+    if: always()
+    needs: [hardware, negative]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hardware-cell-*
+          path: build/hardware/cells
+      - name: Reconstruct serial canonical fingerprints
+        run: |
+          python3 stands/hardware/plan.py --candidate "$CANDIDATE" --prepare-only
+          python3 stands/hardware/merge.py --candidate "$CANDIDATE" --mode "$MODE" --input build/hardware/cells --out build/hardware/final
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-gates-RESULT
+          path: build/hardware/final/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

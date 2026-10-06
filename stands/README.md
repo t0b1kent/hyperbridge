@@ -1,5 +1,11 @@
 # HyperBridge testing stands
 
+Hardware correctness gates: [hardware](hardware/README.md) runs native FEXCore
+against the authored flags/SIMD tables (quick on push, full by dispatch/schedule).
+[Vendor flags](vendor-flags/README.md) captures the same integer probes on Windows
+x64 Intel/AMD hosts and produces a per-cell agreement table. Initial cloud
+qualification of these new workflows is pending; no game inputs are included.
+
 Published October 2, 2026. The CPU and 32-bit stands contain our MIT-licensed source, data formats and own synthetic examples. FEX, Unicorn and Capstone are external dependencies; no dependency source or binaries are bundled.
 
 | Stand | Purpose | Start here |

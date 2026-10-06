@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "registered_manually": true,
+  "registered_by": "STAND-DIFF, user-directed stage 7 measured-undefined registry",
+  "date": "2026-10-02",
+  "cpu": "AMD EPYC 9V74, Zen 4",
+  "scope": "Only measured undefined arithmetic bits and undefined results. Defined outputs and precise #DE are never admitted.",
+  "policy_owner": "Curator and product owner; no engine behavior change is authorized by this registry",
+  "baseline": "known-baseline.jsonl.gz",
+  "baseline_sha256": "6453b6b215d8895db4aa2c5d43e1ff97a2d1bf4ae40cef0f3fc40dbe9bf3e278",
+  "baseline_rows": 867734,
+  "baseline_runner_sha256": "582425d2f66c0f61256cdf7e40b75a1f9787853b160fad0adfc7edfe020a7bdf",
+  "baseline_source_sha256": "954f0ce46a44881f7ac3fc193d969e15abb150a247aac2fd71e50782626c8e8d",
+  "baseline_canonical_sha256": "324a7ca819ed0ff3c800c14a11bdc0be46a383d2218388d3ebea25df7173270d",
+  "groups_file": "reviewed-flags.json",
+  "groups_file_sha256": "52f81b5177f25061c1c34c3aaaf110996dfb28072dacab085de6a412662f8e81",
+  "groups": "RESULT.json groups: 156 divergent group/flag conditions; counts overlap, not additive",
+  "rules": "RESULT.json exact_rules and partition_rows: complete empirical formulas by form, width and masked count; no missing leaf formula",
+  "curator_groups": {
+    "total": 109,
+    "divergent": 62,
+    "equal": 47
+  },
+  "evidence": "full-correct.json; full-correct-part00/01.raw.jsonl.gz and .semantic.jsonl.gz; RESULT.md",
+  "controls": "defined_bad=0 on all 1624804 rows, 100856 precise #DE; negative-table.json defined_bad16/16 FAIL",
+  "engine_env_defaults": {
+    "MACRUNNER_FEX_DIV_OVERFLOW_DE": "1",
+    "MACRUNNER_FEX_SHLD16_CF": "1"
+  },
+  "families": {
+    "double": {
+      "rows": 743424,
+      "undefined_rows": 516570,
+      "rules": "SHLD/SHRD16 masked count17..31: JIT result always0; hardware ROL/ROR16(source,count-16). Other flag formulas: RESULT.json."
+    },
+    "bmi": {
+      "rows": 286616,
+      "undefined_rows": 152686,
+      "rules": "BEXTR AF/PF preserved; AMD AF1/PF parity(result). Other BMI group formulas: RESULT.json."
+    },
+    "divide": {
+      "rows": 174256,
+      "undefined_rows": 73400,
+      "rules": "Successful DIV/IDIV: JIT preserves flags; AMD PF0/AF1/ZF0/SF0 and preserves CF/OF."
+    },
+    "shifts": {
+      "rows": 87296,
+      "undefined_rows": 50396,
+      "rules": "AF_before XOR result[4]; undefined OF differs by immediate/CL form, see exact_rules."
+    },
+    "multiply": {
+      "rows": 49368,
+      "undefined_rows": 37988,
+      "rules": "JIT SF0, ZF=!CF_after (no overflow), PF/AF preserved; AMD retains old SF/ZF/AF/PF."
+    },
+    "rotates": {
+      "rows": 87296,
+      "undefined_rows": 20238,
+      "rules": "Undefined OF differs by form/width/count; complete formulas in exact_rules."
+    },
+    "bitscan": {
+      "rows": 14520,
+      "undefined_rows": 8712,
+      "rules": "BSF/BSR CF1, PF/AF preserved, SF width-dependent; zero-source destination preserved. TZ/LZ undefined flags in exact_rules."
+    },
+    "logic": {
+      "rows": 15488,
+      "undefined_rows": 7744,
+      "rules": "JIT AF=AF_before XOR bit4(logical result); AMD AF0."
+    }
+  },
+  "table_sha256": {
+    "out-09-bmi.txt.gz": "05ec7ca83c44f5ba13cec3f844f672f1d28d8c84763b570967112406b81988a8",
+    "out-bitscan.txt.gz": "46ddd2e03ea0fce9910d4f28b19faf517ef61b217ec983df4f4057fca7c50474",
+    "out-bittest.txt.gz": "1487e7f9d0abc86c24084d92c381150664d0ed7cb87d332479292868225f952d",
+    "out-divide.txt.gz": "8dbfc7d72ff468ef2c897fd0a21e4c24d56154901c75fb641744de5f6e7b277b",
+    "out-double.txt.gz": "28986ab09ceeebaaec791385bbbde94c5b314becbfb511a77654605dc0d7d344",
+    "out-logic.txt.gz": "0cd0f926db8a597c128c66e0c2a53fbdd5435932a864238d62711b79ec9effd0",
+    "out-misc.txt.gz": "14eac5fa2c0e48823804aadffd39fe6c0a65d11cf23fbc2719c685b9d3d319e5",
+    "out-multiply.txt.gz": "12bca4109eec5ddeac893f9343d22f9c66a9a36761cf7ae18ffc312272512bc8",
+    "out-rotates.txt.gz": "a1d4e58282ad4f187975a14c3f4b935c1d73bb537459ab1f0b848f564ebb1fa7",
+    "out-shifts.txt.gz": "c5970080c5e600c8726bb0b6bd7a0642b751534525df0bc6c909e75a85472783"
+  },
+  "original_groups_file_sha256": "908c2caf1003e8c9a8b63655ff3bf0fd6815db48bb6b700fafccf5b47590b9dd",
+  "publication_note": "The reviewed receipt changes only proposal from a private absolute path to known-baseline.jsonl.gz. Numerical rules and admitted rows are unchanged."
+}

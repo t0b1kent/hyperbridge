@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: MIT
+name: vendor-flags
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vendor-flags-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  first:
+    uses: ./.github/workflows/vendor-flags-capture.yml
+    with:
+      attempt: first
+  coverage:
+    needs: first
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      retry: ${{ steps.coverage.outputs.retry }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vendor-flags-reference-first-*
+          path: build/vendor-flags/references
+      - id: coverage
+        run: python3 stands/vendor-flags/compare.py --input build/vendor-flags/references --out build/vendor-flags/coverage --coverage-only
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vendor-flags-coverage-first
+          path: build/vendor-flags/coverage/
+          retention-days: 7
+  retry:
+    needs: coverage
+    if: needs.coverage.outputs.retry == 'true'
+    uses: ./.github/workflows/vendor-flags-capture.yml
+    with:
+      attempt: retry
+  compare:
+    needs: [first, coverage, retry]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vendor-flags-reference-*
+          path: build/vendor-flags/references
+      - name: Intel versus AMD, every cell
+        run: python3 stands/vendor-flags/compare.py --input build/vendor-flags/references --out build/vendor-flags/final
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vendor-flags-RESULT
+          path: build/vendor-flags/final/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

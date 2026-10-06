@@ -1,0 +1,15 @@
+{
+  "state": "HISTORICAL_LOCAL_EVIDENCE_NOT_CLOUD_PROOF",
+  "source": "ENGINE-108 revision-0075 hardware components only",
+  "full_receipt_sha256": "734bf25089be38a8a4509a282f621f3f826d25c57dbe7fc0526494cd5fadbe1f",
+  "quick_receipt_sha256": "b53cfeb274b30f14bfd062636a04c6349a700ae54905404c799ee92ddec65320",
+  "hwflags": {
+    "quick": {"checked": 2204, "canonical_sha256": "dc6a83d7cc00099864d5bdf5cc4bc00b5da761d948f64c137ac0c603dcdfebb8"},
+    "full": {"checked": 1624804, "canonical_sha256": "324a7ca819ed0ff3c800c14a11bdc0be46a383d2218388d3ebea25df7173270d"}
+  },
+  "hwsimd": {
+    "quick": {"checked": 3021, "canonical_sha256": "25ef422635dd80ad304449de3ed6217d7505f0cf8c1e4b0b689d5e66c8bc028e"},
+    "full": {"checked": 919405, "canonical_sha256": "4e05f15bd32429e4a65c7ab041ce3c6620bec43c34c354615a6941ed2c67bc49"}
+  },
+  "limits": ["Historical composition is not byte-identical to the public build until independently verified.", "Equality of hashes is not an FPS or game claim; unequal hashes require row comparison and host/build diagnosis."]
+}
