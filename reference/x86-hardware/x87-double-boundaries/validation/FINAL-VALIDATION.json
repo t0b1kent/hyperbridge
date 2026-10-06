@@ -135,7 +135,7 @@
   "total_cases_per_complete_suite": 701961852,
   "source_hashes": {
     "aux-audit-edges.c": "8ebffaf6d1ee5d57d00cd6296102055c4f4af9e43704c2f263b262c305108904",
-    "aux.c": "855b8de593a31af2d112266b16c284b74c0c1c7a66f3fb393c10db093fd7de51",
+    "auxiliary.c": "855b8de593a31af2d112266b16c284b74c0c1c7a66f3fb393c10db093fd7de51",
     "chains.c": "744282e0030081d79b46ad539c99606d8f93f3a1ff5050e92d37759072fbaa38",
     "core-audit-exact.c": "bde4a8c3aa8ccd5512fa09b178ac6dc6dd614ab930ebe4d7899622b96381e0db",
     "core-selftest.c": "490b30128bd4a5ac09c9cb0a218260fa38f24003f72864fb41b1afe5e475af2e",

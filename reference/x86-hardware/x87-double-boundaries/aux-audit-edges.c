@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT. Small independent guarded-candidate edge check. */
 #define main auxiliary_original_main
-#include "aux.c"
+#include "auxiliary.c"
 #undef main
 int main(void){const int pcs[]={24,53,64};unsigned long tested=0,supported=0,errors=0,flags=0;
  for(int op=SCALE;op<=PREM1;op++)for(unsigned pi=0;pi<3;pi++)for(int rc=0;rc<4;rc++)for(unsigned a=0;a<NE;a++)for(unsigned b=0;b<NE;b++){

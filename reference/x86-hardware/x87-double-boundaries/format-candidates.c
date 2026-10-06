@@ -4,7 +4,7 @@
  * real hardware expansion. It does not claim an SSE m80 load/store opcode exists.
  */
 #define main aux_unused_entry
-#include "aux.c"
+#include "auxiliary.c"
 #undef main
 static ext expand_native(uint64_t raw,int fmt,uint16_t*sw){ext x;if(fmt==32)__asm__ volatile("fninit; flds %2; fnstsw %1; fstpt %0":"=m"(x),"=m"(*sw):"m"(*(uint32_t*)&raw):"st","memory");else __asm__ volatile("fninit; fldl %2; fnstsw %1; fstpt %0":"=m"(x),"=m"(*sw):"m"(raw):"st","memory");return x;}
 static uint64_t move_native(uint64_t in,int fmt){uint64_t out=0;if(fmt==32)__asm__ volatile("movss %1,%%xmm0; movss %%xmm0,%0":"=m"(*(uint32_t*)&out):"m"(*(uint32_t*)&in):"xmm0","memory");else __asm__ volatile("movsd %1,%%xmm0; movsd %%xmm0,%0":"=m"(out):"m"(in):"xmm0","memory");return out;}

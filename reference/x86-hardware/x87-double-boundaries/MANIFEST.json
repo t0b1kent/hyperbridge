@@ -23,15 +23,15 @@
     },
     {
       "path": "aux-audit-edges.c",
-      "sha256": "8ebffaf6d1ee5d57d00cd6296102055c4f4af9e43704c2f263b262c305108904",
-      "bytes": 1098,
+      "sha256": "adb610eab84dd7e69f80fc3c6d6f5c9bca0e89b8a0a6039195202c5b4ac6408d",
+      "bytes": 1104,
       "original_path": "aux-audit-edges.c",
       "original_sha256": "8ebffaf6d1ee5d57d00cd6296102055c4f4af9e43704c2f263b262c305108904",
       "original_bytes": 1098,
-      "text_payload_sha256": "8ebffaf6d1ee5d57d00cd6296102055c4f4af9e43704c2f263b262c305108904"
+      "text_payload_sha256": "adb610eab84dd7e69f80fc3c6d6f5c9bca0e89b8a0a6039195202c5b4ac6408d"
     },
     {
-      "path": "aux.c",
+      "path": "auxiliary.c",
       "sha256": "855b8de593a31af2d112266b16c284b74c0c1c7a66f3fb393c10db093fd7de51",
       "bytes": 22803,
       "original_path": "aux.c",
@@ -212,21 +212,21 @@
     },
     {
       "path": "format-audit-specials.py",
-      "sha256": "d25dda286979c8a3d421da4624bf2194aaaecbcc8330929047ef3f4f8cc9a2b8",
-      "bytes": 2621,
+      "sha256": "9dbad283cb63687b53e28b60b9c96077e2c24eded16017244a6d5afcf7df6664",
+      "bytes": 2633,
       "original_path": "format-audit-specials.py",
       "original_sha256": "d25dda286979c8a3d421da4624bf2194aaaecbcc8330929047ef3f4f8cc9a2b8",
       "original_bytes": 2621,
-      "text_payload_sha256": "d25dda286979c8a3d421da4624bf2194aaaecbcc8330929047ef3f4f8cc9a2b8"
+      "text_payload_sha256": "9dbad283cb63687b53e28b60b9c96077e2c24eded16017244a6d5afcf7df6664"
     },
     {
       "path": "format-candidates.c",
-      "sha256": "fbd834a19a1fbf86b55f9ca059a632449a42bbfbb45941d77d81b86664a31972",
-      "bytes": 6353,
+      "sha256": "3c8e3789ad80afcdfc295db9ed5c374cdca71393c07aed4b1e0b09d25e1a88f2",
+      "bytes": 6359,
       "original_path": "format-candidates.c",
       "original_sha256": "fbd834a19a1fbf86b55f9ca059a632449a42bbfbb45941d77d81b86664a31972",
       "original_bytes": 6353,
-      "text_payload_sha256": "fbd834a19a1fbf86b55f9ca059a632449a42bbfbb45941d77d81b86664a31972"
+      "text_payload_sha256": "3c8e3789ad80afcdfc295db9ed5c374cdca71393c07aed4b1e0b09d25e1a88f2"
     },
     {
       "path": "raw/aux-classes.csv",
@@ -419,12 +419,12 @@
     },
     {
       "path": "run-aux.sh",
-      "sha256": "16ca8b3de701baed354237fe7b788427140d8e3761f2e4afd6dbcf9d75c7537c",
-      "bytes": 401,
+      "sha256": "b89efff2ce5696b17655e19aa328feb804e121cebe62aa861346022da4cdfa4f",
+      "bytes": 407,
       "original_path": "run-aux.sh",
       "original_sha256": "16ca8b3de701baed354237fe7b788427140d8e3761f2e4afd6dbcf9d75c7537c",
       "original_bytes": 401,
-      "text_payload_sha256": "16ca8b3de701baed354237fe7b788427140d8e3761f2e4afd6dbcf9d75c7537c"
+      "text_payload_sha256": "b89efff2ce5696b17655e19aa328feb804e121cebe62aa861346022da4cdfa4f"
     },
     {
       "path": "run-chains.sh",
@@ -545,12 +545,12 @@
     },
     {
       "path": "validation/FINAL-VALIDATION.json",
-      "sha256": "d5a6c94d3d1bc39965cf4ae8f7cc6dd11598a25cb7a9e8ced3f690a6bd14e0a5",
-      "bytes": 5165,
+      "sha256": "4f89692e7d22432964fd1146b05d7eea674a5de7cf7b37fcc8b9eb8708a132f0",
+      "bytes": 5171,
       "original_path": "validation/FINAL-VALIDATION.json",
       "original_sha256": "d5a6c94d3d1bc39965cf4ae8f7cc6dd11598a25cb7a9e8ced3f690a6bd14e0a5",
       "original_bytes": 5165,
-      "text_payload_sha256": "d5a6c94d3d1bc39965cf4ae8f7cc6dd11598a25cb7a9e8ced3f690a6bd14e0a5"
+      "text_payload_sha256": "4f89692e7d22432964fd1146b05d7eea674a5de7cf7b37fcc8b9eb8708a132f0"
     },
     {
       "path": "validation/chains-extended-validation.json",
@@ -579,5 +579,11 @@
       "original_bytes": 1572,
       "text_payload_sha256": "cae2c02e0b5a6d30891088c1c7fa19673603018d32daf7de4c4550dcc4b95648"
     }
-  ]
+  ],
+  "renamed_for_windows_checkout": {
+    "from": "aux.c",
+    "to": "auxiliary.c",
+    "date": "2026-10-06",
+    "reason": "AUX is a reserved device name on Windows; a checkout there refused the file. Content is unchanged (same SHA-256); includes and the build line were updated."
+  }
 }
