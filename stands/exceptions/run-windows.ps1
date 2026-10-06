@@ -33,6 +33,7 @@ function BuildC($name, $flags) {
 }
 $p5 = BuildC 'windows_process64-v5c' $probe
 $sc = Build 'stack-context64' $probe @('-lntdll')
+$sr = Build 'stack-returns64' $probe @('-lntdll')
 $ts = Join-Path $bin 'thread_priority_starvation64.exe'
 & $cc -O1 -g0 -static -fno-stack-protector (Join-Path $src 'thread_priority_starvation64.c') -o $ts -lsynchronization
 if ($LASTEXITCODE -ne 0) { throw 'build failed: thread_priority_starvation64' }
@@ -92,6 +93,10 @@ $d7 = NewDir 'stack-context'
 foreach ($n in 'stack-context64.c', 'stack-context64.S') { (Get-FileHash -Algorithm SHA256 (Join-Path $src $n)).Hash.ToLower() + '  ' + $n | Add-Content (Join-Path $d7 'source-sha256.txt') }
 foreach ($rep in 1..2) { RunOne $sc $d7 "all-rep$rep" $null 60000 }
 
+$d8 = NewDir 'stack-returns'
+foreach ($n in 'stack-returns64.c', 'stack-returns64.S') { (Get-FileHash -Algorithm SHA256 (Join-Path $src $n)).Hash.ToLower() + '  ' + $n | Add-Content (Join-Path $d8 'source-sha256.txt') }
+foreach ($rep in 1..2) { RunOne $sr $d8 "all-rep$rep" $null 60000 }
+
 Get-Content $m
-foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
 exit 0

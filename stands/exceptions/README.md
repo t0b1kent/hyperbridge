@@ -18,9 +18,10 @@ artifacts and serve as the reference. The same binaries can then be run under a 
 | `windows_process64-v5c` | 83 cells, one per process: what an ordinary (not debugged) process is told about itself — process and thread information classes, handle closing and handle flags, mitigation policies, system information, and the four clock sources |
 | `thread_priority_starvation64` | five cells: a fixed amount of work on threads at normal, below-normal, lowest and idle priority while as many polling threads as there are processors spin, yield and sleep briefly; prints wall and CPU time per work thread. On Windows low-priority work still finishes; a layer that maps priorities onto strict host priorities can starve it |
 | `stack-context64` | the flags and registers a handler is given for `RaiseException` and `RtlRaiseException` at sixteen caller stack depths (every aligned value of the low byte of the stack pointer), through vectored and structured handlers; stored byte for byte as measured |
+| `stack-returns64` | the same sixteen stack depths, three callees (`RaiseException`, `RtlRaiseException`, `CloseHandle` on an invalid handle) and both handler mechanisms: besides the handler context it prints what the caller sees after the call returns through a continuing handler — flags, RAX, RDX, XMM0–XMM5 and the last error (64 handler rows, 96 return rows) |
 
-`windows_process64-v5c.c` is stored byte for byte as the measured revision (the workflow writes its SHA-256 next to the
-outputs), so it carries no per-file licence header; it is MIT-licensed like everything else in this directory.
+`windows_process64-v5c.c`, `stack-context64.*` and `stack-returns64.*` are stored byte for byte as the measured revisions (the workflow writes their SHA-256 next to the
+outputs), so they carry no per-file licence header; they are MIT-licensed like everything else in this directory.
 
 ## Running it yourself
 
