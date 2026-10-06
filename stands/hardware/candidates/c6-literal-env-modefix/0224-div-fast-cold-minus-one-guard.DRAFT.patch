@@ -1,0 +1,36 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -3967,13 +3967,26 @@ void OpDispatchBuilder::RaiseProvenDivideErrorBeforeWrite(FEXCore::X86Tables::DecodedOp Op, bool Signed) {
+   // width explicitly, then the same register needs no cleaning MOV in either block.
+   RaiseDivideErrorIf(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}),
+                      CondClass::EQ, false, true, 0, Size);
+   if (Signed) {
+-    // On #DE the original guest flags must remain recoverable. Flag-free EOR,
+-    // ADD, ORR, CBZ costs four instructions rather than CMN/CCMP/B.EQ's three,
+-    // and avoids unconditional MRS/MSR of NZCV on the successful division path.
+-    const uint64_t IntMin = uint64_t {1} << (IR::OpSizeAsBits(Size) - 1);
+-    Ref NotIntMin = _Xor(Size, LoadGPRRegister(X86State::REG_RAX), Constant(IntMin));
++    // The ordinary divisor needs only ADD+CBZ. Keep the INT_MIN predicate in
++    // an out-of-line -1 block; every operation is flag-neutral so #DE observes
++    // the exact prefix flags. The guard is per instruction, never loop-hoisted.
++    const auto PreviousBlock = GetCurrentBlock();
++    auto MinusOneBlock = CreateNewCodeBlockAfter(PreviousBlock);
++    auto ContinueBlock = CreateNewCodeBlockAfter(PreviousBlock);
+     Ref NotMinusOne = _Add(Size, LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}), Constant(1));
+-    RaiseDivideErrorIf(Op, _Or(Size, NotIntMin, NotMinusOne), CondClass::EQ, false, true, 1, Size);
++    CondJump(NotMinusOne, Constant(0), MinusOneBlock, ContinueBlock, CondClass::EQ, Size);
++
++    SetCurrentCodeBlock(MinusOneBlock);
++    StartNewBlock();
++    const uint64_t IntMin = uint64_t {1} << (IR::OpSizeAsBits(Size) - 1);
++    Ref NotIntMin = _Xor(Size, LoadGPRRegister(X86State::REG_RAX), Constant(IntMin));
++    RaiseDivideErrorIf(Op, NotIntMin, CondClass::EQ, false, true, 1, Size);
++    // Non-minimum dividends with divisor -1 are valid. This extra jump is cold
++    // for the usual divisor, and rejoins before any quotient/remainder write.
++    Jump(ContinueBlock);
++
++    SetCurrentCodeBlock(ContinueBlock);
++    StartNewBlock();
+   }
+   const uint64_t Used = MacRunnerDivFastUsed.fetch_add(1, std::memory_order_relaxed) + 1;

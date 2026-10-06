@@ -1,0 +1,73 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -3904,7 +3904,7 @@
+ }
+ 
+ void OpDispatchBuilder::RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond, bool ClassifyCause,
+-                                         bool ColdTail, uint16_t KnownCause) {
++                                         bool ColdTail, uint16_t KnownCause, OpSize CompareSize) {
+   const auto GPRSize = GetGPROpSize();
+ 
+   const auto PreviousBlock = GetCurrentBlock();
+@@ -3913,7 +3913,7 @@
+   // fault block. The normal branch falls through, rather than jumping over #DE.
+   auto ContinueBlock = ColdTail ? CreateNewCodeBlockAfter(PreviousBlock) : CreateNewCodeBlockAfter(FaultBlock);
+ 
+-  CondJump(Value, Constant(0), FaultBlock, ContinueBlock, Cond);
++  CondJump(Value, Constant(0), FaultBlock, ContinueBlock, Cond, CompareSize);
+ 
+   // Signal/si_code follow the INTO (#OF) precedent: SIGSEGV is only the transport
+   // that hands control back to the host fault handler, TrapNumber carries the x86
+@@ -3963,15 +3963,18 @@
+   // old single-read implementation, because FEX SSA definitions are block-local.
+   LOGMAN_THROW_A_FMT(Op->Dest.IsGPR() && Size >= OpSize::i32Bit, "DIV-FAST requires a proven register dividend");
+   CalculateDeferredFlags();
+-  RaiseDivideErrorIf(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags), CondClass::EQ, false, true, 0);
++  // Native W-register operations ignore upper garbage. Match the zero guard's
++  // width explicitly, then the same register needs no cleaning MOV in either block.
++  RaiseDivideErrorIf(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}),
++                     CondClass::EQ, false, true, 0, Size);
+   if (Signed) {
+     // On #DE the original guest flags must remain recoverable. Flag-free EOR,
+     // ADD, ORR, CBZ costs four instructions rather than CMN/CCMP/B.EQ's three,
+     // and avoids unconditional MRS/MSR of NZCV on the successful division path.
+     const uint64_t IntMin = uint64_t {1} << (IR::OpSizeAsBits(Size) - 1);
+     Ref NotIntMin = _Xor(Size, LoadGPRRegister(X86State::REG_RAX), Constant(IntMin));
+-    Ref NotMinusOne = _Add(Size, LoadSourceGPR(Op, Op->Dest, Op->Flags), Constant(1));
+-    RaiseDivideErrorIf(Op, _Or(Size, NotIntMin, NotMinusOne), CondClass::EQ, false, true, 1);
++    Ref NotMinusOne = _Add(Size, LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}), Constant(1));
++    RaiseDivideErrorIf(Op, _Or(Size, NotIntMin, NotMinusOne), CondClass::EQ, false, true, 1, Size);
+   }
+   const uint64_t Used = MacRunnerDivFastUsed.fetch_add(1, std::memory_order_relaxed) + 1;
+   if ((Used & (Used - 1)) == 0) {
+@@ -4005,7 +4008,7 @@
+   Ref Fault {};
+   if (L4) {
+     RaiseProvenDivideErrorBeforeWrite(Op, false);
+-    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true});
+   } else if (OverflowDE) {
+     CalculateDeferredFlags();
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+@@ -4079,7 +4082,7 @@
+   Ref Fault {};
+   if (L4) {
+     RaiseProvenDivideErrorBeforeWrite(Op, true);
+-    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true});
+   } else if (OverflowDE) {
+     CalculateDeferredFlags();
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -474,7 +474,7 @@
+   // Raises #DE when Value <Cond> 0, then continues in a fresh block. MacRunner: with ClassifyCause the fault reports a
+   // zero divisor (ErrorRegister 0) apart from a quotient overflow (ErrorRegister 1).
+   void RaiseDivideErrorIf(FEXCore::X86Tables::DecodedOp Op, Ref Value, CondClass Cond, bool ClassifyCause = false,
+-                          bool ColdTail = false, uint16_t KnownCause = 0);
++                          bool ColdTail = false, uint16_t KnownCause = 0, OpSize CompareSize = OpSize::iInvalid);
+   // Experimental default-off DIV-FAST: fault before write-back, register divisor only.
+   void RaiseProvenDivideErrorBeforeWrite(FEXCore::X86Tables::DecodedOp Op, bool Signed);
+   void BSFOp(OpcodeArgs);
