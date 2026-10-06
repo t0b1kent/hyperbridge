@@ -18,9 +18,15 @@ on:
         type: choice
         options: [full, quick]
         default: full
+      reuse_run:
+        description: 'Optional completed run ID: re-reduce its hardware-cell artifacts without builds or native sweeps'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: hardware-gates-${{ github.ref }}
@@ -46,6 +52,7 @@ jobs:
       - id: plan
         run: python3 stands/hardware/plan.py --candidate "$CANDIDATE" --mode "$MODE"
   build-accepted:
+    if: ${{ !inputs.reuse_run }}
     needs: plan
     uses: ./.github/workflows/hardware-native-build.yml
     with:
@@ -53,6 +60,7 @@ jobs:
       flavor: accepted
 
   build-negative:
+    if: ${{ !inputs.reuse_run }}
     needs: plan
     uses: ./.github/workflows/hardware-native-build.yml
     with:
@@ -60,6 +68,7 @@ jobs:
       flavor: negative
 
   hardware:
+    if: ${{ !inputs.reuse_run }}
     needs: [plan, build-accepted]
     runs-on: macos-15
     timeout-minutes: 30
@@ -99,6 +108,7 @@ jobs:
           retention-days: 7
 
   negative:
+    if: ${{ !inputs.reuse_run }}
     needs: build-negative
     runs-on: macos-15
     timeout-minutes: 30
@@ -134,15 +144,24 @@ jobs:
 
   verdict:
     if: always()
-    needs: [hardware, negative]
+    needs: [plan, hardware, negative]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        if: ${{ !inputs.reuse_run }}
         with:
           pattern: hardware-cell-*
           path: build/hardware/cells
+      - name: Reuse original hardware evidence
+        if: ${{ inputs.reuse_run }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: hardware-cell-*
+          path: build/hardware/cells
+          run-id: ${{ inputs.reuse_run }}
+          github-token: ${{ github.token }}
       - name: Reconstruct serial canonical fingerprints
         run: |
           python3 stands/hardware/plan.py --candidate "$CANDIDATE" --prepare-only

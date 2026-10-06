@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 HyperBridge contributors
-"""Merge by table filename and numeric source line; never hash shard hashes."""
+"""Restore serial order and reproduce the fixed two-part local full fingerprint."""
 import argparse
 import collections
 import gzip
@@ -12,6 +12,18 @@ from pathlib import Path
 import sys
 
 import common
+
+
+def local_full_fingerprint(component, part_hashes):
+    if len(part_hashes) != 2:
+        raise ValueError('the local full contract has exactly two ordered parts')
+    if component == 'hwflags':
+        encoded = json.dumps(part_hashes).encode()
+    elif component == 'hwsimd':
+        encoded = ''.join(part_hashes).encode()
+    else:
+        raise ValueError('unknown fingerprint component')
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def records(directory, report):
@@ -53,6 +65,7 @@ def merge_group(directories, out):
     streams = [records(d, r) for d, r in zip(directories, reports)]
     out.mkdir(parents=True, exist_ok=False)
     count, previous, h = 0, None, hashlib.sha256()
+    local_parts = [hashlib.sha256(), hashlib.sha256()]
     with gzip.open(out / 'semantic.jsonl.gz', 'wb', compresslevel=1) as stream:
         for record in heapq.merge(*streams, key=common.semantic_key):
             key = common.semantic_key(record)
@@ -62,6 +75,10 @@ def merge_group(directories, out):
             encoded = common.semantic_bytes(component, record)
             stream.write(encoded)
             h.update(encoded)
+            # Historical local full uses ordinal % 2, regardless of how many
+            # cloud workers produced the records. Reconstruct from row bytes,
+            # never from the actual cloud shard digests (currently four).
+            local_parts[count % 2].update(encoded)
             count += 1
     if count != common.COUNTS[component][mode]:
         raise ValueError('incomplete merged row coverage')
@@ -72,8 +89,14 @@ def merge_group(directories, out):
         for key, value in r['groups'].items():
             groups[key].update(value)
     result = {k: first[k] for k in required}
+    serial_hash = h.hexdigest()
+    part_hashes = [part.hexdigest() for part in local_parts]
+    canonical = local_full_fingerprint(component, part_hashes) if mode == 'full' else serial_hash
     result.update(gate=first['gate'], status='PASS' if all(r['status'] == 'PASS' for r in reports) else 'FAIL',
-                  counts=dict(counts), groups=dict(groups), canonical_sha256=h.hexdigest(),
+                  counts=dict(counts), groups=dict(groups), canonical_sha256=canonical,
+                  serial_canonical_sha256=serial_hash,
+                  fingerprint_contract='local-two-part-v1' if mode == 'full' else 'serial-row-v1',
+                  local_part_sha256=part_hashes if mode == 'full' else [],
                   seconds=sum(r['seconds'] for r in reports),
                   seconds_semantics='sum of shard wall seconds; not matrix elapsed time',
                   max_shard_seconds=max(r['seconds'] for r in reports),

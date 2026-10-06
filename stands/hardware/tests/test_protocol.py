@@ -54,7 +54,10 @@ class MergeTests(unittest.TestCase):
     def test_interleaved_shards_restore_numeric_serial_order(self):
         dirs = [self.shard(i) for i in (2, 0, 1)]
         result = merge.merge_group(dirs, self.root / 'merged')
-        self.assertEqual(result['canonical_sha256'], hashlib.sha256(self.serial).hexdigest())
+        self.assertEqual(result['serial_canonical_sha256'], hashlib.sha256(self.serial).hexdigest())
+        parts = [hashlib.sha256(b''.join(self.serial.splitlines(keepends=True)[i::2])).hexdigest() for i in range(2)]
+        self.assertEqual(result['local_part_sha256'], parts)
+        self.assertEqual(result['canonical_sha256'], hashlib.sha256(json.dumps(parts).encode()).hexdigest())
         self.assertEqual(gzip.decompress((self.root / 'merged/semantic.jsonl.gz').read_bytes()), self.serial)
 
     def test_missing_or_duplicate_shards_cannot_pass(self):
@@ -87,6 +90,18 @@ class MergeTests(unittest.TestCase):
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_local_full_contract_has_distinct_component_encodings(self):
+        parts = ['3c3641e77f687bf20f0eee53d17be748c46697bb8fb717b235c1dff98eda8914',
+                 '9d76d4c14270fb414a456c5e80af3cf0fc7d90229a9b2130a8a0fee01a8e4a33']
+        self.assertEqual(merge.local_full_fingerprint('hwflags', parts),
+                         '324a7ca819ed0ff3c800c14a11bdc0be46a383d2218388d3ebea25df7173270d')
+        self.assertEqual(merge.local_full_fingerprint('hwsimd', parts),
+                         '9bb870ac37aebdbb4e6c6492118af7e731b9cf2b60c831cd6450b102d6b7fe15')
+        self.assertNotEqual(merge.local_full_fingerprint('hwflags', parts),
+                            merge.local_full_fingerprint('hwflags', list(reversed(parts))))
+        with self.assertRaises(ValueError):
+            merge.local_full_fingerprint('hwflags', parts[:1])
+
     def test_negative_patch_applies_away_from_start_of_file(self):
         # Regression for first hosted failure: a hunk starting at line 1 implies
         # start-of-file context and cannot be relocated to this actual function.

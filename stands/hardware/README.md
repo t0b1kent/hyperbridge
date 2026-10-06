@@ -37,9 +37,20 @@ until the first cloud run; queue delay is not covered by a job timeout.
 `hardware-gates-RESULT/RESULT.json` and `VERDICT.txt` are the aggregate result.
 Cell artifacts preserve raw states, native logs, row comparisons, counts, CPU
 user/system seconds and hashes. Missing/duplicated/truncated cells or changed
-inputs fail the aggregate. The merger restores filename + numeric line order and
-the local serial serialization; it never hashes a list of shard hashes. Flags
-hash the full comparison record; SIMD hashes `{key, comparison}` only.
+inputs fail the aggregate. The merger restores filename + numeric line order.
+`serial_canonical_sha256` hashes that complete stream (flags comparison records;
+SIMD `{key, comparison}` records). For full, `canonical_sha256` reproduces the
+historical local two-part contract: alternate serial rows into two SHA-256 streams,
+then hash their JSON list for flags or their concatenated hex for SIMD. These two
+logical parts are independent of the actual number of cloud shards. Quick uses
+the serial fingerprint directly. `fingerprint_contract` and `local_part_sha256`
+make the encoding explicit; unequal hash formats must not be compared directly.
+
+To correct aggregation without repeating native work, dispatch the same candidate
+and mode with `reuse_run` set to the original completed run ID. Only plan and
+verdict run; the merger downloads `hardware-cell-*` from that run and verifies
+their candidate identity, coverage and raw evidence hashes. The original run and
+its FAIL remain preserved.
 
 The second build applies `controls/div-overflow-disabled.patch` to the translator.
 Its quick hwflags result must be complete and FAIL with new **defined** errors.
