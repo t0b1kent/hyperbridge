@@ -41,6 +41,8 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check portable repository names before native builds
+        run: python3 stands/check_portable_paths.py
       - id: plan
         run: python3 stands/hardware/plan.py --candidate "$CANDIDATE" --mode "$MODE"
   build-accepted:
