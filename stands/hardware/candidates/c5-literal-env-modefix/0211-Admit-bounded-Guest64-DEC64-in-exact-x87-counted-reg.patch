@@ -1,0 +1,38 @@
+diff --git a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+@@ -21,6 +21,7 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+   const IR::IROp_CondJump* Branch {};
+   uint64_t MathPC {}, DecPC {}, BranchPC {}, CurrentPC=Entry+Block->GuestEntryOffset, FalsePC {};
+   bool HaveMarker {}, HaveDec {}, HaveCarry {}, HaveRMIF {}, HaveAF {}, HavePF {}, HaveCounter {}, HaveStore {};
++  bool Counter64 {};
+   auto Inline = [&](IR::OrderedNodeWrapper W,uint64_t N) {uint64_t C;return IsInlineConstant(W,&C)&&C==N;};
+   auto ExprFor = [&](IR::OrderedNodeWrapper W) {return G[GetReg(W).Idx()];};
+   for (auto [Node,Op] : IR->GetCode(BlockNode)) {
+@@ -96,8 +97,10 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+     }
+     case IR::OP_SUBWITHFLAGS: {
+       const auto O=Op->C<IR::IROp_SubWithFlags>(); const IR::PhysicalRegister R(O->Src1);
+-      if(!Math || !HaveCarry || HaveDec || Op->Size!=IR::OpSize::i32Bit || !Inline(O->Src2,1) ||
++      const bool Wide = Op->Size==IR::OpSize::i64Bit && CTX->Config.Is64BitMode() && FEXCore::HBX87::Guest64Enabled();
++      if(!Math || !HaveCarry || HaveDec || (Op->Size!=IR::OpSize::i32Bit && !Wide) || !Inline(O->Src2,1) ||
+           R.AsRegClass()!=IR::RegClass::GPRFixed || R.Reg>=(CTX->Config.Is64BitMode()?16:8) || CurrentPC<=MathPC) return false;
++      Counter64=Wide;
+       Counter=GetReg(O->Src1);CounterGuest=R.Reg;DecResult=GetReg(Node);DecPC=CurrentPC;HaveDec=true;break;
+     }
+     case IR::OP_RMIFNZCV: {
+@@ -149,6 +152,14 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+   sub(Size::i64Bit,ARMEmitter::Reg::rsp,ARMEmitter::Reg::rsp,64);
+   mrs(TMP4,ARMEmitter::SystemRegister::NZCV);
+   str(TMP4,ARMEmitter::Reg::rsp,40);
++  // 0211: DEC64 may use the accepted DEC32 body only for a positive signed
++  // 31-bit entry count. Every intermediate counter then has zero high bits;
++  // DEC32/DEC64 result, PF/AF/ZF/SF/OF agree and CF remains the entry CF.
++  // The bound also makes CompleteDec32 recovery exact for the Guest64 GPR.
++  if (Counter64) {
++    lsr(Size::i64Bit,TMP1,Counter,31);
++    (void)cbnz(Size::i64Bit,TMP1,&Reject);
++  }
+   str(Counter.W(),ARMEmitter::Reg::rsp,0);
+   mrs(TMP1,ARMEmitter::SystemRegister::FPCR);str(TMP1.W(),ARMEmitter::Reg::rsp,4);
+   LoadConstant(Size::i32Bit,TMP1,uint32_t(Math->Kind&~FEXCore::HBX87::InlineExactKindBit)|(ASlot<<8)|(BSlot<<16)|(DSlot<<24));

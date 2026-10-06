@@ -1,0 +1,82 @@
+diff --git a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+@@ -88,37 +88,56 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+      // All tests avoid NZCV: DEC/branch guest flags remain authoritative.
+      ForwardLabel ExactReady;
+      if(kind==FEXCore::HBX87::Add||kind==FEXCore::HBX87::Sub) {
+-       auto IntegerMagnitude=[&](auto Src) {
+-         ForwardLabel Zero,Finish;
++       // A finite p-bit dyadic is coefficient * 2^quantum. Strip trailing
++       // zero bits before aligning both magnitudes to a common quantum.
++       // |a|+|b| <= 2^p on that grid proves either sum or difference exact,
++       // independent of operand signs. Keep the grid in the normal host
++       // range, so a nonzero result cannot be a host subnormal.
++       auto DyadicMagnitude=[&](auto Src) {
+          umov<SubRegSize::i64Bit>(TMP2,Src,0);
++         (void)cbz(Size::i64Bit,TMP2,&ExactReady);
++         rbit(Size::i64Bit,TMP4,TMP2);
++         clz(Size::i64Bit,TMP4,TMP4);
++         lsrv(Size::i64Bit,TMP1,TMP2,TMP4);
+          umov<SubRegSize::i64Bit>(TMP3,Src,1);
+          and_(Size::i64Bit,TMP3,TMP3,0x7fff);
+-         (void)cbz(Size::i64Bit,TMP3,&Zero);
+-         LoadConstant(Size::i64Bit,TMP4,16383);
+-         sub(Size::i64Bit,TMP3,TMP3,TMP4);
+-         (void)tbnz(TMP3,63,&PreSlow);
+-         sub(Size::i64Bit,TMP4,TMP3,isDouble?53:24);
+-         (void)tbz(TMP4,63,&PreSlow);
+-         LoadConstant(Size::i64Bit,TMP4,63);
+-         sub(Size::i64Bit,TMP4,TMP4,TMP3);
+-         lsrv(Size::i64Bit,TMP1,TMP2,TMP4);
+-         lslv(Size::i64Bit,TMP3,TMP1,TMP4);
+-         eor(Size::i64Bit,TMP3,TMP3,TMP2);
+-         (void)cbnz(Size::i64Bit,TMP3,&PreSlow);
+-         (void)b(&Finish);
+-         (void)Bind(&Zero);
+-         LoadConstant(Size::i64Bit,TMP1,0);
+-         (void)Bind(&Finish);
++         sub(Size::i64Bit,TMP3,TMP3,63);
++         add(Size::i64Bit,TMP3,TMP3,TMP4);
++         LoadConstant(Size::i64Bit,TMP4,16383-(isDouble?1022:126));
++         sub(Size::i64Bit,TMP4,TMP3,TMP4);
++         (void)tbnz(TMP4,63,&PreSlow);
+        };
+-       IntegerMagnitude(A);
++       DyadicMagnitude(A);
+        fmov(Size::i64Bit,VTMP1.D(),TMP1);
+-       IntegerMagnitude(D);
+-       fmov(Size::i64Bit,TMP2,VTMP1.D());
++       fmov(Size::i64Bit,VTMP2.D(),TMP3);
++       DyadicMagnitude(D);
++       mov(Size::i64Bit,TMP2,TMP1);
++       fmov(Size::i64Bit,TMP4,VTMP2.D());
++       sub(Size::i64Bit,TMP4,TMP4,TMP3);
++       fmov(Size::i64Bit,TMP1,VTMP1.D());
++       ForwardLabel ShiftB,Aligned;
++       (void)tbnz(TMP4,63,&ShiftB);
++       clz(Size::i64Bit,TMP3,TMP1);
++       add(Size::i64Bit,TMP4,TMP4,isDouble?11:40);
++       sub(Size::i64Bit,TMP3,TMP3,TMP4);
++       (void)tbnz(TMP3,63,&PreSlow);
++       sub(Size::i64Bit,TMP4,TMP4,isDouble?11:40);
++       lslv(Size::i64Bit,TMP1,TMP1,TMP4);
++       (void)b(&Aligned);
++       (void)Bind(&ShiftB);
++       sub(Size::i64Bit,TMP4,Reg::zr,TMP4);
++       clz(Size::i64Bit,TMP3,TMP2);
++       add(Size::i64Bit,TMP4,TMP4,isDouble?11:40);
++       sub(Size::i64Bit,TMP3,TMP3,TMP4);
++       (void)tbnz(TMP3,63,&PreSlow);
++       sub(Size::i64Bit,TMP4,TMP4,isDouble?11:40);
++       lslv(Size::i64Bit,TMP2,TMP2,TMP4);
++       (void)Bind(&Aligned);
+        add(Size::i64Bit,TMP1,TMP1,TMP2);
+        LoadConstant(Size::i64Bit,TMP4,UINT64_C(1)<<(isDouble?53:24));
+        sub(Size::i64Bit,TMP3,TMP4,TMP1);
+        (void)tbnz(TMP3,63,&PreSlow);
+-       // |a|+|b|<=2^p bounds either sum or difference independently of signs.
++       // All shifts were bounded before LSLV; the magnitude sum cannot wrap.
+      } else if(kind==FEXCore::HBX87::Mul||kind==FEXCore::HBX87::Div) {
+        umov<SubRegSize::i64Bit>(TMP2,A,0);
+        (void)cbz(Size::i64Bit,TMP2,&ExactReady);

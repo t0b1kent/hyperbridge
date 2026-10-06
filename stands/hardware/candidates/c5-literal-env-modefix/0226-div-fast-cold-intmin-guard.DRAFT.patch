@@ -1,0 +1,37 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -3968,22 +3968,21 @@
+   RaiseDivideErrorIf(Op, LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}),
+                      CondClass::EQ, false, true, 0, Size);
+   if (Signed) {
+-    // The ordinary divisor needs only ADD+CBZ. Keep the INT_MIN predicate in
+-    // an out-of-line -1 block; every operation is flag-neutral so #DE observes
+-    // the exact prefix flags. The guard is per instruction, never loop-hoisted.
++    // Only INT_MIN needs the -1 test. Keep it out of line so ordinary
++    // dividends, including division by -1, take the same two-instruction guard.
++    // Both predicates are flag-neutral; #DE retains the exact prefix state.
+     const auto PreviousBlock = GetCurrentBlock();
+-    auto MinusOneBlock = CreateNewCodeBlockAfter(PreviousBlock);
++    auto IntMinBlock = CreateNewCodeBlockAfter(PreviousBlock);
+     auto ContinueBlock = CreateNewCodeBlockAfter(PreviousBlock);
+-    Ref NotMinusOne = _Add(Size, LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}), Constant(1));
+-    CondJump(NotMinusOne, Constant(0), MinusOneBlock, ContinueBlock, CondClass::EQ, Size);
+-
+-    SetCurrentCodeBlock(MinusOneBlock);
+-    StartNewBlock();
+     const uint64_t IntMin = uint64_t {1} << (IR::OpSizeAsBits(Size) - 1);
+     Ref NotIntMin = _Xor(Size, LoadGPRRegister(X86State::REG_RAX), Constant(IntMin));
+-    RaiseDivideErrorIf(Op, NotIntMin, CondClass::EQ, false, true, 1, Size);
+-    // Non-minimum dividends with divisor -1 are valid. This extra jump is cold
+-    // for the usual divisor, and rejoins before any quotient/remainder write.
++    CondJump(NotIntMin, Constant(0), IntMinBlock, ContinueBlock, CondClass::EQ, Size);
++
++    SetCurrentCodeBlock(IntMinBlock);
++    StartNewBlock();
++    Ref NotMinusOne = _Add(Size, LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true}), Constant(1));
++    RaiseDivideErrorIf(Op, NotMinusOne, CondClass::EQ, false, true, 1, Size);
++    // INT_MIN divided by any nonzero divisor other than -1 is representable.
+     Jump(ContinueBlock);
+ 
+     SetCurrentCodeBlock(ContinueBlock);

@@ -1,0 +1,97 @@
+diff --git a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+--- a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
++++ b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+@@ -13,8 +13,14 @@
+ 
+ #include <atomic>
+ #include <cstdint>
++#include <cstdlib>
+ 
+ namespace FEXCore::ArchHelpers::Arm64 {
++static const bool MacRunnerSplitAtomicExact = [] {
++  const char* Value = std::getenv("MACRUNNER_FEX_SPLIT_ATOMIC_EXACT");
++  return Value && Value[0] == '1' && Value[1] == 0;
++}();
++static uint32_t MacRunnerExactSplitLock {};
+ constexpr uint32_t CASPAL_MASK = 0xBF'E0'FC'00;
+ constexpr uint32_t CASPAL_INST = 0x08'60'FC'00;
+ 
+@@ -338,6 +344,7 @@
+ 
+ static bool RunCASPAL(uint64_t* GPRs, uint32_t Size, uint32_t DesiredReg1, uint32_t DesiredReg2, uint32_t ExpectedReg1,
+                       uint32_t ExpectedReg2, uint32_t AddressReg, uint32_t* StrictSplitLockMutex) {
++  if (MacRunnerSplitAtomicExact) StrictSplitLockMutex = &MacRunnerExactSplitLock;
+ 
+   std::optional<FEXCore::Utils::SpinWaitLock::UniqueSpinMutex<uint32_t>> Lock {};
+   if (Size == 0) {
+@@ -425,7 +432,10 @@
+               // CAS managed to tear, we can't really solve this
+               // Continue down the path to let the guest know values weren't expected
+               FEXCORE_TELEMETRY_SET(TYPE_CAS_128BIT_TEAR, 1);
++              if (MacRunnerSplitAtomicExact) continue;
+             }
++          } else if (MacRunnerSplitAtomicExact) {
++            continue;
+           }
+ 
+           TmpExpected = TmpExpectedUpper;
+@@ -626,7 +636,8 @@
+ 
+ template<bool Retry>
+ static uint16_t DoCAS16(uint16_t DesiredSrc, uint16_t ExpectedSrc, uint64_t Addr, CASExpectedFn<uint16_t> ExpectedFunction,
+-                        CASDesiredFn<uint16_t> DesiredFunction, uint32_t* StrictSplitLockMutex) {
++                       CASDesiredFn<uint16_t> DesiredFunction, uint32_t* StrictSplitLockMutex) {
++  if (MacRunnerSplitAtomicExact) StrictSplitLockMutex = &MacRunnerExactSplitLock;
+   std::optional<FEXCore::Utils::SpinWaitLock::UniqueSpinMutex<uint32_t>> Lock {};
+ 
+   if ((Addr & 63) == 63) {
+@@ -678,7 +689,10 @@
+             // Continue down the path to let the guest know values weren't expected
+             Tear = true;
+             FEXCORE_TELEMETRY_SET(TYPE_CAS_16BIT_TEAR, 1);
++            if (MacRunnerSplitAtomicExact) continue;
+           }
++        } else if (MacRunnerSplitAtomicExact) {
++          continue;
+         }
+ 
+         ActualLower = ExpectedLower;
+@@ -902,6 +916,7 @@
+ template<bool Retry>
+ static uint32_t DoCAS32(uint32_t DesiredSrc, uint32_t ExpectedSrc, uint64_t Addr, CASExpectedFn<uint32_t> ExpectedFunction,
+                         CASDesiredFn<uint32_t> DesiredFunction, uint32_t* StrictSplitLockMutex) {
++  if (MacRunnerSplitAtomicExact) StrictSplitLockMutex = &MacRunnerExactSplitLock;
+   std::optional<FEXCore::Utils::SpinWaitLock::UniqueSpinMutex<uint32_t>> Lock {};
+ 
+   if ((Addr & 63) > 60) {
+@@ -964,7 +979,10 @@
+             // Continue down the path to let the guest know values weren't expected
+             Tear = true;
+             FEXCORE_TELEMETRY_SET(TYPE_CAS_32BIT_TEAR, 1);
++            if (MacRunnerSplitAtomicExact) continue;
+           }
++        } else if (MacRunnerSplitAtomicExact) {
++          continue;
+         }
+ 
+         TmpExpected = TmpExpectedUpper;
+@@ -1134,6 +1152,7 @@
+ template<bool Retry>
+ static uint64_t DoCAS64(uint64_t DesiredSrc, uint64_t ExpectedSrc, uint64_t Addr, CASExpectedFn<uint64_t> ExpectedFunction,
+                         CASDesiredFn<uint64_t> DesiredFunction, uint32_t* StrictSplitLockMutex) {
++  if (MacRunnerSplitAtomicExact) StrictSplitLockMutex = &MacRunnerExactSplitLock;
+   std::optional<FEXCore::Utils::SpinWaitLock::UniqueSpinMutex<uint32_t>> Lock {};
+ 
+   if ((Addr & 63) > 56) {
+@@ -1198,7 +1217,10 @@
+             // Continue down the path to let the guest know values weren't expected
+             Tear = true;
+             FEXCORE_TELEMETRY_SET(TYPE_CAS_64BIT_TEAR, 1);
++            if (MacRunnerSplitAtomicExact) continue;
+           }
++        } else if (MacRunnerSplitAtomicExact) {
++          continue;
+         }
+ 
+         TmpExpected = TmpExpectedUpper;
+

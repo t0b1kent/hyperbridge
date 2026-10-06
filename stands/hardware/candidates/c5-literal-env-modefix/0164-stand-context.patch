@@ -1,0 +1,30 @@
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -856,3 +856,4 @@
++  if (FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode()) SSANodeMultiplier = 256;
+ 
+   // Prepare restart via long jump in case branch encoding fails.
+   // This uses UncheckedLongJump since we don't implement std::longjmp in WoA setups
+@@ -994,6 +995,21 @@
+     }
+ 
+     if (!EmitX87Region(BlockNode, BlockIROp)) {
++      // Conservatively materialize before unqualified IR. Qualified regions
++      // and their leaf links keep the eight physical registers authoritative.
++      // Leaf GPR bookkeeping can carry the bank between separately compiled
++      // register regions. Everything else is an explicit legacy boundary.
++      bool GPROnly = true;
++      for (auto [CodeNode,IROp] : IR->GetCode(BlockNode)) {
++        switch (IROp->Op) {
++        case IR::OP_BEGINBLOCK:case IR::OP_ENDBLOCK:case IR::OP_GUESTOPCODE:
++        case IR::OP_INLINECONSTANT:case IR::OP_CONSTANT:
++        case IR::OP_STOREREGISTER:case IR::OP_ADD:case IR::OP_SUB:case IR::OP_AND:
++        case IR::OP_OR:case IR::OP_XOR:case IR::OP_JUMP:case IR::OP_CONDJUMP: break;
++        default:GPROnly=false;break;
++        }
++      }
++      if (!GPROnly) SpillX87StaticBank();
+       for (auto [CodeNode, IROp] : IR->GetCode(BlockNode)) EmitIR(IROp, CodeNode);
+     }
+ 

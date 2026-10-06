@@ -1,0 +1,62 @@
+diff --git a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+--- a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
++++ b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+@@ -355,6 +355,24 @@
+   }
+ }
+ 
++// 0202: establish host write intent on both split containers before committing
++// any guest bits, including a compare mismatch. Each CAS writes its observed
++// value only; a fault handler or competing writer changing it forces a reload.
++// This covers stable host permissions and native-PC continuation. Guest 4KiB
++// permission accounting and concurrent permission revocation belong to frontend.
++template<typename T>
++static void ValidateSplitWriteIntent(uint64_t Lower, uint64_t Upper, T (*Load)(uint64_t), bool (*Store)(T&, T, uint64_t)) {
++  while (true) {
++    T ActualUpper = Load(Upper);
++    T ActualLower = Load(Lower);
++    T ExpectedUpper = ActualUpper;
++    if (!Store(ExpectedUpper, ActualUpper, Upper)) continue;
++    T ExpectedLower = ActualLower;
++    if (!Store(ExpectedLower, ActualLower, Lower)) continue;
++    return;
++  }
++}
++
+ static bool RunCASPAL(uint64_t* GPRs, uint32_t Size, uint32_t DesiredReg1, uint32_t DesiredReg2, uint32_t ExpectedReg1,
+                       uint32_t ExpectedReg2, uint32_t AddressReg, uint32_t* StrictSplitLockMutex) {
+   if (MacRunnerSplitAtomicExact) StrictSplitLockMutex = &MacRunnerExactSplitLock;
+@@ -398,6 +416,7 @@
+       uint64_t AddrUpper = Addr + 8;
+ 
+       // Crosses a 16byte boundary
++      if (MacRunnerSplitAtomicExact) ValidateSplitWriteIntent<uint64_t>(Addr, AddrUpper, LoadAcquire64, StoreCAS64);
+       // Need to do 256bit atomic, but since that doesn't exist we need to do a dual CAS loop
+       __uint128_t Mask = ~0ULL;
+       Mask <<= Alignment * 8;
+@@ -674,6 +693,8 @@
+     // Need a dual 8bit CAS loop
+     uint64_t AddrUpper = Addr + 1;
+ 
++    if (MacRunnerSplitAtomicExact) ValidateSplitWriteIntent<uint8_t>(Addr, AddrUpper, LoadAcquire8, StoreCAS8);
++
+     while (1) {
+       uint8_t ActualUpper {};
+       uint8_t ActualLower {};
+@@ -956,6 +977,8 @@
+ 
+     uint64_t AddrUpper = Addr + 4;
+ 
++    if (MacRunnerSplitAtomicExact) ValidateSplitWriteIntent<uint32_t>(Addr, AddrUpper, LoadAcquire32, StoreCAS32);
++
+     uint64_t Mask = ~0U;
+     Mask <<= Alignment * 8;
+     uint64_t NegMask = ~Mask;
+@@ -1192,6 +1215,7 @@
+     uint64_t AddrUpper = Addr + 8;
+ 
+     // Crosses a 16byte boundary
++    if (MacRunnerSplitAtomicExact) ValidateSplitWriteIntent<uint64_t>(Addr, AddrUpper, LoadAcquire64, StoreCAS64);
+     // Need to do 256bit atomic, but since that doesn't exist we need to do a dual CAS loop
+     __uint128_t Mask = ~0ULL;
+     Mask <<= Alignment * 8;
