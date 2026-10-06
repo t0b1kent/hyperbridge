@@ -24,11 +24,16 @@ class CostTests(unittest.TestCase):
         self.assertEqual(result['allocation_bytes'], 12)
 
     def test_bad_ranges_and_missing_decode_fail(self):
-        for blocks in ([], [[0, 8], [4, 4]], [[0, 16]], [[1, 4]], [[0, 3]], [[-4, 4]]):
+        for blocks in ([], [[0, 0]], [[0, 8], [4, 4]], [[0, 16]], [[1, 4]], [[0, 3]], [[-4, 4]]):
             record = self.record(); record['subblocks'] = blocks
             with self.assertRaises(ValueError): measure.decode_cost(record)
         record = self.record(); record['host_hex'] = 'ffffffff' * 3
         with self.assertRaises(ValueError): measure.decode_cost(record)
+
+    def test_eliminated_empty_block_shares_next_offset(self):
+        record = self.record()
+        record['subblocks'] = [[0, 4], [4, 0], [4, 4]]
+        self.assertEqual(measure.decode_cost(record)['arm_instructions'], 2)
 
     def result(self):
         cost = measure.decode_cost(self.record())

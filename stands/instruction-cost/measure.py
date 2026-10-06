@@ -34,7 +34,13 @@ def decode_cost(record):
     mnemonics = Counter()
     end = 0
     for offset, size in blocks:
-        if offset < end or offset < 0 or size <= 0 or offset % 4 or size % 4 or offset + size > len(data):
+        if offset < 0 or size < 0 or offset % 4 or size % 4 or offset + size > len(data):
+            raise ValueError('overlapping, unaligned or out-of-bounds code block')
+        # FEX can retain an empty block after eliminating a jump. It occupies no
+        # host bytes; the next nonempty block may have exactly the same offset.
+        if size == 0:
+            continue
+        if offset < end:
             raise ValueError('overlapping, unaligned or out-of-bounds code block')
         instructions = list(decoder.disasm(data[offset:offset+size], offset))
         if sum(i.size for i in instructions) != size:
@@ -42,7 +48,7 @@ def decode_cost(record):
         mnemonics.update(i.mnemonic for i in instructions)
         end = offset + size
     arm = sum(mnemonics.values())
-    if not 0 < record['host_code_bytes'] <= len(data) or arm * 4 > record['host_code_bytes']:
+    if arm == 0 or not 0 < record['host_code_bytes'] <= len(data) or arm * 4 > record['host_code_bytes']:
         raise ValueError('debug code size inconsistent with emitted instructions')
     return {k: record[k] for k in ('guest_instructions', 'host_code_bytes', 'allocation_bytes')} | {
         'arm_instructions': arm, 'arm_per_guest': arm / record['guest_instructions'],
