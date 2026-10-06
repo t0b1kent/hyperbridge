@@ -86,6 +86,25 @@ class MergeTests(unittest.TestCase):
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_negative_patch_applies_away_from_start_of_file(self):
+        # Regression for first hosted failure: a hunk starting at line 1 implies
+        # start-of-file context and cannot be relocated to this actual function.
+        negative = Path(__file__).resolve().parents[1] / 'controls/div-overflow-disabled.patch'
+        body = ('int MacRunnerDivOverflowMode() {\n'
+                '  static const int Mode = [] {\n'
+                '    const char* Value = getenv("MACRUNNER_FEX_DIV_OVERFLOW_DE");\n'
+                "    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;\n"
+                '  }();\n  return Mode;\n}\n')
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp'
+            source.parent.mkdir(parents=True)
+            source.write_text('// prefix\n' * 100 + body + '// suffix\n')
+            checked = subprocess.run(['git', 'apply', '--check', str(negative)], cwd=directory, capture_output=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            applied = subprocess.run(['git', 'apply', str(negative)], cwd=directory, capture_output=True)
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            self.assertIn('const char* Value = nullptr;', source.read_text())
+
     def test_timeout_keeps_captured_stdout_and_stderr(self):
         raw, native = io.StringIO(), io.StringIO()
         error = subprocess.TimeoutExpired('fixture', 55, output=b'{"id":0}\n', stderr=b'fault\n')

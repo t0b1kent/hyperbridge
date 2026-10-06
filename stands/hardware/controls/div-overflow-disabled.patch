@@ -1,7 +1,7 @@
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-@@ -1,6 +1,6 @@
+@@ -45,7 +45,7 @@
  int MacRunnerDivOverflowMode() {
    static const int Mode = [] {
 -    const char* Value = getenv("MACRUNNER_FEX_DIV_OVERFLOW_DE");
@@ -9,3 +9,4 @@ diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source
      return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
    }();
    return Mode;
+ }
