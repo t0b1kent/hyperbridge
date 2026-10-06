@@ -32,6 +32,9 @@ function BuildC($name, $flags) {
   return $exe
 }
 $p5 = BuildC 'windows_process64-v5c' $probe
+$ts = Join-Path $bin 'thread_priority_starvation64.exe'
+& $cc -O1 -g0 -static -fno-stack-protector (Join-Path $src 'thread_priority_starvation64.c') -o $ts -lsynchronization
+if ($LASTEXITCODE -ne 0) { throw 'build failed: thread_priority_starvation64' }
 
 $m = Join-Path $Out 'machine.txt'
 (Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name) | Set-Content $m
@@ -81,6 +84,9 @@ $d5 = NewDir 'process-v5c'
 RunOne $p5 $d5 'list' '--list' 25000
 foreach ($k in 0..82) { RunOne $p5 $d5 ("cell-{0:d2}" -f $k) "cell $k" 25000 }
 
+$d6 = NewDir 'thread-priority'
+foreach ($rep in 1..3) { foreach ($k in 0..4) { RunOne $ts $d6 ("cell-$k-rep$rep") "$k 60" 90000 } }
+
 Get-Content $m
-foreach ($d in $d1, $d3, $d4, $d5) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+foreach ($d in $d1, $d3, $d4, $d5, $d6) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
 exit 0
