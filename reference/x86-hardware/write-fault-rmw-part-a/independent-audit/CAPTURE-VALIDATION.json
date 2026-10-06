@@ -1,0 +1,29 @@
+{
+  "counts": {
+    "rows": 38433,
+    "scalar_rows": 10359,
+    "one-two-clean-comparisons": 21644,
+    "scalar-modeled": 10359,
+    "faults": 39419,
+    "faults-with-rep-progress": 2160,
+    "rmw_rows": 24576,
+    "vector_rows": 3498,
+    "vector-modeled": 3498
+  },
+  "uncompressed_sha256": {
+    "scalar": [
+      "b049d2af26c8d296e4a778b0da393c71836940e51a9c2613ca61dc93b18f59a1",
+      "b049d2af26c8d296e4a778b0da393c71836940e51a9c2613ca61dc93b18f59a1"
+    ],
+    "rmw": [
+      "0fa750b812861c8a28841c94a7c9bdd3729ccbfc0c2cf6491db706d944496e49",
+      "0fa750b812861c8a28841c94a7c9bdd3729ccbfc0c2cf6491db706d944496e49"
+    ],
+    "vector": [
+      "7a52a7960bce55435e505cf9555b0dcbc1ec5fedc69e28c508ccc9bba088598f",
+      "7a52a7960bce55435e505cf9555b0dcbc1ec5fedc69e28c508ccc9bba088598f"
+    ]
+  },
+  "errors": [],
+  "pass": true
+}

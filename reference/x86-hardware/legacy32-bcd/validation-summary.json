@@ -1,0 +1,70 @@
+{
+  "bcd": {
+    "data_rows": 682408,
+    "comments": 45,
+    "raw_bytes": 27222929,
+    "gzip_bytes": 2103060,
+    "raw_sha256": "033b8ffc328c2df75aa888a2e045c38b62ecf46d4e6fe31a7547a3f00ab88904",
+    "gzip_sha256": "a3989795ab8466e6d02b812fffcf28fe8808d58cc9af7215ed24dda16c9bb2ac",
+    "C_checks": {
+      "rows": 682408,
+      "duplicate_pairs": 682408,
+      "result_checks": 682364,
+      "flag_checks": 682408,
+      "trap_checks": 44,
+      "mode_pairs": 0,
+      "salc_empirical_checks": 0,
+      "errors": 0
+    },
+    "full_repeat": "raw streams, C check logs, and deterministic gzip byte-identical"
+  },
+  "extra": {
+    "data_rows": 4840,
+    "comments": 495,
+    "raw_bytes": 320414,
+    "gzip_bytes": 21180,
+    "raw_sha256": "bd9aeb52688b7ffc4ab7187741a5a933c469b074928f726db07232e49dd80fbc",
+    "gzip_sha256": "23a4e80d50305b979638c7b2e3d9c275d764b05b3ab254497b8f24d66284abae",
+    "C_checks": {
+      "rows": 4840,
+      "duplicate_pairs": 4840,
+      "result_checks": 4610,
+      "flag_checks": 4840,
+      "trap_checks": 230,
+      "mode_pairs": 0,
+      "salc_empirical_checks": 512,
+      "errors": 0
+    },
+    "full_repeat": "raw streams, C check logs, and deterministic gzip byte-identical"
+  },
+  "control": {
+    "data_rows": 9680,
+    "comments": 1,
+    "raw_bytes": 551869,
+    "gzip_bytes": 32037,
+    "raw_sha256": "deac433e3dbf1664a5fa26d897e23715a32b848b39c9e1cc2a785ad69526d446",
+    "gzip_sha256": "217aa4b0883e124569bde5e36840b135f69e2f84ed93e0936d737090b2ca68a5",
+    "C_checks": {
+      "rows": 9680,
+      "duplicate_pairs": 4840,
+      "result_checks": 4840,
+      "flag_checks": 4840,
+      "trap_checks": 0,
+      "mode_pairs": 4840,
+      "salc_empirical_checks": 0,
+      "errors": 0
+    },
+    "full_repeat": "raw streams, C check logs, and deterministic gzip byte-identical"
+  },
+  "total_data_rows": 696928,
+  "trap_rows": {
+    "AAM": 44,
+    "BOUND": 208,
+    "INTO": 22
+  },
+  "cross_mode_pairs": 4840,
+  "architectural_flag_check_rows": 691576,
+  "architectural_success_result_check_rows": 691302,
+  "SALC_empirical_rows": 512,
+  "interpretation": "C flag_checks/result_checks include 512 explicitly empirical SALC cases; these are excluded from the architectural-only totals above. Mode-long rows additionally have 4840 exact pair comparisons."
+}

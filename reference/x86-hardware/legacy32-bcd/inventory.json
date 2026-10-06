@@ -1,0 +1,5842 @@
+[
+  {
+    "name": "DAA.al",
+    "width": 8,
+    "kind": "DAA",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_0",
+    "frame": 0
+  },
+  {
+    "name": "DAS.al",
+    "width": 8,
+    "kind": "DAS",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_1",
+    "frame": 0
+  },
+  {
+    "name": "AAA.ax",
+    "width": 16,
+    "kind": "AAA",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_2",
+    "frame": 0
+  },
+  {
+    "name": "AAS.ax",
+    "width": 16,
+    "kind": "AAS",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_3",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 0,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_4",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_5",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 2,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_6",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 3,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_7",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 4,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_8",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 5,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_9",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 6,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_10",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 7,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_11",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 8,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_12",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 9,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_13",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 10,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_14",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 11,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_15",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 12,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_16",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 13,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_17",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 14,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_18",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 15,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_19",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 16,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_20",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 17,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_21",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 18,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_22",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 19,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_23",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 20,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_24",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 21,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_25",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 22,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_26",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 23,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_27",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 24,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_28",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 25,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_29",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 26,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_30",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 27,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_31",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 28,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_32",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 29,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_33",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 30,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_34",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 31,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_35",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 32,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_36",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 33,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_37",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 34,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_38",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 35,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_39",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 36,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_40",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 37,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_41",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 38,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_42",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 39,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_43",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 40,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_44",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 41,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_45",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 42,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_46",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 43,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_47",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 44,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_48",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 45,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_49",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 46,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_50",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 47,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_51",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 48,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_52",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 49,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_53",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 50,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_54",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 51,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_55",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 52,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_56",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 53,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_57",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 54,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_58",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 55,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_59",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 56,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_60",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 57,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_61",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 58,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_62",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 59,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_63",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 60,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_64",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 61,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_65",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 62,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_66",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 63,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_67",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 64,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_68",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 65,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_69",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 66,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_70",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 67,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_71",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 68,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_72",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 69,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_73",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 70,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_74",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 71,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_75",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 72,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_76",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 73,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_77",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 74,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_78",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 75,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_79",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 76,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_80",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 77,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_81",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 78,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_82",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 79,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_83",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 80,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_84",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 81,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_85",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 82,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_86",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 83,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_87",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 84,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_88",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 85,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_89",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 86,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_90",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 87,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_91",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 88,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_92",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 89,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_93",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 90,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_94",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 91,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_95",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 92,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_96",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 93,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_97",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 94,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_98",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 95,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_99",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 96,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_100",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 97,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_101",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 98,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_102",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 99,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_103",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 100,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_104",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 101,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_105",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 102,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_106",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 103,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_107",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 104,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_108",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 105,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_109",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 106,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_110",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 107,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_111",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 108,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_112",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 109,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_113",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 110,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_114",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 111,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_115",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 112,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_116",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 113,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_117",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 114,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_118",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 115,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_119",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 116,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_120",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 117,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_121",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 118,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_122",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 119,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_123",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 120,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_124",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 121,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_125",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 122,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_126",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 123,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_127",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 124,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_128",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 125,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_129",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 126,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_130",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 127,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_131",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 128,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_132",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 129,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_133",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 130,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_134",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 131,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_135",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 132,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_136",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 133,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_137",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 134,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_138",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 135,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_139",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 136,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_140",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 137,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_141",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 138,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_142",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 139,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_143",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 140,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_144",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 141,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_145",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 142,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_146",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 143,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_147",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 144,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_148",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 145,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_149",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 146,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_150",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 147,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_151",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 148,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_152",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 149,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_153",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 150,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_154",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 151,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_155",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 152,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_156",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 153,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_157",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 154,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_158",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 155,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_159",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 156,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_160",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 157,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_161",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 158,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_162",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 159,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_163",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 160,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_164",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 161,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_165",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 162,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_166",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 163,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_167",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 164,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_168",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 165,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_169",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 166,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_170",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 167,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_171",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 168,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_172",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 169,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_173",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 170,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_174",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 171,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_175",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 172,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_176",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 173,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_177",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 174,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_178",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 175,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_179",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 176,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_180",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 177,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_181",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 178,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_182",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 179,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_183",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 180,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_184",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 181,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_185",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 182,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_186",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 183,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_187",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 184,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_188",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 185,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_189",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 186,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_190",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 187,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_191",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 188,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_192",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 189,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_193",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 190,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_194",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 191,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_195",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 192,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_196",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 193,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_197",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 194,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_198",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 195,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_199",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 196,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_200",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 197,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_201",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 198,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_202",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 199,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_203",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 200,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_204",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 201,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_205",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 202,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_206",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 203,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_207",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 204,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_208",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 205,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_209",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 206,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_210",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 207,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_211",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 208,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_212",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 209,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_213",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 210,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_214",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 211,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_215",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 212,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_216",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 213,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_217",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 214,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_218",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 215,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_219",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 216,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_220",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 217,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_221",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 218,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_222",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 219,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_223",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 220,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_224",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 221,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_225",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 222,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_226",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 223,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_227",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 224,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_228",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 225,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_229",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 226,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_230",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 227,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_231",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 228,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_232",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 229,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_233",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 230,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_234",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 231,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_235",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 232,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_236",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 233,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_237",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 234,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_238",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 235,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_239",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 236,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_240",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 237,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_241",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 238,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_242",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 239,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_243",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 240,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_244",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 241,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_245",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 242,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_246",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 243,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_247",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 244,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_248",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 245,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_249",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 246,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_250",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 247,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_251",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 248,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_252",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 249,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_253",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 250,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_254",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 251,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_255",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 252,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_256",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 253,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_257",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 254,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_258",
+    "frame": 0
+  },
+  {
+    "name": "AAM.imm",
+    "width": 16,
+    "kind": "AAM",
+    "immediate": 255,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_259",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 0,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_260",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_261",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 2,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_262",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 3,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_263",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 4,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_264",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 5,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_265",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 6,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_266",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 7,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_267",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 8,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_268",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 9,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_269",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 10,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_270",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 11,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_271",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 12,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_272",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 13,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_273",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 14,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_274",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 15,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_275",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 16,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_276",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 17,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_277",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 18,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_278",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 19,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_279",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 20,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_280",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 21,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_281",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 22,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_282",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 23,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_283",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 24,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_284",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 25,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_285",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 26,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_286",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 27,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_287",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 28,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_288",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 29,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_289",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 30,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_290",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 31,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_291",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 32,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_292",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 33,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_293",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 34,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_294",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 35,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_295",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 36,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_296",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 37,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_297",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 38,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_298",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 39,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_299",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 40,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_300",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 41,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_301",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 42,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_302",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 43,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_303",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 44,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_304",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 45,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_305",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 46,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_306",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 47,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_307",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 48,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_308",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 49,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_309",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 50,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_310",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 51,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_311",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 52,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_312",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 53,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_313",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 54,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_314",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 55,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_315",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 56,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_316",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 57,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_317",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 58,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_318",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 59,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_319",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 60,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_320",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 61,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_321",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 62,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_322",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 63,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_323",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 64,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_324",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 65,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_325",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 66,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_326",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 67,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_327",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 68,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_328",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 69,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_329",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 70,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_330",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 71,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_331",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 72,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_332",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 73,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_333",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 74,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_334",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 75,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_335",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 76,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_336",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 77,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_337",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 78,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_338",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 79,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_339",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 80,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_340",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 81,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_341",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 82,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_342",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 83,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_343",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 84,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_344",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 85,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_345",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 86,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_346",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 87,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_347",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 88,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_348",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 89,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_349",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 90,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_350",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 91,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_351",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 92,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_352",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 93,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_353",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 94,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_354",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 95,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_355",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 96,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_356",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 97,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_357",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 98,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_358",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 99,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_359",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 100,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_360",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 101,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_361",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 102,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_362",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 103,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_363",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 104,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_364",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 105,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_365",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 106,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_366",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 107,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_367",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 108,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_368",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 109,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_369",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 110,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_370",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 111,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_371",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 112,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_372",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 113,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_373",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 114,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_374",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 115,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_375",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 116,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_376",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 117,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_377",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 118,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_378",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 119,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_379",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 120,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_380",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 121,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_381",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 122,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_382",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 123,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_383",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 124,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_384",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 125,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_385",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 126,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_386",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 127,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_387",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 128,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_388",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 129,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_389",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 130,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_390",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 131,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_391",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 132,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_392",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 133,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_393",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 134,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_394",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 135,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_395",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 136,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_396",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 137,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_397",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 138,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_398",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 139,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_399",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 140,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_400",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 141,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_401",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 142,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_402",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 143,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_403",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 144,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_404",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 145,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_405",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 146,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_406",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 147,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_407",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 148,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_408",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 149,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_409",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 150,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_410",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 151,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_411",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 152,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_412",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 153,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_413",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 154,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_414",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 155,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_415",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 156,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_416",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 157,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_417",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 158,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_418",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 159,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_419",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 160,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_420",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 161,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_421",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 162,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_422",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 163,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_423",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 164,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_424",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 165,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_425",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 166,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_426",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 167,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_427",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 168,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_428",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 169,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_429",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 170,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_430",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 171,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_431",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 172,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_432",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 173,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_433",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 174,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_434",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 175,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_435",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 176,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_436",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 177,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_437",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 178,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_438",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 179,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_439",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 180,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_440",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 181,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_441",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 182,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_442",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 183,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_443",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 184,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_444",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 185,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_445",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 186,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_446",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 187,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_447",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 188,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_448",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 189,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_449",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 190,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_450",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 191,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_451",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 192,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_452",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 193,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_453",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 194,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_454",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 195,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_455",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 196,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_456",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 197,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_457",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 198,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_458",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 199,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_459",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 200,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_460",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 201,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_461",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 202,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_462",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 203,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_463",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 204,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_464",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 205,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_465",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 206,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_466",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 207,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_467",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 208,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_468",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 209,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_469",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 210,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_470",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 211,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_471",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 212,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_472",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 213,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_473",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 214,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_474",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 215,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_475",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 216,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_476",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 217,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_477",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 218,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_478",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 219,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_479",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 220,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_480",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 221,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_481",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 222,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_482",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 223,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_483",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 224,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_484",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 225,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_485",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 226,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_486",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 227,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_487",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 228,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_488",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 229,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_489",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 230,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_490",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 231,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_491",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 232,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_492",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 233,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_493",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 234,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_494",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 235,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_495",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 236,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_496",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 237,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_497",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 238,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_498",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 239,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_499",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 240,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_500",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 241,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_501",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 242,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_502",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 243,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_503",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 244,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_504",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 245,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_505",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 246,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_506",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 247,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_507",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 248,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_508",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 249,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_509",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 250,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_510",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 251,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_511",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 252,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_512",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 253,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_513",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 254,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_514",
+    "frame": 0
+  },
+  {
+    "name": "AAD.imm",
+    "width": 16,
+    "kind": "AAD",
+    "immediate": 255,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_515",
+    "frame": 0
+  },
+  {
+    "name": "PUSHA.regs",
+    "width": 16,
+    "kind": "PUSHA",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_516",
+    "frame": 16
+  },
+  {
+    "name": "PUSHAD.regs",
+    "width": 32,
+    "kind": "PUSHAD",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_517",
+    "frame": 32
+  },
+  {
+    "name": "POPA.regs",
+    "width": 16,
+    "kind": "POPA",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_518",
+    "frame": 0
+  },
+  {
+    "name": "POPAD.regs",
+    "width": 32,
+    "kind": "POPAD",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_519",
+    "frame": 0
+  },
+  {
+    "name": "BOUND.mem",
+    "width": 16,
+    "kind": "BOUND",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_520",
+    "frame": 0
+  },
+  {
+    "name": "BOUND.mem",
+    "width": 32,
+    "kind": "BOUND",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_521",
+    "frame": 0
+  },
+  {
+    "name": "INTO.of",
+    "width": 32,
+    "kind": "INTO",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_522",
+    "frame": 0
+  },
+  {
+    "name": "SALC.al",
+    "width": 8,
+    "kind": "SALC",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_523",
+    "frame": 0
+  },
+  {
+    "name": "INC.ax",
+    "width": 16,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 0,
+    "segment": -1,
+    "symbol": "op_524",
+    "frame": 0
+  },
+  {
+    "name": "INC.cx",
+    "width": 16,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 1,
+    "segment": -1,
+    "symbol": "op_525",
+    "frame": 0
+  },
+  {
+    "name": "INC.dx",
+    "width": 16,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 2,
+    "segment": -1,
+    "symbol": "op_526",
+    "frame": 0
+  },
+  {
+    "name": "INC.bx",
+    "width": 16,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 3,
+    "segment": -1,
+    "symbol": "op_527",
+    "frame": 0
+  },
+  {
+    "name": "INC.sp",
+    "width": 16,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 4,
+    "segment": -1,
+    "symbol": "op_528",
+    "frame": 0
+  },
+  {
+    "name": "INC.bp",
+    "width": 16,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 5,
+    "segment": -1,
+    "symbol": "op_529",
+    "frame": 0
+  },
+  {
+    "name": "INC.si",
+    "width": 16,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 6,
+    "segment": -1,
+    "symbol": "op_530",
+    "frame": 0
+  },
+  {
+    "name": "INC.di",
+    "width": 16,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 7,
+    "segment": -1,
+    "symbol": "op_531",
+    "frame": 0
+  },
+  {
+    "name": "INC.eax",
+    "width": 32,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 0,
+    "segment": -1,
+    "symbol": "op_532",
+    "frame": 0
+  },
+  {
+    "name": "INC.ecx",
+    "width": 32,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 1,
+    "segment": -1,
+    "symbol": "op_533",
+    "frame": 0
+  },
+  {
+    "name": "INC.edx",
+    "width": 32,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 2,
+    "segment": -1,
+    "symbol": "op_534",
+    "frame": 0
+  },
+  {
+    "name": "INC.ebx",
+    "width": 32,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 3,
+    "segment": -1,
+    "symbol": "op_535",
+    "frame": 0
+  },
+  {
+    "name": "INC.esp",
+    "width": 32,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 4,
+    "segment": -1,
+    "symbol": "op_536",
+    "frame": 0
+  },
+  {
+    "name": "INC.ebp",
+    "width": 32,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 5,
+    "segment": -1,
+    "symbol": "op_537",
+    "frame": 0
+  },
+  {
+    "name": "INC.esi",
+    "width": 32,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 6,
+    "segment": -1,
+    "symbol": "op_538",
+    "frame": 0
+  },
+  {
+    "name": "INC.edi",
+    "width": 32,
+    "kind": "INC",
+    "immediate": -1,
+    "register": 7,
+    "segment": -1,
+    "symbol": "op_539",
+    "frame": 0
+  },
+  {
+    "name": "DEC.ax",
+    "width": 16,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 0,
+    "segment": -1,
+    "symbol": "op_540",
+    "frame": 0
+  },
+  {
+    "name": "DEC.cx",
+    "width": 16,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 1,
+    "segment": -1,
+    "symbol": "op_541",
+    "frame": 0
+  },
+  {
+    "name": "DEC.dx",
+    "width": 16,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 2,
+    "segment": -1,
+    "symbol": "op_542",
+    "frame": 0
+  },
+  {
+    "name": "DEC.bx",
+    "width": 16,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 3,
+    "segment": -1,
+    "symbol": "op_543",
+    "frame": 0
+  },
+  {
+    "name": "DEC.sp",
+    "width": 16,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 4,
+    "segment": -1,
+    "symbol": "op_544",
+    "frame": 0
+  },
+  {
+    "name": "DEC.bp",
+    "width": 16,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 5,
+    "segment": -1,
+    "symbol": "op_545",
+    "frame": 0
+  },
+  {
+    "name": "DEC.si",
+    "width": 16,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 6,
+    "segment": -1,
+    "symbol": "op_546",
+    "frame": 0
+  },
+  {
+    "name": "DEC.di",
+    "width": 16,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 7,
+    "segment": -1,
+    "symbol": "op_547",
+    "frame": 0
+  },
+  {
+    "name": "DEC.eax",
+    "width": 32,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 0,
+    "segment": -1,
+    "symbol": "op_548",
+    "frame": 0
+  },
+  {
+    "name": "DEC.ecx",
+    "width": 32,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 1,
+    "segment": -1,
+    "symbol": "op_549",
+    "frame": 0
+  },
+  {
+    "name": "DEC.edx",
+    "width": 32,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 2,
+    "segment": -1,
+    "symbol": "op_550",
+    "frame": 0
+  },
+  {
+    "name": "DEC.ebx",
+    "width": 32,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 3,
+    "segment": -1,
+    "symbol": "op_551",
+    "frame": 0
+  },
+  {
+    "name": "DEC.esp",
+    "width": 32,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 4,
+    "segment": -1,
+    "symbol": "op_552",
+    "frame": 0
+  },
+  {
+    "name": "DEC.ebp",
+    "width": 32,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 5,
+    "segment": -1,
+    "symbol": "op_553",
+    "frame": 0
+  },
+  {
+    "name": "DEC.esi",
+    "width": 32,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 6,
+    "segment": -1,
+    "symbol": "op_554",
+    "frame": 0
+  },
+  {
+    "name": "DEC.edi",
+    "width": 32,
+    "kind": "DEC",
+    "immediate": -1,
+    "register": 7,
+    "segment": -1,
+    "symbol": "op_555",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.es",
+    "width": 16,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 0,
+    "symbol": "op_556",
+    "frame": 16
+  },
+  {
+    "name": "POP.es",
+    "width": 16,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 0,
+    "symbol": "op_557",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.cs",
+    "width": 16,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 1,
+    "symbol": "op_558",
+    "frame": 16
+  },
+  {
+    "name": "PUSH.ss",
+    "width": 16,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 2,
+    "symbol": "op_559",
+    "frame": 16
+  },
+  {
+    "name": "POP.ss",
+    "width": 16,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 2,
+    "symbol": "op_560",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.ds",
+    "width": 16,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 3,
+    "symbol": "op_561",
+    "frame": 16
+  },
+  {
+    "name": "POP.ds",
+    "width": 16,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 3,
+    "symbol": "op_562",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.fs",
+    "width": 16,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 4,
+    "symbol": "op_563",
+    "frame": 16
+  },
+  {
+    "name": "POP.fs",
+    "width": 16,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 4,
+    "symbol": "op_564",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.gs",
+    "width": 16,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 5,
+    "symbol": "op_565",
+    "frame": 16
+  },
+  {
+    "name": "POP.gs",
+    "width": 16,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 5,
+    "symbol": "op_566",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.es",
+    "width": 32,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 0,
+    "symbol": "op_567",
+    "frame": 32
+  },
+  {
+    "name": "POP.es",
+    "width": 32,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 0,
+    "symbol": "op_568",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.cs",
+    "width": 32,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 1,
+    "symbol": "op_569",
+    "frame": 32
+  },
+  {
+    "name": "PUSH.ss",
+    "width": 32,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 2,
+    "symbol": "op_570",
+    "frame": 32
+  },
+  {
+    "name": "POP.ss",
+    "width": 32,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 2,
+    "symbol": "op_571",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.ds",
+    "width": 32,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 3,
+    "symbol": "op_572",
+    "frame": 32
+  },
+  {
+    "name": "POP.ds",
+    "width": 32,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 3,
+    "symbol": "op_573",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.fs",
+    "width": 32,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 4,
+    "symbol": "op_574",
+    "frame": 32
+  },
+  {
+    "name": "POP.fs",
+    "width": 32,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 4,
+    "symbol": "op_575",
+    "frame": 0
+  },
+  {
+    "name": "PUSH.gs",
+    "width": 32,
+    "kind": "PUSHSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 5,
+    "symbol": "op_576",
+    "frame": 32
+  },
+  {
+    "name": "POP.gs",
+    "width": 32,
+    "kind": "POPSEG",
+    "immediate": -1,
+    "register": -1,
+    "segment": 5,
+    "symbol": "op_577",
+    "frame": 0
+  },
+  {
+    "name": "LAHF.ah",
+    "width": 16,
+    "kind": "LAHF",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_578",
+    "frame": 0
+  },
+  {
+    "name": "SAHF.ah",
+    "width": 16,
+    "kind": "SAHF",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_579",
+    "frame": 0
+  },
+  {
+    "name": "ARPL.ax_bx",
+    "width": 16,
+    "kind": "ARPL",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_580",
+    "frame": 0
+  },
+  {
+    "name": "ADD.compat",
+    "width": 32,
+    "kind": "ADD",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_581",
+    "frame": 0
+  },
+  {
+    "name": "SUB.compat",
+    "width": 32,
+    "kind": "SUB",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_582",
+    "frame": 0
+  },
+  {
+    "name": "SHL.compat",
+    "width": 32,
+    "kind": "SHL",
+    "immediate": -1,
+    "register": -1,
+    "segment": -1,
+    "symbol": "op_583",
+    "frame": 0
+  }
+]

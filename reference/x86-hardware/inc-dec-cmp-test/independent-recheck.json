@@ -1,0 +1,537 @@
+{
+  "status": "PASS",
+  "files": {
+    "A-inc-dec.csv": {
+      "rows": 100832,
+      "groups": [
+        {
+          "op": "dec",
+          "width": 8,
+          "flags_in": "0x0",
+          "rows": 256
+        },
+        {
+          "op": "dec",
+          "width": 8,
+          "flags_in": "0x1",
+          "rows": 256
+        },
+        {
+          "op": "dec",
+          "width": 8,
+          "flags_in": "0x8d4",
+          "rows": 256
+        },
+        {
+          "op": "dec",
+          "width": 8,
+          "flags_in": "0x8d5",
+          "rows": 256
+        },
+        {
+          "op": "dec",
+          "width": 16,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 16,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 16,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 16,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 32,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 32,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 32,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 32,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 64,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 64,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 64,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "dec",
+          "width": 64,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 8,
+          "flags_in": "0x0",
+          "rows": 256
+        },
+        {
+          "op": "inc",
+          "width": 8,
+          "flags_in": "0x1",
+          "rows": 256
+        },
+        {
+          "op": "inc",
+          "width": 8,
+          "flags_in": "0x8d4",
+          "rows": 256
+        },
+        {
+          "op": "inc",
+          "width": 8,
+          "flags_in": "0x8d5",
+          "rows": 256
+        },
+        {
+          "op": "inc",
+          "width": 16,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 16,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 16,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 16,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 32,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 32,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 32,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 32,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 64,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 64,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 64,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "inc",
+          "width": 64,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        }
+      ]
+    },
+    "B-add1-sub1.csv": {
+      "rows": 100832,
+      "groups": [
+        {
+          "op": "add1",
+          "width": 8,
+          "flags_in": "0x0",
+          "rows": 256
+        },
+        {
+          "op": "add1",
+          "width": 8,
+          "flags_in": "0x1",
+          "rows": 256
+        },
+        {
+          "op": "add1",
+          "width": 8,
+          "flags_in": "0x8d4",
+          "rows": 256
+        },
+        {
+          "op": "add1",
+          "width": 8,
+          "flags_in": "0x8d5",
+          "rows": 256
+        },
+        {
+          "op": "add1",
+          "width": 16,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 16,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 16,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 16,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 32,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 32,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 32,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 32,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 64,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 64,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 64,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "add1",
+          "width": 64,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 8,
+          "flags_in": "0x0",
+          "rows": 256
+        },
+        {
+          "op": "sub1",
+          "width": 8,
+          "flags_in": "0x1",
+          "rows": 256
+        },
+        {
+          "op": "sub1",
+          "width": 8,
+          "flags_in": "0x8d4",
+          "rows": 256
+        },
+        {
+          "op": "sub1",
+          "width": 8,
+          "flags_in": "0x8d5",
+          "rows": 256
+        },
+        {
+          "op": "sub1",
+          "width": 16,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 16,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 16,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 16,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 32,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 32,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 32,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 32,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 64,
+          "flags_in": "0x0",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 64,
+          "flags_in": "0x1",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 64,
+          "flags_in": "0x8d4",
+          "rows": 4116
+        },
+        {
+          "op": "sub1",
+          "width": 64,
+          "flags_in": "0x8d5",
+          "rows": 4116
+        }
+      ]
+    },
+    "C-memory-cmp-test.csv": {
+      "rows": 289120,
+      "groups": [
+        {
+          "op": "cmp_m16_imm16",
+          "width": 16,
+          "flags_in": "0x0",
+          "rows": 4496
+        },
+        {
+          "op": "cmp_m16_imm16",
+          "width": 16,
+          "flags_in": "0x8d5",
+          "rows": 4496
+        },
+        {
+          "op": "cmp_m16_imm8",
+          "width": 16,
+          "flags_in": "0x0",
+          "rows": 4496
+        },
+        {
+          "op": "cmp_m16_imm8",
+          "width": 16,
+          "flags_in": "0x8d5",
+          "rows": 4496
+        },
+        {
+          "op": "cmp_m32_imm8",
+          "width": 32,
+          "flags_in": "0x0",
+          "rows": 4496
+        },
+        {
+          "op": "cmp_m32_imm8",
+          "width": 32,
+          "flags_in": "0x8d5",
+          "rows": 4496
+        },
+        {
+          "op": "cmp_m8_imm8",
+          "width": 8,
+          "flags_in": "0x0",
+          "rows": 65536
+        },
+        {
+          "op": "cmp_m8_imm8",
+          "width": 8,
+          "flags_in": "0x8d5",
+          "rows": 65536
+        },
+        {
+          "op": "test_m8_imm8",
+          "width": 8,
+          "flags_in": "0x0",
+          "rows": 65536
+        },
+        {
+          "op": "test_m8_imm8",
+          "width": 8,
+          "flags_in": "0x8d5",
+          "rows": 65536
+        }
+      ]
+    },
+    "D-high-byte.csv": {
+      "rows": 2048,
+      "groups": [
+        {
+          "op": "dec_ch",
+          "width": 8,
+          "flags_in": "0x0",
+          "rows": 256
+        },
+        {
+          "op": "dec_ch",
+          "width": 8,
+          "flags_in": "0x1",
+          "rows": 256
+        },
+        {
+          "op": "dec_ch",
+          "width": 8,
+          "flags_in": "0x8d4",
+          "rows": 256
+        },
+        {
+          "op": "dec_ch",
+          "width": 8,
+          "flags_in": "0x8d5",
+          "rows": 256
+        },
+        {
+          "op": "inc_ah",
+          "width": 8,
+          "flags_in": "0x0",
+          "rows": 256
+        },
+        {
+          "op": "inc_ah",
+          "width": 8,
+          "flags_in": "0x1",
+          "rows": 256
+        },
+        {
+          "op": "inc_ah",
+          "width": 8,
+          "flags_in": "0x8d4",
+          "rows": 256
+        },
+        {
+          "op": "inc_ah",
+          "width": 8,
+          "flags_in": "0x8d5",
+          "rows": 256
+        }
+      ]
+    }
+  },
+  "test_af_observed": {
+    "0x0:0": 65536,
+    "0x8d5:0": 65536
+  },
+  "sha256": {
+    "A-inc-dec.csv": "a3f8943432ea1bf347cd697fa6812293321b8498d1832b386f9a1a2568d0082f",
+    "B-add1-sub1.csv": "25caa5b03d028638a41864bfc59153b60e70c240bc82fcc3a67c8c93ac9a7d76",
+    "C-memory-cmp-test.csv": "250decd91dbd2cd024914511b6a9270e8d8a29be20cf219729a5ac7987d28ea5",
+    "D-high-byte.csv": "53352c5b03abb71d026b0977f455fcc9963be502cc3b253da76ce95fd5a38c25"
+  },
+  "errors": [],
+  "coverage_errors": 0,
+  "high_low_byte_rows_matched": 2048,
+  "repeat_byte_identity": {
+    "A-inc-dec.csv": true,
+    "B-add1-sub1.csv": true,
+    "C-memory-cmp-test.csv": true,
+    "D-high-byte.csv": true
+  },
+  "total_rows": 492832
+}

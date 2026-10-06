@@ -1,0 +1,137 @@
+{
+  "shifts": {
+    "forms": 1984,
+    "rows": 87296,
+    "traps": 0,
+    "before_flags": {
+      "0202": 43648,
+      "0ad7": 43648
+    },
+    "gzip_bytes": 331574,
+    "sha256_raw": "b0be4483af4d7ba94ac4fa844d556de00ac20c1a78457c8d5e3cdfcbb2c9e2b8",
+    "sha256_gzip": "c5970080c5e600c8726bb0b6bd7a0642b751534525df0bc6c909e75a85472783",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "rotates": {
+    "forms": 1984,
+    "rows": 87296,
+    "traps": 0,
+    "before_flags": {
+      "0202": 43648,
+      "0ad7": 43648
+    },
+    "gzip_bytes": 406083,
+    "sha256_raw": "9232dd1af20140d098721fdd79af1306682bc9365d1124546dc6128bfd98dd52",
+    "sha256_gzip": "a1d4e58282ad4f187975a14c3f4b935c1d73bb537459ab1f0b848f564ebb1fa7",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "double": {
+    "forms": 768,
+    "rows": 743424,
+    "traps": 0,
+    "before_flags": {
+      "0202": 371712,
+      "0ad7": 371712
+    },
+    "gzip_bytes": 2394061,
+    "sha256_raw": "200a6520ac28c1ce2242a8f1722f8ef200d4ed2e98b4c737a5bfa412be0b83e2",
+    "sha256_gzip": "28986ab09ceeebaaec791385bbbde94c5b314becbfb511a77654605dc0d7d344",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "multiply": {
+    "forms": 51,
+    "rows": 49368,
+    "traps": 0,
+    "before_flags": {
+      "0202": 24684,
+      "0ad7": 24684
+    },
+    "gzip_bytes": 155979,
+    "sha256_raw": "8b7cf6fd359da1fd2995392e0b9e5f4ea1ca8c1f8027818aa3713d9f68aaf20b",
+    "sha256_gzip": "12bca4109eec5ddeac893f9343d22f9c66a9a36761cf7ae18ffc312272512bc8",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "divide": {
+    "forms": 8,
+    "rows": 174256,
+    "traps": 100856,
+    "before_flags": {
+      "0202": 87128,
+      "0ad7": 87128
+    },
+    "gzip_bytes": 659726,
+    "sha256_raw": "738a7555f436a93f98f1eb4d1ec427371a1e12b6d84bebb53333e5f06feb6287",
+    "sha256_gzip": "8dbfc7d72ff468ef2c897fd0a21e4c24d56154901c75fb641744de5f6e7b277b",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "bitscan": {
+    "forms": 15,
+    "rows": 14520,
+    "traps": 0,
+    "before_flags": {
+      "0202": 7260,
+      "0ad7": 7260
+    },
+    "gzip_bytes": 40846,
+    "sha256_raw": "eab6603b04a5e95194cd82efdc2c95f0cac82442aab343c102fd6f27a77802b2",
+    "sha256_gzip": "46ddd2e03ea0fce9910d4f28b19faf517ef61b217ec983df4f4057fca7c50474",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "bittest": {
+    "forms": 192,
+    "rows": 34848,
+    "traps": 0,
+    "before_flags": {
+      "0202": 17424,
+      "0ad7": 17424
+    },
+    "gzip_bytes": 126596,
+    "sha256_raw": "cc34ee796bd23c0f7eabcd683cc02fa6a4a3b32f88e631dfc3d4e97fdf429bd2",
+    "sha256_gzip": "1487e7f9d0abc86c24084d92c381150664d0ed7cb87d332479292868225f952d",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "logic": {
+    "forms": 16,
+    "rows": 15488,
+    "traps": 0,
+    "before_flags": {
+      "0202": 7744,
+      "0ad7": 7744
+    },
+    "gzip_bytes": 48602,
+    "sha256_raw": "0416a7530e2f7000e22451c7b4106ebbd5c38e323bf36d77ce4fa95225b93a3e",
+    "sha256_gzip": "0cd0f926db8a597c128c66e0c2a53fbdd5435932a864238d62711b79ec9effd0",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "misc": {
+    "forms": 11,
+    "rows": 131692,
+    "traps": 0,
+    "before_flags": {
+      "0202": 65846,
+      "0ad7": 65846
+    },
+    "gzip_bytes": 410882,
+    "sha256_raw": "8f0319123f1f4d0b0afbc91667222d93d7576cc2e487ce975d2050478274026f",
+    "sha256_gzip": "14eac5fa2c0e48823804aadffd39fe6c0a65d11cf23fbc2719c685b9d3d319e5",
+    "per_form_counts": "all exact; independent expected products",
+    "field_widths": "all exact"
+  },
+  "09-bmi": {
+    "rows": 286616,
+    "sha256_raw": "553e595227ca5b06c8125861d61e7903e6ca63ab0345c5266704ca07203a1b50",
+    "gzip_bytes": 874072,
+    "sha256_gzip": "05ec7ca83c44f5ba13cec3f844f672f1d28d8c84763b570967112406b81988a8",
+    "detail": "bmi_RULE_CHECKS.txt"
+  },
+  "total_rows": 1624804,
+  "total_result_gzip_bytes": 5448421
+}

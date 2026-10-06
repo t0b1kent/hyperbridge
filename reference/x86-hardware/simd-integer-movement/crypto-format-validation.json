@@ -1,0 +1,7 @@
+{
+  "family": "crypto",
+  "rows_checked": 37560,
+  "scalar_rows": 216,
+  "fault_rows": 4136,
+  "standard_destination_slots": "PASS"
+}

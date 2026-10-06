@@ -1,0 +1,56 @@
+{
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 1650,
+      "sha256": "5ef653e85baacba0a0abd00490a25914895df91875ee02b2956b9f4f9fb7c00a"
+    },
+    {
+      "path": "a-native-LICENSE",
+      "bytes": 1063,
+      "sha256": "7de1e115d165f176e68f962acdb809b5ab8d8ae78d3981e0701392b2ac50c713"
+    },
+    {
+      "path": "a-native-forms.S",
+      "bytes": 2701,
+      "sha256": "6c750686d6ed997bf552480b1c289afb9e269aa9c5e1db16c70a1a16c8344994"
+    },
+    {
+      "path": "a-native-noncanonical.tsv",
+      "bytes": 1196,
+      "sha256": "4cacbbcde70811dc43a15f99d182be2ef5c7d418919ee4853fbf8b8e2aad7d3c"
+    },
+    {
+      "path": "a-native-repeat.tsv",
+      "bytes": 9980,
+      "sha256": "9b4bb85295aa1241d9506e81f49631e5816b1fb41a6c0d6c8334bf965f59a7b9"
+    },
+    {
+      "path": "a-native-summary.json",
+      "bytes": 624,
+      "sha256": "d6880c1c71c678970abb5ae9e2b60e53ac0a0c801ee2613bb4c111c6ffa151cb"
+    },
+    {
+      "path": "a-native-validate.py",
+      "bytes": 4526,
+      "sha256": "733668ce9a51c787b36c6df12d51c14c75165fcfde3cf1f27bd4c14b3f48392d"
+    },
+    {
+      "path": "a-native.c",
+      "bytes": 10002,
+      "sha256": "b000e607931fa9bcb9be2811f74614af561287d23a006676c282d293fca660a5"
+    },
+    {
+      "path": "a-native.tsv",
+      "bytes": 9980,
+      "sha256": "9b4bb85295aa1241d9506e81f49631e5816b1fb41a6c0d6c8334bf965f59a7b9"
+    },
+    {
+      "path": "commands-a.sh",
+      "bytes": 2679,
+      "sha256": "e8ec223d1eb1ab0693fce8507f60b0adeabba40904722fc0b85419b465e72aa9"
+    }
+  ],
+  "license": "MIT",
+  "compiled_files": 0
+}

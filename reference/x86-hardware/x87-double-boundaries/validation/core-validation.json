@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "configurations": 84,
+  "random_cases": 84000000,
+  "total_cases": 85059520,
+  "example_rows": 27695,
+  "source_sha256": "f3e883dadb803b1e6d9695cb8e18ae2ba90e5c2665257e2b99fd58c2755a54bd",
+  "files": {
+    "core-counts.csv": {
+      "sha256": "3c06408df1c1b5e84148f290d529579cba0d7d737373cbdc583c486fbb2a692b",
+      "bytes": 105682,
+      "repeat_byte_identical": true
+    },
+    "core-examples.csv": {
+      "sha256": "38f4fc82bf39e98520eb4883bbde966540b13401e373dfb2665a02db3c49f260",
+      "bytes": 5292579,
+      "repeat_byte_identical": true
+    }
+  },
+  "all_pc24_pc53_guarded_value_and_flag_failures": 0
+}

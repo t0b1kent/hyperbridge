@@ -1,0 +1,22 @@
+# Notes
+
+- All sources in this directory are original and MIT licensed. No external sources were downloaded or executed; no packages were installed.
+- Native Linux x86-64 is executed on the CPU identified in MACHINE.txt. The hypervisor flag is disclosed; there is no use of QEMU or another instruction emulator.
+- Stage-1 v1 sidecars named compressed .txt.gz files, whereas the receiver expected uncompressed .txt hashes following 0001. Verified replacement v2 changed sidecar convention only. Final sidecars hash uncompressed native records, and COMPRESSED-SHA256.txt explicitly hashes gzip files.
+- Final NaN slot tags use bit 8 instead of the interim bit 20 so payload-order tests include both source winners. Output is regenerated from the changed deterministic input sampling, never hand-edited.
+- During self-review, high-precision FPATAN reference handling was corrected for negative-zero y on the negative x axis. The hardware data was unchanged. Correct signed-zero branches and 320/640-bit convergence are now checked.
+- FXSAVE and FNSTENV differ in visible pointer/opcode fields on this CPU. Both views are retained; normalization never equates an update with a preserved field. Unknown pointers cause validation failure.
+- The generated 64-step FPREM/FPREM1 chains are fixed-length so row counts are known in advance. All 384 chains finish with C2 clear. Steps after convergence intentionally continue to show quotient-bit behavior on a completed remainder.
+- No timestamps, random inputs, credentials, environment-variable dumps, machine hostname or network addresses are present in result records.
+
+## Capture interference discovered and measured
+
+One end-to-end repetition showed a masked FNSTENV post-snapshot with legacy FOP/FIP/FDP zero rather than the seeded values, even though the target FNSTENV memory result still retained them. No result row was patched. A getrusage-only guard was insufficient: a later TRACE_FNCLEX row lost pointers without a guest-visible voluntary/involuntary context switch.
+
+Original independent `context_switch_probe.c` reproduces pointer loss across a measured scheduler switch: three no-sleep controls preserve the synthetic FOP/FIP/FDP; three 1 ms sleep trials each switch once and produce zero pointers. `signal_context_probe.c` separately shows that an empty signal handler also clears the fields without a scheduler counter change, whereas getpid alone does not. These sources and literal observations are included. No real machine addresses appear; the pointer values in these probes are public synthetic constants.
+
+A bounded timing/migration isolation rule was then fixed at 5,000 invariant-TSC ticks and 128 attempts. Subsequent instrumented *unfiltered* trials (100 runs, 367,200 records) showed 10 pointer-changing captures; every one took 62,504–542,490 ticks. All ten complete original/reference rows and exact measured timing metadata are preserved in capture-interference-evidence.json. Some delayed windows retained the same values, so latency is a conservative isolation condition, not a claim that every delay damages state. Unobserved host preemption or signal/interrupt save/restore remain possible explanations of counter-invisible events; the precise cause of each stress event is not established.
+
+Separately, 100 filtered environment runs (367,200 records) were byte-identical. There were 142 whole windows rejected for timing/migration and 10 for measured context-switch change (these categories may overlap); see capture-stress-validation.txt. This is observed stability under an explicit measurement condition, not a guarantee against every future interruption.
+
+Every class now applies the same pre/post thread-counter guard and, for non-trapping captures, RDTSCP/TSC_AUX latency/migration guard around the complete restore → instruction → snapshots window. SIGFPE cases retain the counter and migration guards but are latency-exempt because signal entry is the phenomenon being measured. Failed windows are entirely re-executed from the original input; no acceptance decision reads numerical, tag or pointer results. The 128-attempt limit fails explicitly rather than omitting the case. Attempt counts and timings go only to separate diagnostics, never the deterministic native corpus. Diagnostic `build/oracle environment --timing-unfiltered` disables the timing filter explicitly for observing interference; normal run.sh never uses it.

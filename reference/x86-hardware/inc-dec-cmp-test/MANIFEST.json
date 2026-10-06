@@ -1,0 +1,242 @@
+{
+  "dataset": "inc-dec-cmp-test",
+  "machine": "AMD EPYC 9V74, family 25/model 17/stepping 1, Linux 6.18.44 x86-64 KVM guest",
+  "measured": "492,832 data rows per run: A 100,832; B 100,832; C 289,120; D 2,048. Two complete captures have identical CSV bytes.",
+  "files": [
+    {
+      "path": "A-inc-dec.csv.tar.gz",
+      "sha256": "3ea0fb47c03c30e6fcfd98904148271698a146d245a72e4d271fd8b3e6285dfa",
+      "bytes": 735323,
+      "original_path": "A-inc-dec.csv",
+      "original_sha256": "a3f8943432ea1bf347cd697fa6812293321b8498d1832b386f9a1a2568d0082f",
+      "original_bytes": 7862887,
+      "text_payload_sha256": "a3f8943432ea1bf347cd697fa6812293321b8498d1832b386f9a1a2568d0082f"
+    },
+    {
+      "path": "B-add1-sub1.csv.tar.gz",
+      "sha256": "ce377115bc2830c58fd24ac6e760e715c4bba64492dc0407cf3d46291df404c2",
+      "bytes": 698460,
+      "original_path": "B-add1-sub1.csv",
+      "original_sha256": "25caa5b03d028638a41864bfc59153b60e70c240bc82fcc3a67c8c93ac9a7d76",
+      "original_bytes": 7963719,
+      "text_payload_sha256": "25caa5b03d028638a41864bfc59153b60e70c240bc82fcc3a67c8c93ac9a7d76"
+    },
+    {
+      "path": "C-memory-cmp-test.csv.tar.gz",
+      "sha256": "1b2c9fdf378946b0eb6909f28a9535d9d34ce5aecfbd7039d2abff7f2f4922d9",
+      "bytes": 1601783,
+      "original_path": "C-memory-cmp-test.csv",
+      "original_sha256": "250decd91dbd2cd024914511b6a9270e8d8a29be20cf219729a5ac7987d28ea5",
+      "original_bytes": 24769255,
+      "text_payload_sha256": "250decd91dbd2cd024914511b6a9270e8d8a29be20cf219729a5ac7987d28ea5"
+    },
+    {
+      "path": "D-high-byte.csv",
+      "sha256": "53352c5b03abb71d026b0977f455fcc9963be502cc3b253da76ce95fd5a38c25",
+      "bytes": 163879,
+      "original_path": "D-high-byte.csv",
+      "original_sha256": "53352c5b03abb71d026b0977f455fcc9963be502cc3b253da76ce95fd5a38c25",
+      "original_bytes": 163879,
+      "text_payload_sha256": "53352c5b03abb71d026b0977f455fcc9963be502cc3b253da76ce95fd5a38c25"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "7de1e115d165f176e68f962acdb809b5ab8d8ae78d3981e0701392b2ac50c713",
+      "bytes": 1063,
+      "original_path": "LICENSE",
+      "original_sha256": "7de1e115d165f176e68f962acdb809b5ab8d8ae78d3981e0701392b2ac50c713",
+      "original_bytes": 1063,
+      "text_payload_sha256": "7de1e115d165f176e68f962acdb809b5ab8d8ae78d3981e0701392b2ac50c713"
+    },
+    {
+      "path": "build.sh",
+      "sha256": "3502db85972ddb72870371bd87fb014d6b3b12d9aff25a4079197b902c124def",
+      "bytes": 695,
+      "original_path": "build.sh",
+      "original_sha256": "3502db85972ddb72870371bd87fb014d6b3b12d9aff25a4079197b902c124def",
+      "original_bytes": 695,
+      "text_payload_sha256": "3502db85972ddb72870371bd87fb014d6b3b12d9aff25a4079197b902c124def"
+    },
+    {
+      "path": "encoding-validation.json",
+      "sha256": "704115f29ee8787f4de689d12efa1833a180ea584ffa73bd63bc3c2fd2800012",
+      "bytes": 971,
+      "original_path": "encoding-validation.json",
+      "original_sha256": "704115f29ee8787f4de689d12efa1833a180ea584ffa73bd63bc3c2fd2800012",
+      "original_bytes": 971,
+      "text_payload_sha256": "704115f29ee8787f4de689d12efa1833a180ea584ffa73bd63bc3c2fd2800012"
+    },
+    {
+      "path": "generate_asm.py",
+      "sha256": "232592695eefeef2628c8fdfe890019ff36cb80488f443ed0d4da3550569a530",
+      "bytes": 2817,
+      "original_path": "generate_asm.py",
+      "original_sha256": "232592695eefeef2628c8fdfe890019ff36cb80488f443ed0d4da3550569a530",
+      "original_bytes": 2817,
+      "text_payload_sha256": "232592695eefeef2628c8fdfe890019ff36cb80488f443ed0d4da3550569a530"
+    },
+    {
+      "path": "independent-audit/AUDIT.md",
+      "sha256": "4f7e8239862340c586c8720480da1f19a5fc2b5b786928fea29268e9ff81657f",
+      "bytes": 6840,
+      "original_path": "independent-audit/AUDIT.md",
+      "original_sha256": "4f7e8239862340c586c8720480da1f19a5fc2b5b786928fea29268e9ff81657f",
+      "original_bytes": 6840,
+      "text_payload_sha256": "4f7e8239862340c586c8720480da1f19a5fc2b5b786928fea29268e9ff81657f"
+    },
+    {
+      "path": "independent-audit/DOCUMENTATION.md",
+      "sha256": "9a0abc23177a8ebead737f47492b09b96a38de3d9403373cdfd4d55414b0a886",
+      "bytes": 2499,
+      "original_path": "independent-audit/DOCUMENTATION.md",
+      "original_sha256": "9a0abc23177a8ebead737f47492b09b96a38de3d9403373cdfd4d55414b0a886",
+      "original_bytes": 2499,
+      "text_payload_sha256": "9a0abc23177a8ebead737f47492b09b96a38de3d9403373cdfd4d55414b0a886"
+    },
+    {
+      "path": "independent-audit/audit_elf.py",
+      "sha256": "459417dc25292ebc2e42f8e2ceaec277fcf43a97f044741eebc68ec0e77689bd",
+      "bytes": 3421,
+      "original_path": "independent-audit/audit_elf.py",
+      "original_sha256": "459417dc25292ebc2e42f8e2ceaec277fcf43a97f044741eebc68ec0e77689bd",
+      "original_bytes": 3421,
+      "text_payload_sha256": "459417dc25292ebc2e42f8e2ceaec277fcf43a97f044741eebc68ec0e77689bd"
+    },
+    {
+      "path": "independent-audit/opcodes.json",
+      "sha256": "704115f29ee8787f4de689d12efa1833a180ea584ffa73bd63bc3c2fd2800012",
+      "bytes": 971,
+      "original_path": "independent-audit/opcodes.json",
+      "original_sha256": "704115f29ee8787f4de689d12efa1833a180ea584ffa73bd63bc3c2fd2800012",
+      "original_bytes": 971,
+      "text_payload_sha256": "704115f29ee8787f4de689d12efa1833a180ea584ffa73bd63bc3c2fd2800012"
+    },
+    {
+      "path": "independent-audit/rebuild.json",
+      "sha256": "6e6560c91c53d45d7575891ef62b731e4d8a74736ba0dbd089efc0df4b28a6d1",
+      "bytes": 822,
+      "original_path": "independent-audit/rebuild.json",
+      "original_sha256": "6e6560c91c53d45d7575891ef62b731e4d8a74736ba0dbd089efc0df4b28a6d1",
+      "original_bytes": 822,
+      "text_payload_sha256": "6e6560c91c53d45d7575891ef62b731e4d8a74736ba0dbd089efc0df4b28a6d1"
+    },
+    {
+      "path": "independent-audit/seed_roundtrip.c",
+      "sha256": "f6d3c0df768342fe9ffda758e5e8e6695a0304a555ebc80752514e789f866f0f",
+      "bytes": 804,
+      "original_path": "independent-audit/seed_roundtrip.c",
+      "original_sha256": "f6d3c0df768342fe9ffda758e5e8e6695a0304a555ebc80752514e789f866f0f",
+      "original_bytes": 804,
+      "text_payload_sha256": "f6d3c0df768342fe9ffda758e5e8e6695a0304a555ebc80752514e789f866f0f"
+    },
+    {
+      "path": "independent-audit/validate_independent.py",
+      "sha256": "1b4e28393305ba3fb59676e98b9712a7f9854ab50518ee6b7b3408d617146b0f",
+      "bytes": 6369,
+      "original_path": "independent-audit/validate_independent.py",
+      "original_sha256": "1b4e28393305ba3fb59676e98b9712a7f9854ab50518ee6b7b3408d617146b0f",
+      "original_bytes": 6369,
+      "text_payload_sha256": "1b4e28393305ba3fb59676e98b9712a7f9854ab50518ee6b7b3408d617146b0f"
+    },
+    {
+      "path": "independent-audit/validation.json",
+      "sha256": "5ab67f73bb12a9abb618c58156368180bb3d18b97e83ca3bfe5fb2aa1dfc8820",
+      "bytes": 11006,
+      "original_path": "independent-audit/validation.json",
+      "original_sha256": "5ab67f73bb12a9abb618c58156368180bb3d18b97e83ca3bfe5fb2aa1dfc8820",
+      "original_bytes": 11006,
+      "text_payload_sha256": "5ab67f73bb12a9abb618c58156368180bb3d18b97e83ca3bfe5fb2aa1dfc8820"
+    },
+    {
+      "path": "independent-recheck.json",
+      "sha256": "5ab67f73bb12a9abb618c58156368180bb3d18b97e83ca3bfe5fb2aa1dfc8820",
+      "bytes": 11006,
+      "original_path": "independent-recheck.json",
+      "original_sha256": "5ab67f73bb12a9abb618c58156368180bb3d18b97e83ca3bfe5fb2aa1dfc8820",
+      "original_bytes": 11006,
+      "text_payload_sha256": "5ab67f73bb12a9abb618c58156368180bb3d18b97e83ca3bfe5fb2aa1dfc8820"
+    },
+    {
+      "path": "probe.c",
+      "sha256": "7be3a14829e8184edfc29ce638ea20fba587aac93ffe858a97f33010283c0534",
+      "bytes": 7337,
+      "original_path": "probe.c",
+      "original_sha256": "7be3a14829e8184edfc29ce638ea20fba587aac93ffe858a97f33010283c0534",
+      "original_bytes": 7337,
+      "text_payload_sha256": "7be3a14829e8184edfc29ce638ea20fba587aac93ffe858a97f33010283c0534"
+    },
+    {
+      "path": "probes.S",
+      "sha256": "351608293ce15be0638629f88639df75bc632262b69e0fbf8b403d06fa580d51",
+      "bytes": 13823828,
+      "original_path": "probes.S",
+      "original_sha256": "351608293ce15be0638629f88639df75bc632262b69e0fbf8b403d06fa580d51",
+      "original_bytes": 13823828,
+      "text_payload_sha256": "351608293ce15be0638629f88639df75bc632262b69e0fbf8b403d06fa580d51"
+    },
+    {
+      "path": "repeat/A-inc-dec.csv.tar.gz",
+      "sha256": "6cdf05e557f801d40912944cfeb0548a395da13e19d0b7e1957889dae0a2f326",
+      "bytes": 735331,
+      "original_path": "repeat/A-inc-dec.csv",
+      "original_sha256": "a3f8943432ea1bf347cd697fa6812293321b8498d1832b386f9a1a2568d0082f",
+      "original_bytes": 7862887,
+      "text_payload_sha256": "a3f8943432ea1bf347cd697fa6812293321b8498d1832b386f9a1a2568d0082f"
+    },
+    {
+      "path": "repeat/B-add1-sub1.csv.tar.gz",
+      "sha256": "bbf6832298612f84238ecb330dbe5980507bc602cf3c0f0d9d6158990fde46c4",
+      "bytes": 698468,
+      "original_path": "repeat/B-add1-sub1.csv",
+      "original_sha256": "25caa5b03d028638a41864bfc59153b60e70c240bc82fcc3a67c8c93ac9a7d76",
+      "original_bytes": 7963719,
+      "text_payload_sha256": "25caa5b03d028638a41864bfc59153b60e70c240bc82fcc3a67c8c93ac9a7d76"
+    },
+    {
+      "path": "repeat/C-memory-cmp-test.csv.tar.gz",
+      "sha256": "628690e3d254fa1fa19c6b571c31fe22a090a1881715019a4474f331f3e798ac",
+      "bytes": 1601799,
+      "original_path": "repeat/C-memory-cmp-test.csv",
+      "original_sha256": "250decd91dbd2cd024914511b6a9270e8d8a29be20cf219729a5ac7987d28ea5",
+      "original_bytes": 24769255,
+      "text_payload_sha256": "250decd91dbd2cd024914511b6a9270e8d8a29be20cf219729a5ac7987d28ea5"
+    },
+    {
+      "path": "repeat/D-high-byte.csv",
+      "sha256": "53352c5b03abb71d026b0977f455fcc9963be502cc3b253da76ce95fd5a38c25",
+      "bytes": 163879,
+      "original_path": "repeat/D-high-byte.csv",
+      "original_sha256": "53352c5b03abb71d026b0977f455fcc9963be502cc3b253da76ce95fd5a38c25",
+      "original_bytes": 163879,
+      "text_payload_sha256": "53352c5b03abb71d026b0977f455fcc9963be502cc3b253da76ce95fd5a38c25"
+    },
+    {
+      "path": "validation.json",
+      "sha256": "89f924f610c255b28f80258bfb084a946f67082b8fc7b36a25132d29b48fd168",
+      "bytes": 1996,
+      "original_path": "validation.json",
+      "original_sha256": "89f924f610c255b28f80258bfb084a946f67082b8fc7b36a25132d29b48fd168",
+      "original_bytes": 1996,
+      "text_payload_sha256": "89f924f610c255b28f80258bfb084a946f67082b8fc7b36a25132d29b48fd168"
+    },
+    {
+      "path": "verify.py",
+      "sha256": "0dbefd36fef40c0b28c394ce8309e222203e23bdb872523258c71bf898fdb6ae",
+      "bytes": 6001,
+      "original_path": "verify.py",
+      "original_sha256": "0dbefd36fef40c0b28c394ce8309e222203e23bdb872523258c71bf898fdb6ae",
+      "original_bytes": 6001,
+      "text_payload_sha256": "0dbefd36fef40c0b28c394ce8309e222203e23bdb872523258c71bf898fdb6ae"
+    },
+    {
+      "path": "FORMAT.md",
+      "sha256": "7bfe45c46d5e0ebdb7e85fc09db40ecae4c5341874ab5f11a0962dcba3fe43ed",
+      "bytes": 10101,
+      "original_path": "FORMAT.md",
+      "original_sha256": "73cf04f2a11dc378daa4933090bc96a9407ef1ce0c2a43d9748f00d9294e1a33",
+      "original_bytes": 10160,
+      "text_payload_sha256": "7bfe45c46d5e0ebdb7e85fc09db40ecae4c5341874ab5f11a0962dcba3fe43ed",
+      "documentation_edit": "Removed one redundant Russian status sentence; source and numerical data unchanged."
+    }
+  ]
+}

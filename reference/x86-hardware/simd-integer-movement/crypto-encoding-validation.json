@@ -1,0 +1,19 @@
+{
+  "family": "crypto",
+  "forms_checked": 4695,
+  "immediate_forms_checked": 4608,
+  "encodings": {
+    "legacy": 2337,
+    "VEX128": 1551,
+    "VEX256": 780,
+    "scalar": 27
+  },
+  "opcode_bytes_sha256": "bc04e232074d981bbab123bcbe4bc211570e5fbe7a0f82335d6cd43f00c629ce",
+  "checks": [
+    "unique target opcode in each symbol",
+    "legacy versus VEX prefix",
+    "VEX L bit and displayed register width",
+    "register versus memory operand",
+    "all immediate bytes match declaration"
+  ]
+}

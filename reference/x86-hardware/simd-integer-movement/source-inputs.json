@@ -1,0 +1,146 @@
+[
+  {
+    "path": "LICENSE",
+    "sha256": "0beff66e3040539958448a89fadc842cbe0365a2530033e43c42e0f97c61328d"
+  },
+  {
+    "path": "MACHINE.txt",
+    "sha256": "89dcfd8df9cb345261bb2e408e2da8a93c62fc90f9921978cc222ee2e38bc096"
+  },
+  {
+    "path": "core-generate.py",
+    "sha256": "27bddcd839c68dca8d89bd7b8e094d199e6021b72decabeb3e376132c2e3c691"
+  },
+  {
+    "path": "core-run.sh",
+    "sha256": "3d97aa9e59501b1ba7e52e868cac07c1d68446f469b35a5628459cafbe08ac4e"
+  },
+  {
+    "path": "core-verify.py",
+    "sha256": "420d25e1f4a8af5334933527821f138b78e2655b37bb48b1be64dd52bccf285e"
+  },
+  {
+    "path": "core.c",
+    "sha256": "1bcb26bdd9fbc05790f24cc66946a6824ab522fb96bc73d08affe0073328a271"
+  },
+  {
+    "path": "crypto/check-output.py",
+    "sha256": "917807436f7f44bb4733b08a783b5c1feed5398838ea29402ff68eb6944060a4"
+  },
+  {
+    "path": "crypto/generate.py",
+    "sha256": "a8c62dcd406de4fc1b37a0a3e800706a93824b587baf0b98360fb46cf22625b7"
+  },
+  {
+    "path": "crypto/machine.c",
+    "sha256": "07818c4d79995311e35be5804b8235efc94dbd25f8d28d65c6679224a6b04c27"
+  },
+  {
+    "path": "crypto/main.c",
+    "sha256": "4a74a33cf337b512b1d11b18282d11be83ada72891ce49114bd72e823ac679bc"
+  },
+  {
+    "path": "crypto/verify.py",
+    "sha256": "cebdbfabaac64b23d0b9516e5d347e0328fe233cd84e169c6aa6b3f9ee18a0ab"
+  },
+  {
+    "path": "crypto-run.sh",
+    "sha256": "65df4a2790d6427f329d7d992d60825658bb93443dbb197585dd7dd74a379a9f"
+  },
+  {
+    "path": "crypto-sanitize.sh",
+    "sha256": "5448065de65265e12e3861f18fd1f0a630000ba7481f80ed9ea90a412528d0b4"
+  },
+  {
+    "path": "movement/audit.py",
+    "sha256": "ba854eaf376775b83e22eef0efd9621ded46baba72be10c7d8ac971769734e98"
+  },
+  {
+    "path": "movement/check-output.py",
+    "sha256": "615dd81a51b345ae0e6e5206c6144b41eea1be4c705d1567b37a34c4360cc419"
+  },
+  {
+    "path": "movement/docs.py",
+    "sha256": "2d4d5c2caf3e011effc0daa0ec787aed335c6084bac4f8c1661f2d5147964341"
+  },
+  {
+    "path": "movement/gather-audit.py",
+    "sha256": "85e3bbdb5c2927245738e883bd92f0dd11e077bee62e6737d939a85e57bad143"
+  },
+  {
+    "path": "movement/gather-docs.py",
+    "sha256": "5b06866dae1ea9c2b04584ed56b40fc62121a7a4f8d9d2a4add04bbd250adaf4"
+  },
+  {
+    "path": "movement/gather-generate.py",
+    "sha256": "87b02252f2755ca077bdd0d8474fafcdc3697deae3dd75726b702e249b80b1c6"
+  },
+  {
+    "path": "movement/gather.c",
+    "sha256": "092fa0a758e31ac70a3b63c401babd003ed5fcccf0b688878e0e41896f83e5c9"
+  },
+  {
+    "path": "movement/generate.py",
+    "sha256": "9b56f8e0f7e00130fd41fb069689fa1a0e06e2ec86c393de4f73a042e0c50c92"
+  },
+  {
+    "path": "movement/runner.c",
+    "sha256": "66b655ebee288c252ec104bfb2ffaddeffa0f9444858c8c0bde9c47c82e074c7"
+  },
+  {
+    "path": "movement-gather-run.sh",
+    "sha256": "2a9f7974d96461b3541dba04cc580f244a12696d5d52b38f45ca961ba17af7b3"
+  },
+  {
+    "path": "movement-run.sh",
+    "sha256": "1ee8970d5386920a68f122f689945cb15337d4174e05a80a6a91a8b4efb6d345"
+  },
+  {
+    "path": "run.sh",
+    "sha256": "89a752addab3590c5bf69b0af98724dff44cb5f1813da615e49ef6ffb6d5b119"
+  },
+  {
+    "path": "sanitize.sh",
+    "sha256": "53def88f4d0742154b843eca919927fe0370e127237ab3aa323b61508f6686ec"
+  },
+  {
+    "path": "strings/check-output.py",
+    "sha256": "f07339a20e7dc819e2a158b60ac6dff42a7c0636b50581af698ed355417d8f13"
+  },
+  {
+    "path": "strings/generate.py",
+    "sha256": "a0ceff733e07cb3342b795ff21350197a6fc968ab6ba89a1637fde525fb66543"
+  },
+  {
+    "path": "strings/main.c",
+    "sha256": "d807853a747e2cb28ed16644037d323543a557ca5936c55be8eac16dfffe0e3b"
+  },
+  {
+    "path": "strings/verify.py",
+    "sha256": "8974af595862ad79ec4eb5136efa29947e9082215abdc4c68e9587f857fcd345"
+  },
+  {
+    "path": "strings-run.sh",
+    "sha256": "a6fbb92231dbb8f8333d6069a82f026e53d3488bb5e8c7d04e99082a6b18b05d"
+  },
+  {
+    "path": "strings-sanitize.sh",
+    "sha256": "daa9436821a14c513257a9f8f3c35d886fe4fc028e4d5463980200a89509a113"
+  },
+  {
+    "path": "upper-generate.py",
+    "sha256": "88ba85c416b158e0ce2f16eb8fe3511de861ccf61490782c81e9d4fdf1ac2f63"
+  },
+  {
+    "path": "upper-run.sh",
+    "sha256": "24b5a1a18f2fb3c7791cd25795a33a9271c2118ec63ac4edfd9db8e89232416d"
+  },
+  {
+    "path": "upper.c",
+    "sha256": "ef55b99f26226ac2f58363b8282980b283a6d91ddbedf03b34048be5a02d8050"
+  },
+  {
+    "path": "verify.py",
+    "sha256": "bbdb08cb0d5f99f93b91adc070e3fecf7d1a1c4a9089fb2579383ee28102f167"
+  }
+]

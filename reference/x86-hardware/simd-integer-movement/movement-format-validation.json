@@ -1,0 +1,8 @@
+{
+  "GPR": 27765,
+  "MEM": 56538,
+  "YMM": 90558,
+  "gather_rows": 6336,
+  "rows": 174861,
+  "unknown_full_memory_values": 270
+}

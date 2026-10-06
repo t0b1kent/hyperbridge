@@ -1,0 +1,56 @@
+{
+  "all_256_immediate_groups": 150,
+  "arithmetic": {
+    "compressed_bytes": 144730,
+    "forms": 2778,
+    "rows": 20592,
+    "scalar_checked": 18296,
+    "traps": 2296
+  },
+  "encoding_verified_forms": 39375,
+  "logic": {
+    "compressed_bytes": 38998,
+    "forms": 201,
+    "rows": 4824,
+    "scalar_checked": 4320,
+    "traps": 504
+  },
+  "pack": {
+    "compressed_bytes": 7874,
+    "forms": 36,
+    "rows": 864,
+    "scalar_checked": 768,
+    "traps": 96
+  },
+  "permutation": {
+    "compressed_bytes": 537008,
+    "forms": 28578,
+    "rows": 117552,
+    "scalar_checked": 107952,
+    "traps": 9600
+  },
+  "rules": {
+    "arithmetic_legacy_upper_preserve_support": 4592,
+    "arithmetic_vex128_upper_zero_support": 6888,
+    "fault_destination_preservation_support": 12816,
+    "logic_legacy_upper_preserve_support": 960,
+    "logic_vex128_upper_zero_support": 1440,
+    "oversized_shift_elements": 299388,
+    "oversized_shift_rows": 43665,
+    "pack_legacy_upper_preserve_support": 192,
+    "pack_vex128_upper_zero_support": 288,
+    "permutation_legacy_upper_preserve_support": 19200,
+    "permutation_vex128_upper_zero_support": 38160,
+    "pshufb_high_mask_bytes": 2910,
+    "pshufb_high_mask_rows": 180,
+    "shifts_legacy_upper_preserve_support": 21120,
+    "shifts_vex128_upper_zero_support": 21800
+  },
+  "shifts": {
+    "compressed_bytes": 320595,
+    "forms": 7782,
+    "rows": 65040,
+    "scalar_checked": 64720,
+    "traps": 320
+  }
+}

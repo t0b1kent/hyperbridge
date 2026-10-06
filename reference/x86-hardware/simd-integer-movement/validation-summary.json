@@ -1,0 +1,83 @@
+{
+  "arithmetic": {
+    "expected_rows": 20592,
+    "gzip_bytes": 144730,
+    "raw_bytes": 5524927,
+    "raw_sha256": "f66c1187ce38a65264bd715f73c2c57375af9885d845305d828bb392330b5850",
+    "rows": 20592
+  },
+  "crypto": {
+    "expected_rows": 37560,
+    "gzip_bytes": 330144,
+    "raw_bytes": 21270691,
+    "raw_sha256": "2087997c98c2a1b02430056027c09aefe936c1cd41ffed8e5178138bfa2bf448",
+    "rows": 37560
+  },
+  "gather": {
+    "expected_rows": 6336,
+    "gzip_bytes": 139374,
+    "raw_bytes": 3062428,
+    "raw_sha256": "608d98bf5f062864589d3c9bd55caaaa567b75a0eb5475cc10fa138f0f559f86",
+    "rows": 6336
+  },
+  "logic": {
+    "expected_rows": 4824,
+    "gzip_bytes": 38998,
+    "raw_bytes": 1285176,
+    "raw_sha256": "ded59cf56e0f320111fe7358feb26c43cbfb8efd9d5018c335a38fba839748ab",
+    "rows": 4824
+  },
+  "movement": {
+    "expected_rows": 174861,
+    "gzip_bytes": 2092041,
+    "raw_bytes": 142092564,
+    "raw_sha256": "2b61ba82cc45c88fc2d4aa5561e74205cfdf208a01a354b0cb9c8e01a6a36725",
+    "rows": 174861
+  },
+  "pack": {
+    "expected_rows": 864,
+    "gzip_bytes": 7874,
+    "raw_bytes": 226807,
+    "raw_sha256": "595c8dd30d298d06ed7680dfcf0dd8db663bbcd82bf828d18916f28f337a9ce2",
+    "rows": 864
+  },
+  "permutation": {
+    "expected_rows": 117552,
+    "gzip_bytes": 537008,
+    "raw_bytes": 31401893,
+    "raw_sha256": "1a9e230ef0e12b67ccf6cd52773438fc234eff73cceb15cdd320e7f0aec24c34",
+    "rows": 117552
+  },
+  "shifts": {
+    "expected_rows": 65040,
+    "gzip_bytes": 320595,
+    "raw_bytes": 13478878,
+    "raw_sha256": "ff36329c0260ce5f0a3ab0ea9dc14ff92eba12db40dd965d45b1a0e61fbead8a",
+    "rows": 65040
+  },
+  "strings": {
+    "expected_rows": 491520,
+    "gzip_bytes": 3726439,
+    "raw_bytes": 167070032,
+    "raw_sha256": "d555394df08bb86a88401e4337b08853ae0c017fbeedabcc1943ba1ec78563da",
+    "rows": 491520
+  },
+  "totals": {
+    "budget_bytes": 60000000,
+    "forms_core": 39375,
+    "forms_crypto": 4695,
+    "forms_gather": 64,
+    "forms_movement": 13051,
+    "forms_strings": 6144,
+    "gzip_bytes": 7339822,
+    "rows": 919405,
+    "upper_instructions": 2
+  },
+  "upper": {
+    "expected_rows": 256,
+    "gzip_bytes": 2619,
+    "raw_bytes": 41186,
+    "raw_sha256": "3f628664159a4cf68fbce59cc9b4d04febbcad15564993ef04eb0b323efe460c",
+    "rows": 256
+  }
+}

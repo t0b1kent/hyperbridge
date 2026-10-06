@@ -1,0 +1,74 @@
+{
+  "gzip_bytes": 55125098,
+  "forms": 15410,
+  "rows": 8773024,
+  "traps": 391157,
+  "C_normal_crosschecks": 3893,
+  "C_mismatches": 0,
+  "classes": {
+    "arithmetic": {
+      "forms": 70,
+      "rows": 145184,
+      "traps": 9097,
+      "gzip_bytes": 772164,
+      "sha256": "02825e1f394080977cb3c870aef46a769b00bb455825ade0d3268c778f55cddb",
+      "footer": "# lines=145184 expected=145184 traps=9097 trap_destination_preserved=9097 trap_preservation_failures=0 C_normal_crosschecks=1601 C_mismatches=0"
+    },
+    "fma": {
+      "forms": 96,
+      "rows": 1357824,
+      "traps": 78679,
+      "gzip_bytes": 6585801,
+      "sha256": "8cf5edf9b6dd0d632dafa56c21a82cfdba320737ee7cb43885f601575b6e2a46",
+      "footer": "# lines=1357824 expected=1357824 traps=78679 trap_destination_preserved=78679 trap_preservation_failures=0 C_normal_crosschecks=2292 C_mismatches=0"
+    },
+    "comparison": {
+      "forms": 232,
+      "rows": 485888,
+      "traps": 21032,
+      "gzip_bytes": 2296030,
+      "sha256": "be7e82cc85cba08c2224b3bf84e7939c8d9a9f49b1abf1057debdcc8eb53d530",
+      "footer": "# lines=485888 expected=485888 traps=21032 trap_destination_preserved=21032 trap_preservation_failures=0 C_normal_crosschecks=0 C_mismatches=0"
+    },
+    "approximation": {
+      "forms": 10,
+      "rows": 15392,
+      "traps": 0,
+      "gzip_bytes": 66368,
+      "sha256": "302983ed7b163968a71d7f7c92baebed45f33ad03f10e00ef948715b289dd7a0",
+      "footer": "# lines=15392 expected=15392 traps=0 trap_destination_preserved=0 trap_preservation_failures=0 C_normal_crosschecks=0 C_mismatches=0"
+    },
+    "conversion": {
+      "forms": 92,
+      "rows": 119808,
+      "traps": 9023,
+      "gzip_bytes": 523481,
+      "sha256": "fd6f76f9647440672ea92eb4cc15c22a379b895afb8736c5f2b46d005db22731",
+      "footer": "# lines=119808 expected=119808 traps=9023 trap_destination_preserved=9023 trap_preservation_failures=0 C_normal_crosschecks=0 C_mismatches=0"
+    },
+    "rounding": {
+      "forms": 160,
+      "rows": 246272,
+      "traps": 6144,
+      "gzip_bytes": 1085769,
+      "sha256": "e7d88db49de21c801679d2ff7b975e588fdf997c855a475694059cadf68e1ffe",
+      "footer": "# lines=246272 expected=246272 traps=6144 trap_destination_preserved=6144 trap_preservation_failures=0 C_normal_crosschecks=0 C_mismatches=0"
+    },
+    "horizontal": {
+      "forms": 1298,
+      "rows": 1079936,
+      "traps": 81022,
+      "gzip_bytes": 6867497,
+      "sha256": "437f5b84ab8154469a68a19d14a0c4f6ad4c464a8a3dbd5431828f1303dfe624",
+      "footer": "# lines=1079936 expected=1079936 traps=81022 trap_destination_preserved=81022 trap_preservation_failures=0 C_normal_crosschecks=0 C_mismatches=0"
+    },
+    "evex": {
+      "forms": 13452,
+      "rows": 5322720,
+      "traps": 186160,
+      "gzip_bytes": 36927988,
+      "sha256": "af0b2951c5df31d9bb0e2105724f101c1c3f19a7738013548d4bf57701ca84d3",
+      "footer": "# lines=5322720 expected=5322720 traps=186160 trap_destination_preserved=186160 trap_preservation_failures=0 C_normal_crosschecks=0 C_mismatches=0"
+    }
+  }
+}

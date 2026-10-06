@@ -1,0 +1,12 @@
+{
+  "symbols": 5029,
+  "removed_elf_directives": {
+    "type": 5029,
+    "size": 5029,
+    "stack": 1
+  },
+  "instruction_lines_identical": true,
+  "instruction_lines_sha256": "d77cfe882e65802a90151b126a0730006bd12acd42b20499d1e512e70bac7d3a",
+  "elf_source_sha256": "799d4e487c262b5633225a15cf3e65c6e2a82d2035ca5964331c671058d1d7b3",
+  "macho_source_sha256": "b79f51e6b2378ba46d464ff9e9932c934036bdcc5cc4db2a56ad0b27d9ce496a"
+}

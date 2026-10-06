@@ -1,0 +1,56 @@
+{
+  "remainder": {
+    "status": "PASS",
+    "configurations": 24,
+    "random_cases": 24000000,
+    "total_cases": 24008664,
+    "files": {
+      "remainder-counts.csv": {
+        "bytes": 23914,
+        "sha256": "25662a56ea1882addfa411209be4c06de17ecd405f78adb82e9c5387c3b5c116",
+        "repeat_byte_identical": true
+      },
+      "remainder-examples.csv": {
+        "bytes": 992083,
+        "sha256": "c09ef770827c09bc8d4a46a007855eb9b861f8bca2456d77403bda1ba4d805e8",
+        "repeat_byte_identical": true
+      }
+    }
+  },
+  "scale": {
+    "status": "PASS",
+    "configurations": 12,
+    "random_cases": 12000000,
+    "total_cases": 12023040,
+    "files": {
+      "scale-counts.csv": {
+        "bytes": 7042,
+        "sha256": "7066711c34eacc7cb0e71d57ab10a2308aa91d091749ce2b15f4e82a87865892",
+        "repeat_byte_identical": true
+      },
+      "scale-examples.csv": {
+        "bytes": 348092,
+        "sha256": "9a54539f929866ec334598def60c6b5a3bd3f64c58ca88025e086cd39684e230",
+        "repeat_byte_identical": true
+      }
+    }
+  },
+  "format": {
+    "status": "PASS",
+    "configurations": 48,
+    "random_cases": 48000000,
+    "total_cases": 48092976,
+    "files": {
+      "format-counts.csv": {
+        "bytes": 27410,
+        "sha256": "8e5f51ce2b12682795aa7211eb0003230bbbcb0b7e2042aff56ebf36ef16e4c9",
+        "repeat_byte_identical": true
+      },
+      "format-examples.csv": {
+        "bytes": 1109913,
+        "sha256": "5b0043898323ebc455334776a504a5d766e2f82c0cc6deea00cc9c5694f0bfdf",
+        "repeat_byte_identical": true
+      }
+    }
+  }
+}

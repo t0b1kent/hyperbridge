@@ -1,0 +1,19 @@
+{
+  "vendor_id": "GenuineIntel",
+  "cpu family": "6",
+  "model": "58",
+  "stepping": "10",
+  "model name": "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz",
+  "hypervisor_present_sysctl": "1",
+  "process_translated": "UNKNOWN",
+  "arm64_capable": "UNKNOWN",
+  "system": "Darwin",
+  "architecture": "x86_64",
+  "kernel": "Darwin 24.6.0 x86_64",
+  "os_version": "15.7.9",
+  "compiler": "Apple clang version 17.0.0 (clang-1700.0.13.5)",
+  "sdk_version": "15.5",
+  "xcode_version": "Xcode 16.4 Build version 16F6",
+  "gate": "GenuineIntel + Darwin + uname x86_64; Rosetta/ARM host rejected",
+  "backend_proof": "INFERRED_FROM_RUNNER_PROVENANCE; two anti-translation checks UNKNOWN"
+}

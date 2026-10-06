@@ -1,0 +1,786 @@
+{
+  "forms": 156,
+  "mnemonic_mismatches": 0,
+  "encodings": [
+    {
+      "name": "FLD_m32",
+      "bytes": "d9 06",
+      "decoded": "fld    DWORD PTR [rsi]"
+    },
+    {
+      "name": "FST_m32",
+      "bytes": "d9 16",
+      "decoded": "fst    DWORD PTR [rsi]"
+    },
+    {
+      "name": "FSTP_m32",
+      "bytes": "d9 1e",
+      "decoded": "fstp   DWORD PTR [rsi]"
+    },
+    {
+      "name": "FLD_m64",
+      "bytes": "dd 06",
+      "decoded": "fld    QWORD PTR [rsi]"
+    },
+    {
+      "name": "FST_m64",
+      "bytes": "dd 16",
+      "decoded": "fst    QWORD PTR [rsi]"
+    },
+    {
+      "name": "FSTP_m64",
+      "bytes": "dd 1e",
+      "decoded": "fstp   QWORD PTR [rsi]"
+    },
+    {
+      "name": "FLD_m80",
+      "bytes": "db 2e",
+      "decoded": "fld    TBYTE PTR [rsi]"
+    },
+    {
+      "name": "FSTP_m80",
+      "bytes": "db 3e",
+      "decoded": "fstp   TBYTE PTR [rsi]"
+    },
+    {
+      "name": "FILD_m16",
+      "bytes": "df 06",
+      "decoded": "fild   WORD PTR [rsi]"
+    },
+    {
+      "name": "FIST_m16",
+      "bytes": "df 16",
+      "decoded": "fist   WORD PTR [rsi]"
+    },
+    {
+      "name": "FISTP_m16",
+      "bytes": "df 1e",
+      "decoded": "fistp  WORD PTR [rsi]"
+    },
+    {
+      "name": "FISTTP_m16",
+      "bytes": "df 0e",
+      "decoded": "fisttp WORD PTR [rsi]"
+    },
+    {
+      "name": "FILD_m32",
+      "bytes": "db 06",
+      "decoded": "fild   DWORD PTR [rsi]"
+    },
+    {
+      "name": "FIST_m32",
+      "bytes": "db 16",
+      "decoded": "fist   DWORD PTR [rsi]"
+    },
+    {
+      "name": "FISTP_m32",
+      "bytes": "db 1e",
+      "decoded": "fistp  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FISTTP_m32",
+      "bytes": "db 0e",
+      "decoded": "fisttp DWORD PTR [rsi]"
+    },
+    {
+      "name": "FILD_m64",
+      "bytes": "df 2e",
+      "decoded": "fild   QWORD PTR [rsi]"
+    },
+    {
+      "name": "FISTP_m64",
+      "bytes": "df 3e",
+      "decoded": "fistp  QWORD PTR [rsi]"
+    },
+    {
+      "name": "FISTTP_m64",
+      "bytes": "dd 0e",
+      "decoded": "fisttp QWORD PTR [rsi]"
+    },
+    {
+      "name": "FBLD_m80",
+      "bytes": "df 26",
+      "decoded": "fbld   TBYTE PTR [rsi]"
+    },
+    {
+      "name": "FBSTP_m80",
+      "bytes": "df 36",
+      "decoded": "fbstp  TBYTE PTR [rsi]"
+    },
+    {
+      "name": "FLD1",
+      "bytes": "d9 e8",
+      "decoded": "fld1"
+    },
+    {
+      "name": "FLDZ",
+      "bytes": "d9 ee",
+      "decoded": "fldz"
+    },
+    {
+      "name": "FLDPI",
+      "bytes": "d9 eb",
+      "decoded": "fldpi"
+    },
+    {
+      "name": "FLDL2T",
+      "bytes": "d9 e9",
+      "decoded": "fldl2t"
+    },
+    {
+      "name": "FLDL2E",
+      "bytes": "d9 ea",
+      "decoded": "fldl2e"
+    },
+    {
+      "name": "FLDLG2",
+      "bytes": "d9 ec",
+      "decoded": "fldlg2"
+    },
+    {
+      "name": "FLDLN2",
+      "bytes": "d9 ed",
+      "decoded": "fldln2"
+    },
+    {
+      "name": "FLD_ST1",
+      "bytes": "d9 c1",
+      "decoded": "fld    st(1)"
+    },
+    {
+      "name": "FST_ST1",
+      "bytes": "dd d1",
+      "decoded": "fst    st(1)"
+    },
+    {
+      "name": "FSTP_ST1",
+      "bytes": "dd d9",
+      "decoded": "fstp   st(1)"
+    },
+    {
+      "name": "FADD_ST0_ST1",
+      "bytes": "d8 c1",
+      "decoded": "fadd   st,st(1)"
+    },
+    {
+      "name": "FADD_ST1_ST0",
+      "bytes": "dc c1",
+      "decoded": "fadd   st(1),st"
+    },
+    {
+      "name": "FADDP_ST1_ST0",
+      "bytes": "de c1",
+      "decoded": "faddp  st(1),st"
+    },
+    {
+      "name": "FADD_m32",
+      "bytes": "d8 06",
+      "decoded": "fadd   DWORD PTR [rsi]"
+    },
+    {
+      "name": "FADD_m64",
+      "bytes": "dc 06",
+      "decoded": "fadd   QWORD PTR [rsi]"
+    },
+    {
+      "name": "FIADD_m16",
+      "bytes": "de 06",
+      "decoded": "fiadd  WORD PTR [rsi]"
+    },
+    {
+      "name": "FIADD_m32",
+      "bytes": "da 06",
+      "decoded": "fiadd  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FSUB_ST0_ST1",
+      "bytes": "d8 e1",
+      "decoded": "fsub   st,st(1)"
+    },
+    {
+      "name": "FSUB_ST1_ST0",
+      "bytes": "dc e9",
+      "decoded": "fsub   st(1),st"
+    },
+    {
+      "name": "FSUBP_ST1_ST0",
+      "bytes": "de e9",
+      "decoded": "fsubp  st(1),st"
+    },
+    {
+      "name": "FSUB_m32",
+      "bytes": "d8 26",
+      "decoded": "fsub   DWORD PTR [rsi]"
+    },
+    {
+      "name": "FSUB_m64",
+      "bytes": "dc 26",
+      "decoded": "fsub   QWORD PTR [rsi]"
+    },
+    {
+      "name": "FISUB_m16",
+      "bytes": "de 26",
+      "decoded": "fisub  WORD PTR [rsi]"
+    },
+    {
+      "name": "FISUB_m32",
+      "bytes": "da 26",
+      "decoded": "fisub  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FSUBR_ST0_ST1",
+      "bytes": "d8 e9",
+      "decoded": "fsubr  st,st(1)"
+    },
+    {
+      "name": "FSUBR_ST1_ST0",
+      "bytes": "dc e1",
+      "decoded": "fsubr  st(1),st"
+    },
+    {
+      "name": "FSUBRP_ST1_ST0",
+      "bytes": "de e1",
+      "decoded": "fsubrp st(1),st"
+    },
+    {
+      "name": "FSUBR_m32",
+      "bytes": "d8 2e",
+      "decoded": "fsubr  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FSUBR_m64",
+      "bytes": "dc 2e",
+      "decoded": "fsubr  QWORD PTR [rsi]"
+    },
+    {
+      "name": "FISUBR_m16",
+      "bytes": "de 2e",
+      "decoded": "fisubr WORD PTR [rsi]"
+    },
+    {
+      "name": "FISUBR_m32",
+      "bytes": "da 2e",
+      "decoded": "fisubr DWORD PTR [rsi]"
+    },
+    {
+      "name": "FMUL_ST0_ST1",
+      "bytes": "d8 c9",
+      "decoded": "fmul   st,st(1)"
+    },
+    {
+      "name": "FMUL_ST1_ST0",
+      "bytes": "dc c9",
+      "decoded": "fmul   st(1),st"
+    },
+    {
+      "name": "FMULP_ST1_ST0",
+      "bytes": "de c9",
+      "decoded": "fmulp  st(1),st"
+    },
+    {
+      "name": "FMUL_m32",
+      "bytes": "d8 0e",
+      "decoded": "fmul   DWORD PTR [rsi]"
+    },
+    {
+      "name": "FMUL_m64",
+      "bytes": "dc 0e",
+      "decoded": "fmul   QWORD PTR [rsi]"
+    },
+    {
+      "name": "FIMUL_m16",
+      "bytes": "de 0e",
+      "decoded": "fimul  WORD PTR [rsi]"
+    },
+    {
+      "name": "FIMUL_m32",
+      "bytes": "da 0e",
+      "decoded": "fimul  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FDIV_ST0_ST1",
+      "bytes": "d8 f1",
+      "decoded": "fdiv   st,st(1)"
+    },
+    {
+      "name": "FDIV_ST1_ST0",
+      "bytes": "dc f9",
+      "decoded": "fdiv   st(1),st"
+    },
+    {
+      "name": "FDIVP_ST1_ST0",
+      "bytes": "de f9",
+      "decoded": "fdivp  st(1),st"
+    },
+    {
+      "name": "FDIV_m32",
+      "bytes": "d8 36",
+      "decoded": "fdiv   DWORD PTR [rsi]"
+    },
+    {
+      "name": "FDIV_m64",
+      "bytes": "dc 36",
+      "decoded": "fdiv   QWORD PTR [rsi]"
+    },
+    {
+      "name": "FIDIV_m16",
+      "bytes": "de 36",
+      "decoded": "fidiv  WORD PTR [rsi]"
+    },
+    {
+      "name": "FIDIV_m32",
+      "bytes": "da 36",
+      "decoded": "fidiv  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FDIVR_ST0_ST1",
+      "bytes": "d8 f9",
+      "decoded": "fdivr  st,st(1)"
+    },
+    {
+      "name": "FDIVR_ST1_ST0",
+      "bytes": "dc f1",
+      "decoded": "fdivr  st(1),st"
+    },
+    {
+      "name": "FDIVRP_ST1_ST0",
+      "bytes": "de f1",
+      "decoded": "fdivrp st(1),st"
+    },
+    {
+      "name": "FDIVR_m32",
+      "bytes": "d8 3e",
+      "decoded": "fdivr  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FDIVR_m64",
+      "bytes": "dc 3e",
+      "decoded": "fdivr  QWORD PTR [rsi]"
+    },
+    {
+      "name": "FIDIVR_m16",
+      "bytes": "de 3e",
+      "decoded": "fidivr WORD PTR [rsi]"
+    },
+    {
+      "name": "FIDIVR_m32",
+      "bytes": "da 3e",
+      "decoded": "fidivr DWORD PTR [rsi]"
+    },
+    {
+      "name": "FSQRT",
+      "bytes": "d9 fa",
+      "decoded": "fsqrt"
+    },
+    {
+      "name": "FABS",
+      "bytes": "d9 e1",
+      "decoded": "fabs"
+    },
+    {
+      "name": "FCHS",
+      "bytes": "d9 e0",
+      "decoded": "fchs"
+    },
+    {
+      "name": "FRNDINT",
+      "bytes": "d9 fc",
+      "decoded": "frndint"
+    },
+    {
+      "name": "FCOM_ST1",
+      "bytes": "d8 d1",
+      "decoded": "fcom   st(1)"
+    },
+    {
+      "name": "FCOM_m32",
+      "bytes": "d8 16",
+      "decoded": "fcom   DWORD PTR [rsi]"
+    },
+    {
+      "name": "FCOM_m64",
+      "bytes": "dc 16",
+      "decoded": "fcom   QWORD PTR [rsi]"
+    },
+    {
+      "name": "FCOMP_ST1",
+      "bytes": "d8 d9",
+      "decoded": "fcomp  st(1)"
+    },
+    {
+      "name": "FCOMP_m32",
+      "bytes": "d8 1e",
+      "decoded": "fcomp  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FCOMP_m64",
+      "bytes": "dc 1e",
+      "decoded": "fcomp  QWORD PTR [rsi]"
+    },
+    {
+      "name": "FUCOM_ST1",
+      "bytes": "dd e1",
+      "decoded": "fucom  st(1)"
+    },
+    {
+      "name": "FUCOMP_ST1",
+      "bytes": "dd e9",
+      "decoded": "fucomp st(1)"
+    },
+    {
+      "name": "FCOMPP",
+      "bytes": "de d9",
+      "decoded": "fcompp"
+    },
+    {
+      "name": "FUCOMPP",
+      "bytes": "da e9",
+      "decoded": "fucompp"
+    },
+    {
+      "name": "FCOMI_ST1",
+      "bytes": "db f1",
+      "decoded": "fcomi  st,st(1)"
+    },
+    {
+      "name": "FCOMIP_ST1",
+      "bytes": "df f1",
+      "decoded": "fcomip st,st(1)"
+    },
+    {
+      "name": "FUCOMI_ST1",
+      "bytes": "db e9",
+      "decoded": "fucomi st,st(1)"
+    },
+    {
+      "name": "FUCOMIP_ST1",
+      "bytes": "df e9",
+      "decoded": "fucomip st,st(1)"
+    },
+    {
+      "name": "FICOM_m16",
+      "bytes": "de 16",
+      "decoded": "ficom  WORD PTR [rsi]"
+    },
+    {
+      "name": "FICOM_m32",
+      "bytes": "da 16",
+      "decoded": "ficom  DWORD PTR [rsi]"
+    },
+    {
+      "name": "FICOMP_m16",
+      "bytes": "de 1e",
+      "decoded": "ficomp WORD PTR [rsi]"
+    },
+    {
+      "name": "FICOMP_m32",
+      "bytes": "da 1e",
+      "decoded": "ficomp DWORD PTR [rsi]"
+    },
+    {
+      "name": "FTST",
+      "bytes": "d9 e4",
+      "decoded": "ftst"
+    },
+    {
+      "name": "FXAM",
+      "bytes": "d9 e5",
+      "decoded": "fxam"
+    },
+    {
+      "name": "FPREM",
+      "bytes": "d9 f8",
+      "decoded": "fprem"
+    },
+    {
+      "name": "FPREM1",
+      "bytes": "d9 f5",
+      "decoded": "fprem1"
+    },
+    {
+      "name": "FSCALE",
+      "bytes": "d9 fd",
+      "decoded": "fscale"
+    },
+    {
+      "name": "FXTRACT",
+      "bytes": "d9 f4",
+      "decoded": "fxtract"
+    },
+    {
+      "name": "FPREM_ITER",
+      "bytes": "d9 f8",
+      "decoded": "fprem"
+    },
+    {
+      "name": "FPREM1_ITER",
+      "bytes": "d9 f5",
+      "decoded": "fprem1"
+    },
+    {
+      "name": "FSIN",
+      "bytes": "d9 fe",
+      "decoded": "fsin"
+    },
+    {
+      "name": "FCOS",
+      "bytes": "d9 ff",
+      "decoded": "fcos"
+    },
+    {
+      "name": "FSINCOS",
+      "bytes": "d9 fb",
+      "decoded": "fsincos"
+    },
+    {
+      "name": "FPTAN",
+      "bytes": "d9 f2",
+      "decoded": "fptan"
+    },
+    {
+      "name": "F2XM1",
+      "bytes": "d9 f0",
+      "decoded": "f2xm1"
+    },
+    {
+      "name": "FPATAN",
+      "bytes": "d9 f3",
+      "decoded": "fpatan"
+    },
+    {
+      "name": "FYL2X",
+      "bytes": "d9 f1",
+      "decoded": "fyl2x"
+    },
+    {
+      "name": "FYL2XP1",
+      "bytes": "d9 f9",
+      "decoded": "fyl2xp1"
+    },
+    {
+      "name": "FLD1_DEPTH",
+      "bytes": "d9 e8",
+      "decoded": "fld1"
+    },
+    {
+      "name": "FSTP_ST0_DEPTH",
+      "bytes": "dd d8",
+      "decoded": "fstp   st(0)"
+    },
+    {
+      "name": "FADDP_ST1_ST0_DEPTH",
+      "bytes": "de c1",
+      "decoded": "faddp  st(1),st"
+    },
+    {
+      "name": "FCOMPP_DEPTH",
+      "bytes": "de d9",
+      "decoded": "fcompp"
+    },
+    {
+      "name": "FFREE_ST0_DEPTH",
+      "bytes": "dd c0",
+      "decoded": "ffree  st(0)"
+    },
+    {
+      "name": "FFREE_ST3_DEPTH",
+      "bytes": "dd c3",
+      "decoded": "ffree  st(3)"
+    },
+    {
+      "name": "FINCSTP_DEPTH",
+      "bytes": "d9 f7",
+      "decoded": "fincstp"
+    },
+    {
+      "name": "FDECSTP_DEPTH",
+      "bytes": "d9 f6",
+      "decoded": "fdecstp"
+    },
+    {
+      "name": "FXCH_ST1_DEPTH",
+      "bytes": "d9 c9",
+      "decoded": "fxch   st(1)"
+    },
+    {
+      "name": "FXCH_ST7_DEPTH",
+      "bytes": "d9 cf",
+      "decoded": "fxch   st(7)"
+    },
+    {
+      "name": "FNINIT_DEPTH",
+      "bytes": "db e3",
+      "decoded": "fninit"
+    },
+    {
+      "name": "FNCLEX_DEPTH",
+      "bytes": "db e2",
+      "decoded": "fnclex"
+    },
+    {
+      "name": "FNSTENV",
+      "bytes": "d9 36",
+      "decoded": "fnstenv [rsi]"
+    },
+    {
+      "name": "FLDENV",
+      "bytes": "d9 26",
+      "decoded": "fldenv [rsi]"
+    },
+    {
+      "name": "FNSAVE",
+      "bytes": "dd 36",
+      "decoded": "fnsave [rsi]"
+    },
+    {
+      "name": "FRSTOR",
+      "bytes": "dd 26",
+      "decoded": "frstor [rsi]"
+    },
+    {
+      "name": "FXSAVE64",
+      "bytes": "48 0f ae 06",
+      "decoded": "fxsave64 [rsi]"
+    },
+    {
+      "name": "FXRSTOR64",
+      "bytes": "48 0f ae 0e",
+      "decoded": "fxrstor64 [rsi]"
+    },
+    {
+      "name": "FXSAVE",
+      "bytes": "0f ae 06",
+      "decoded": "fxsave [rsi]"
+    },
+    {
+      "name": "FXRSTOR",
+      "bytes": "0f ae 0e",
+      "decoded": "fxrstor [rsi]"
+    },
+    {
+      "name": "TRACE_FNOP",
+      "bytes": "d9 d0",
+      "decoded": "fnop"
+    },
+    {
+      "name": "TRACE_FLD1",
+      "bytes": "d9 e8",
+      "decoded": "fld1"
+    },
+    {
+      "name": "TRACE_FADD_ST0_ST1",
+      "bytes": "d8 c1",
+      "decoded": "fadd   st,st(1)"
+    },
+    {
+      "name": "TRACE_FLD_m32",
+      "bytes": "d9 06",
+      "decoded": "fld    DWORD PTR [rsi]"
+    },
+    {
+      "name": "TRACE_FST_m64",
+      "bytes": "dd 16",
+      "decoded": "fst    QWORD PTR [rsi]"
+    },
+    {
+      "name": "TRACE_FCOMI_ST1",
+      "bytes": "db f1",
+      "decoded": "fcomi  st,st(1)"
+    },
+    {
+      "name": "TRACE_FNCLEX",
+      "bytes": "db e2",
+      "decoded": "fnclex"
+    },
+    {
+      "name": "TRACE_FNINIT",
+      "bytes": "db e3",
+      "decoded": "fninit"
+    },
+    {
+      "name": "TRACE_FLDCW",
+      "bytes": "d9 2e",
+      "decoded": "fldcw  WORD PTR [rsi]"
+    },
+    {
+      "name": "IE_FWAIT",
+      "bytes": "d9 fa",
+      "decoded": "fsqrt"
+    },
+    {
+      "name": "IE_FLD1",
+      "bytes": "d9 fa",
+      "decoded": "fsqrt"
+    },
+    {
+      "name": "DE_FWAIT",
+      "bytes": "d8 c1",
+      "decoded": "fadd   st,st(1)"
+    },
+    {
+      "name": "DE_FLD1",
+      "bytes": "d8 c1",
+      "decoded": "fadd   st,st(1)"
+    },
+    {
+      "name": "ZE_FWAIT",
+      "bytes": "d8 f1",
+      "decoded": "fdiv   st,st(1)"
+    },
+    {
+      "name": "ZE_FLD1",
+      "bytes": "d8 f1",
+      "decoded": "fdiv   st,st(1)"
+    },
+    {
+      "name": "OE_FWAIT",
+      "bytes": "d8 c9",
+      "decoded": "fmul   st,st(1)"
+    },
+    {
+      "name": "OE_FLD1",
+      "bytes": "d8 c9",
+      "decoded": "fmul   st,st(1)"
+    },
+    {
+      "name": "UE_FWAIT",
+      "bytes": "d8 c9",
+      "decoded": "fmul   st,st(1)"
+    },
+    {
+      "name": "UE_FLD1",
+      "bytes": "d8 c9",
+      "decoded": "fmul   st,st(1)"
+    },
+    {
+      "name": "PE_FWAIT",
+      "bytes": "d8 f1",
+      "decoded": "fdiv   st,st(1)"
+    },
+    {
+      "name": "PE_FLD1",
+      "bytes": "d8 f1",
+      "decoded": "fdiv   st,st(1)"
+    },
+    {
+      "name": "STACK_UNDERFLOW_FWAIT",
+      "bytes": "d8 c1",
+      "decoded": "fadd   st,st(1)"
+    },
+    {
+      "name": "STACK_UNDERFLOW_FLD1",
+      "bytes": "d8 c1",
+      "decoded": "fadd   st,st(1)"
+    },
+    {
+      "name": "STACK_OVERFLOW_FWAIT",
+      "bytes": "d9 e8",
+      "decoded": "fld1"
+    },
+    {
+      "name": "STACK_OVERFLOW_FLD1",
+      "bytes": "d9 e8",
+      "decoded": "fld1"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "binary_sha256": "5c2cd3a6e79e4a53a56faa4bd7a73a81e3dcc17d063c81ba22a3935c2a4a82e5",
+  "elf": "ELF64 little-endian EM_X86_64",
+  "memory_stubs": {
+    "cmp_m8_i8": 256,
+    "test_m8_i8": 256,
+    "cmp_m16_i8": 256,
+    "cmp_m16_i16": 65536,
+    "cmp_m32_i8": 256
+  },
+  "register_forms": {
+    "probe_inc8": "40fec7",
+    "probe_inc16": "66ffc7",
+    "probe_inc32": "ffc7",
+    "probe_inc64": "48ffc7",
+    "probe_dec8": "40fecf",
+    "probe_dec16": "66ffcf",
+    "probe_dec32": "ffcf",
+    "probe_dec64": "48ffcf",
+    "probe_add8": "4080c701",
+    "probe_add16": "6683c701",
+    "probe_add32": "83c701",
+    "probe_add64": "4883c701",
+    "probe_sub8": "4080ef01",
+    "probe_sub16": "6683ef01",
+    "probe_sub32": "83ef01",
+    "probe_sub64": "4883ef01",
+    "probe_inc_ah": "fec4",
+    "probe_dec_ch": "fecd"
+  },
+  "status": "PASS",
+  "total_memory_stubs": 66560,
+  "memory_dispatch": "POPFQ; JMP RDX; memory-immediate opcode; PUSHFQ",
+  "flags_mask": "0x8d5"
+}

@@ -1,0 +1,339 @@
+{
+  "classes": {
+    "arithmetic": {
+      "rows": 441024,
+      "forms": 46,
+      "compressed_bytes": 2281933,
+      "compressed_sha256": "12b260f8d6150e579245c9f3afef43c204f58964a430431e8e642f89c37163cf",
+      "raw_sha256": "b163e153923b43d624515dffeecf67c75e34f7c110f011fabf516e1624d93746"
+    },
+    "comparison": {
+      "rows": 200880,
+      "forms": 20,
+      "compressed_bytes": 950132,
+      "compressed_sha256": "2ea1c5311a9030136dc5412364cd7c967d04d6e5ae1a598a679479bd13285b25",
+      "raw_sha256": "d501bb5b8ef6894bba8c0e8fe6e6b6f825fe858bb9ecdd7396cd8da4f27c9384"
+    },
+    "environment": {
+      "rows": 3672,
+      "forms": 17,
+      "compressed_bytes": 38595,
+      "compressed_sha256": "9f583ce14fb9ac0689c736d90657921d3eddb5455c3240c94bc1d38955374b4a",
+      "raw_sha256": "1577e855274b964e1b09b5292ed249cb8b65078900ce66636ff26671b6f5bcd4"
+    },
+    "load-store": {
+      "rows": 56700,
+      "forms": 31,
+      "compressed_bytes": 241731,
+      "compressed_sha256": "d049df5e4ffad61075a58a16acde4d1e344f205ae3356de508b65e0337f75897",
+      "raw_sha256": "a0d1a3e9ed701b62e19d58ed3157783bce68320c1525f4df742672831fe84d9c"
+    },
+    "remainder-scale": {
+      "rows": 65496,
+      "forms": 6,
+      "compressed_bytes": 355432,
+      "compressed_sha256": "4ecc4bda7968ea52f427d017b6edea7b1c2588f46bb957c06462a32030ac99ff",
+      "raw_sha256": "518560e88d2d2ddbbffb08fb98aaf7053900288f4754b9c66416ccffcc18d312"
+    },
+    "stack": {
+      "rows": 2592,
+      "forms": 12,
+      "compressed_bytes": 22364,
+      "compressed_sha256": "34f3877cfbd41c9f9d7684e4980418ddf8ce5b793487f9f76518a2a0b2c489f3",
+      "raw_sha256": "3ee21b0922245950fe8826c4dc0b4fe49c09376ab476f142e33c30970b2ba237"
+    },
+    "transcendental": {
+      "rows": 83736,
+      "forms": 8,
+      "compressed_bytes": 708030,
+      "compressed_sha256": "98fbe1c3e4048b47e4686ef4c06fe1889ab2a6710fbea67eb75621400561fd9a",
+      "raw_sha256": "0766e44e4804e5b87a7b2e0cdf1b31e2f38dd9ed65de406f732aaaba9635fb8b"
+    },
+    "traps": {
+      "rows": 192,
+      "forms": 16,
+      "compressed_bytes": 2215,
+      "compressed_sha256": "1ebccf9ea7e0463d131efc9d4f1012232c8dddaf65bad5ffe077a7547bfeb4b6",
+      "raw_sha256": "963f3db1cd4b0b1deb0d9c5960ba1b28ce66ab60ef80cbdaf82f50f86c527e33"
+    }
+  },
+  "checks": {
+    "arithmetic_C1_iff_magnitude_rounded_up": {
+      "support": 15984,
+      "contradiction": 0
+    },
+    "unsupported_arithmetic_negative_indefinite_and_IE": {
+      "support": 24192,
+      "contradiction": 0
+    },
+    "invalid_arithmetic_negative_indefinite_and_IE": {
+      "support": 360,
+      "contradiction": 0
+    },
+    "NaN_QQ_quiet_preferred_else_larger_significand": {
+      "support": 288,
+      "contradiction": 0
+    },
+    "NaN_QQ_IE_iff_signaling": {
+      "support": 288,
+      "contradiction": 0
+    },
+    "NaN_QS_quiet_preferred_else_larger_significand": {
+      "support": 288,
+      "contradiction": 0
+    },
+    "NaN_QS_IE_iff_signaling": {
+      "support": 288,
+      "contradiction": 0
+    },
+    "NaN_SQ_quiet_preferred_else_larger_significand": {
+      "support": 288,
+      "contradiction": 0
+    },
+    "NaN_SQ_IE_iff_signaling": {
+      "support": 288,
+      "contradiction": 0
+    },
+    "NaN_SS_quiet_preferred_else_larger_significand": {
+      "support": 288,
+      "contradiction": 0
+    },
+    "NaN_SS_IE_iff_signaling": {
+      "support": 288,
+      "contradiction": 0
+    },
+    "sqrt_C1_iff_magnitude_rounded_up": {
+      "support": 408,
+      "contradiction": 0
+    },
+    "negative_sqrt_indefinite_and_IE": {
+      "support": 360,
+      "contradiction": 0
+    },
+    "frndint_C1_iff_magnitude_rounded_up": {
+      "support": 768,
+      "contradiction": 0
+    },
+    "NaN_compare_IE_rule": {
+      "support": 22128,
+      "contradiction": 0
+    },
+    "NaN_compare_unordered_flags": {
+      "support": 22128,
+      "contradiction": 0
+    },
+    "full_FTW_empty_tags_match_logical_STACK": {
+      "support": 51648,
+      "contradiction": 0
+    },
+    "abridged_FTW_matches_full_FTW": {
+      "support": 6456,
+      "contradiction": 0
+    },
+    "environment_restore_preserves_seeded_pointers_in_legacy_view": {
+      "support": 864,
+      "contradiction": 0
+    },
+    "FNSAVE_resets_x87": {
+      "support": 216,
+      "contradiction": 0
+    },
+    "masked_trace_FXSAVE_reports_zero_FOP_FIP_FDP": {
+      "support": 1944,
+      "contradiction": 0
+    },
+    "float_store_C1_iff_magnitude_rounded_up": {
+      "support": 3072,
+      "contradiction": 0
+    },
+    "integer_store_C1_iff_magnitude_rounded_up": {
+      "support": 4986,
+      "contradiction": 0
+    },
+    "remainder_value_exact_for_completed_bounded_inputs": {
+      "support": 17640,
+      "contradiction": 0
+    },
+    "remainder_quotient_bits_absolute_low3": {
+      "support": 17640,
+      "contradiction": 0
+    },
+    "remainder_all_fixed64_chains_terminate_C2_clear": {
+      "support": 384,
+      "contradiction": 0
+    },
+    "stack_overflow_IE_SF_C1_negative_indefinite": {
+      "support": 12,
+      "contradiction": 0
+    },
+    "stack_underflow_IE_SF_C1zero_pop": {
+      "support": 12,
+      "contradiction": 0
+    },
+    "stack_top_adjust_keeps_physical_full_tags": {
+      "support": 432,
+      "contradiction": 0
+    },
+    "FNINIT_resets_x87": {
+      "support": 216,
+      "contradiction": 0
+    },
+    "FNCLEX_clears_exception_SF_ES_B_preserves_CCs": {
+      "support": 216,
+      "contradiction": 0
+    },
+    "all_unmasked_exceptions_deferred_to_next_waiting_probe": {
+      "support": 192,
+      "contradiction": 0
+    },
+    "trap_state_equals_preprobe_hardware_snapshot": {
+      "support": 192,
+      "contradiction": 0
+    },
+    "trap_has_ES_and_B_set": {
+      "support": 192,
+      "contradiction": 0
+    }
+  },
+  "counterexamples": {},
+  "nan_selection": {
+    "QQ": {
+      "rows": 288,
+      "ST0": 216,
+      "ST1": 72,
+      "IE": 0
+    },
+    "QS": {
+      "rows": 288,
+      "ST0": 288,
+      "ST1": 0,
+      "IE": 288
+    },
+    "SQ": {
+      "rows": 288,
+      "ST0": 0,
+      "ST1": 288,
+      "IE": 288
+    },
+    "SS": {
+      "rows": 288,
+      "ST0": 72,
+      "ST1": 216,
+      "IE": 288
+    }
+  },
+  "traps": {
+    "IE_FWAIT": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_7": 12
+    },
+    "IE_FLD1": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_7": 12
+    },
+    "DE_FWAIT": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_5": 12
+    },
+    "DE_FLD1": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_5": 12
+    },
+    "ZE_FWAIT": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_3": 12
+    },
+    "ZE_FLD1": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_3": 12
+    },
+    "OE_FWAIT": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_4": 12
+    },
+    "OE_FLD1": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_4": 12
+    },
+    "UE_FWAIT": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_5": 12
+    },
+    "UE_FLD1": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_5": 12
+    },
+    "PE_FWAIT": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_6": 12
+    },
+    "PE_FLD1": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_6": 12
+    },
+    "STACK_UNDERFLOW_FWAIT": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_7": 12
+    },
+    "STACK_UNDERFLOW_FLD1": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_7": 12
+    },
+    "STACK_OVERFLOW_FWAIT": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_7": 12
+    },
+    "STACK_OVERFLOW_FLD1": {
+      "rows": 12,
+      "SIGFPE": 12,
+      "probe": 12,
+      "trigger": 0,
+      "signal_code_7": 12
+    }
+  }
+}

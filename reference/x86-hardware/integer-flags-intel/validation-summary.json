@@ -1,0 +1,139 @@
+{
+  "shifts": {
+    "forms": 1984,
+    "rows": 87296,
+    "traps": 0,
+    "before_flags": {
+      "0202": 43648,
+      "0ad7": 43648
+    },
+    "skipped": [],
+    "sha256_raw": "779214fda7b38da0495cbd5ddc6e769bfbca58b287ada6edb1deafd12b052403",
+    "sha256_gzip": "ba3b95c8bcae0c37ad1bd23716ce3200f7b6255fdc8902dadefa5cf38896ec48",
+    "gzip_bytes": 328622,
+    "per_form_counts": "exact for available native forms"
+  },
+  "rotates": {
+    "forms": 1984,
+    "rows": 87296,
+    "traps": 0,
+    "before_flags": {
+      "0202": 43648,
+      "0ad7": 43648
+    },
+    "skipped": [],
+    "sha256_raw": "1a557ccbdbdf7a3bf00766ed65c2884ff93bbdc6d9ac3883f8908d300084e733",
+    "sha256_gzip": "678799cb5810af7587088be336769dce1cbe202895fc5027d3667d15b94dc333",
+    "gzip_bytes": 400220,
+    "per_form_counts": "exact for available native forms"
+  },
+  "double": {
+    "forms": 768,
+    "rows": 743424,
+    "traps": 0,
+    "before_flags": {
+      "0202": 371712,
+      "0ad7": 371712
+    },
+    "skipped": [],
+    "sha256_raw": "f5b98d1ce7397dcb04ecd771a5f66a4fd937125ddb44bceffb86a4d2b0e49ed4",
+    "sha256_gzip": "49ea8e5684da8030ea8c766aafa433477074d07e8699ee9d456685d7ee6652f3",
+    "gzip_bytes": 2491002,
+    "per_form_counts": "exact for available native forms"
+  },
+  "multiply": {
+    "forms": 51,
+    "rows": 49368,
+    "traps": 0,
+    "before_flags": {
+      "0202": 24684,
+      "0ad7": 24684
+    },
+    "skipped": [],
+    "sha256_raw": "8676167a619bb7ff489a7d6aad19381bab50916ae3ebfaa0a6d4ace02bf6fc53",
+    "sha256_gzip": "40666d239aca6123b0c9eb639d69a6a51e4c52a1133aacd8ac65ee39300295a5",
+    "gzip_bytes": 148052,
+    "per_form_counts": "exact for available native forms"
+  },
+  "divide": {
+    "forms": 8,
+    "rows": 174256,
+    "traps": 100856,
+    "before_flags": {
+      "0202": 87128,
+      "0ad7": 87128
+    },
+    "skipped": [],
+    "sha256_raw": "f1b12728525bd461f45016d1bc19e32695562a8c5c5eab65bc82977230ee060b",
+    "sha256_gzip": "62edc5e24c7e6f2c11be9fb4ee1f2a293f31fbedfa061e89bb45998934360596",
+    "gzip_bytes": 638725,
+    "per_form_counts": "exact for available native forms"
+  },
+  "bitscan": {
+    "forms": 15,
+    "rows": 14520,
+    "traps": 0,
+    "before_flags": {
+      "0202": 7260,
+      "0ad7": 7260
+    },
+    "skipped": [],
+    "sha256_raw": "50cb1d11919dd325fc63174e459298261ee761f57f304ffe52546c98b450a45c",
+    "sha256_gzip": "409c4235f3ad06d551dd600a682de78fa1758e72ca6a35db5ab9c584a2fb793d",
+    "gzip_bytes": 38947,
+    "per_form_counts": "exact for available native forms"
+  },
+  "bittest": {
+    "forms": 192,
+    "rows": 34848,
+    "traps": 0,
+    "before_flags": {
+      "0202": 17424,
+      "0ad7": 17424
+    },
+    "skipped": [],
+    "sha256_raw": "cc34ee796bd23c0f7eabcd683cc02fa6a4a3b32f88e631dfc3d4e97fdf429bd2",
+    "sha256_gzip": "35db72a60bdeb44ad37f5fbb6f0dbc6e3c12374103160325bee103ba8d42617f",
+    "gzip_bytes": 125659,
+    "per_form_counts": "exact for available native forms"
+  },
+  "logic": {
+    "forms": 16,
+    "rows": 15488,
+    "traps": 0,
+    "before_flags": {
+      "0202": 7744,
+      "0ad7": 7744
+    },
+    "skipped": [],
+    "sha256_raw": "0416a7530e2f7000e22451c7b4106ebbd5c38e323bf36d77ce4fa95225b93a3e",
+    "sha256_gzip": "c0be416784573ddbde8b8bb2579c80fd450e436997c934634e484b78e0fe3eec",
+    "gzip_bytes": 47568,
+    "per_form_counts": "exact for available native forms"
+  },
+  "misc": {
+    "forms": 11,
+    "rows": 131692,
+    "traps": 0,
+    "before_flags": {
+      "0202": 65846,
+      "0ad7": 65846
+    },
+    "skipped": [],
+    "sha256_raw": "8f0319123f1f4d0b0afbc91667222d93d7576cc2e487ce975d2050478274026f",
+    "sha256_gzip": "4625ff15ae3776a3c4f31cf1e9dbcc4627bde295887e68ccf1d988ec6a69b668",
+    "gzip_bytes": 404125,
+    "per_form_counts": "exact for available native forms"
+  },
+  "09-bmi": {
+    "rows": 286616,
+    "sha256_raw": "db5e986fe98d9333154df9dc47d4408b6dcc8dd434934a8847f2b3f8e987ab6c",
+    "gzip_bytes": 867717,
+    "sha256_gzip": "2b9c34ce8fbb14c4f996d430835c459820529c64e89f3b8f8333420e002fd710",
+    "skipped": [],
+    "detail": "bmi_RULE_CHECKS.txt"
+  },
+  "total_rows": 1624804,
+  "total_result_gzip_bytes": 5490637,
+  "complete_0002_64bit_coverage": true
+}

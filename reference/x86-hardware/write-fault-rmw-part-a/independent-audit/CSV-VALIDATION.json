@@ -1,0 +1,9 @@
+{
+  "pass": true,
+  "counts": {
+    "csv_rows": 13111,
+    "measured_rows": 12811,
+    "na_rows": 300
+  },
+  "errors": []
+}

@@ -1,0 +1,25 @@
+{
+  "rows": 50,
+  "repeat_byte_identical": true,
+  "table_sha256": "9b4bb85295aa1241d9506e81f49631e5816b1fb41a6c0d6c8334bf965f59a7b9",
+  "runs": [
+    {
+      "run": 1,
+      "page_faults": 40,
+      "general_protection_faults": 10,
+      "confirmed_altstack": 50,
+      "confirmed_unmapped_in_child_maps": 50,
+      "captured_64bit_cs33": 30,
+      "captured_32bit_cs23": 20
+    },
+    {
+      "run": 2,
+      "page_faults": 40,
+      "general_protection_faults": 10,
+      "confirmed_altstack": 50,
+      "confirmed_unmapped_in_child_maps": 50,
+      "captured_64bit_cs33": 30,
+      "captured_32bit_cs23": 20
+    }
+  ]
+}

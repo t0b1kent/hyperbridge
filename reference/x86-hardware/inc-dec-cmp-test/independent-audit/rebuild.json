@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "compiler": "gcc 14.2.0",
+  "options": "-O2 -std=c11 -Wall -Wextra -Werror -fno-pie -no-pie -Wl,--build-id=none",
+  "binary_sha256": "5c2cd3a6e79e4a53a56faa4bd7a73a81e3dcc17d063c81ba22a3935c2a4a82e5",
+  "binary_byte_identity": true,
+  "independent_third_capture": {
+    "A-inc-dec.csv": "a3f8943432ea1bf347cd697fa6812293321b8498d1832b386f9a1a2568d0082f",
+    "B-add1-sub1.csv": "25caa5b03d028638a41864bfc59153b60e70c240bc82fcc3a67c8c93ac9a7d76",
+    "C-memory-cmp-test.csv": "250decd91dbd2cd024914511b6a9270e8d8a29be20cf219729a5ac7987d28ea5",
+    "D-high-byte.csv": "53352c5b03abb71d026b0977f455fcc9963be502cc3b253da76ce95fd5a38c25"
+  },
+  "third_capture_byte_identity": {
+    "A-inc-dec.csv": true,
+    "B-add1-sub1.csv": true,
+    "C-memory-cmp-test.csv": true,
+    "D-high-byte.csv": true
+  }
+}

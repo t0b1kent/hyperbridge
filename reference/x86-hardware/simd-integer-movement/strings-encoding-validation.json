@@ -1,0 +1,17 @@
+{
+  "family": "strings",
+  "forms_checked": 6144,
+  "immediate_forms_checked": 6144,
+  "encodings": {
+    "legacy": 3072,
+    "VEX128": 3072
+  },
+  "opcode_bytes_sha256": "6d1283c33bf2b7ee058abd5735c293104995ca83657868727db87c2a00bc3456",
+  "checks": [
+    "unique target opcode in each symbol",
+    "legacy versus VEX prefix",
+    "VEX L bit and displayed register width",
+    "register versus memory operand",
+    "all immediate bytes match declaration"
+  ]
+}

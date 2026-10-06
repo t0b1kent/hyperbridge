@@ -1,0 +1,38 @@
+{
+  "chains": {
+    "status": "PASS",
+    "configurations": 112,
+    "random_cases": 112000000,
+    "total_cases": 112044800,
+    "files": {
+      "chains-counts.csv": {
+        "sha256": "e503d2ea800b562eb08c3cc369049c28b594b7beebfd21b9887fc9b98b2de802",
+        "bytes": 57136,
+        "repeat_byte_identical": true
+      },
+      "chains-examples.csv": {
+        "sha256": "359c58458cd9cae6fdfed7ccd94e88832b29d35a3b47db1d9cb600ced491335f",
+        "bytes": 3194052,
+        "repeat_byte_identical": true
+      }
+    }
+  },
+  "extended": {
+    "status": "PASS",
+    "configurations": 48,
+    "random_cases": 48000000,
+    "total_cases": 48012288,
+    "files": {
+      "extended-counts.csv": {
+        "sha256": "369628d1bc19222f0bc29a3527d33f79f8f4ad6fbbdd3346201dcfb0be76abc1",
+        "bytes": 14702,
+        "repeat_byte_identical": true
+      },
+      "extended-examples.csv": {
+        "sha256": "5083f870e038195e2ceffe55c0d8827b76e542d93229630ff9240e51a3830787",
+        "bytes": 1097650,
+        "repeat_byte_identical": true
+      }
+    }
+  }
+}

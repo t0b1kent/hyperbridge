@@ -1,0 +1,8 @@
+host page size 16384
+anon MADV_DONTNEED           rc=0 errno=0 bytes_still_A5=1048576 of 1048576
+anon MADV_FREE               rc=0 errno=0 bytes_still_A5=1048576 of 1048576
+anon MAP_FIXED remap         same_addr=1 bytes_still_A5=0 of 1048576
+MAP_JIT last page PROT_NONE  rc=-1 errno=13
+MAP_JIT last page PROT_READ  rc=-1 errno=13
+MAP_JIT MADV_DONTNEED        rc=0 errno=0
+plain anon last page NONE    rc=0 errno=0

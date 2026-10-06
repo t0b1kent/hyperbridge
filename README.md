@@ -223,3 +223,5 @@ taken from Wine is the three adapter files listed above.
 
 Windows is a trademark of Microsoft. Apple and Apple Silicon are trademarks of
 Apple Inc. HyperBridge is not affiliated with or endorsed by either company.
+
+Original measured references are available in [reference/x86-hardware](reference/x86-hardware/README.md), with native probe sources, machine descriptions, text results and reproduction commands. Short [measured findings](docs/findings/README.md) document observed hardware, OS and translator behavior with limits and falsification criteria.

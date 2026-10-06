@@ -1,0 +1,8 @@
+# Class 7 observed gather rules
+
+- 4032 non-faulting rows exactly match scalar signed-index address calculation, lane data, destination merge and the full 256-bit final mask. Scales 1/2/4/8 and negative indices are independently exercised.
+- Successful gathers clear the entire YMM mask, including initially disabled mask elements with nonzero low bits. They retain old destination elements where the corresponding mask sign was clear, and zero destination bits outside the form's output lanes.
+- 576 all-disabled protected-address rows and 576 rows with protected addresses only in disabled lanes complete without a fault. The raw before/after masks make the clearing visible.
+- 2304 fault rows are real SIGSEGV/page-fault observations. Each already-completed active lane contains its scalar memory value and has mask element zero; each pending active lane retains its old destination and the entire original mask element, including noncanonical low bits. Initially disabled lanes retain their old destination and their mask elements become zero. Enabled readable lanes below the first faulting lane must be complete; later lanes are checked against their actually observed completion mask.
+- On this host, faulting gathers retain the destination and mask bits above the form's output lanes, including the nonzero YMM upper-half pattern for XMM-destination forms. Successful completion zeroes those bits. This difference is recorded from signal XSAVE context, not inferred from the post-longjmp process registers.
+- All 6336 rows pass the relevant scalar/state model. Two complete native executions produce identical gzip bytes. Fault recovery uses only user-owned anonymous memory and a standard SA_SIGINFO signal handler.

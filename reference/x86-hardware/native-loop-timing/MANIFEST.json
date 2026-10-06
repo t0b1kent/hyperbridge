@@ -1,0 +1,106 @@
+{
+  "dataset": "native-loop-timing",
+  "machine": "AMD EPYC 9V74 80-Core Processor, Linux cloud VM; GCC 14.2.0, binutils 2.44",
+  "measured": "26 loops, two runs, five samples per loop in each run; one thread pinned to logical CPU 0.",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "c5c39e96d39cb00909644911662ff4edccf1a6c57bf64b37fda97b2a6cfd2e13",
+      "bytes": 1088,
+      "original_path": "LICENSE",
+      "original_sha256": "c5c39e96d39cb00909644911662ff4edccf1a6c57bf64b37fda97b2a6cfd2e13",
+      "original_bytes": 1088,
+      "text_payload_sha256": "c5c39e96d39cb00909644911662ff4edccf1a6c57bf64b37fda97b2a6cfd2e13"
+    },
+    {
+      "path": "RAW-AMD-EPYC-9V74-80-Core-Processor-run2.tsv",
+      "sha256": "e7caaa6cd2992e7102593f82fe9a777ee4355d28d85eb4fa1e6a80cfa05b5a49",
+      "bytes": 12658,
+      "original_path": "RAW-AMD-EPYC-9V74-80-Core-Processor-run2.tsv",
+      "original_sha256": "e7caaa6cd2992e7102593f82fe9a777ee4355d28d85eb4fa1e6a80cfa05b5a49",
+      "original_bytes": 12658,
+      "text_payload_sha256": "e7caaa6cd2992e7102593f82fe9a777ee4355d28d85eb4fa1e6a80cfa05b5a49"
+    },
+    {
+      "path": "RAW-AMD-EPYC-9V74-80-Core-Processor.tsv",
+      "sha256": "3ff4c18bc02b3229ebbd58ed3de8760f3dbc6a55c75eee00b89cd13333d627f9",
+      "bytes": 12659,
+      "original_path": "RAW-AMD-EPYC-9V74-80-Core-Processor.tsv",
+      "original_sha256": "3ff4c18bc02b3229ebbd58ed3de8760f3dbc6a55c75eee00b89cd13333d627f9",
+      "original_bytes": 12659,
+      "text_payload_sha256": "3ff4c18bc02b3229ebbd58ed3de8760f3dbc6a55c75eee00b89cd13333d627f9"
+    },
+    {
+      "path": "REPEATABILITY.tsv",
+      "sha256": "ecd00b7a9fb12dfe8c27945f33b5e1b34c1b60a01e64896e702bbe4a1f3fe35f",
+      "bytes": 2065,
+      "original_path": "REPEATABILITY.tsv",
+      "original_sha256": "ecd00b7a9fb12dfe8c27945f33b5e1b34c1b60a01e64896e702bbe4a1f3fe35f",
+      "original_bytes": 2065,
+      "text_payload_sha256": "ecd00b7a9fb12dfe8c27945f33b5e1b34c1b60a01e64896e702bbe4a1f3fe35f"
+    },
+    {
+      "path": "RESULTS-AMD-EPYC-9V74-80-Core-Processor-run2.tsv",
+      "sha256": "415d04bae1dce96352f3bcdb2ebdcee211107f94f772c158c3fdda9dcb1672bc",
+      "bytes": 2694,
+      "original_path": "RESULTS-AMD-EPYC-9V74-80-Core-Processor-run2.tsv",
+      "original_sha256": "415d04bae1dce96352f3bcdb2ebdcee211107f94f772c158c3fdda9dcb1672bc",
+      "original_bytes": 2694,
+      "text_payload_sha256": "415d04bae1dce96352f3bcdb2ebdcee211107f94f772c158c3fdda9dcb1672bc"
+    },
+    {
+      "path": "RESULTS-AMD-EPYC-9V74-80-Core-Processor.tsv",
+      "sha256": "d1974b6ab6d5581532c8ab8c3c9eb5bbcb5c6d35b99171044a9a7e76b3d307ea",
+      "bytes": 2694,
+      "original_path": "RESULTS-AMD-EPYC-9V74-80-Core-Processor.tsv",
+      "original_sha256": "d1974b6ab6d5581532c8ab8c3c9eb5bbcb5c6d35b99171044a9a7e76b3d307ea",
+      "original_bytes": 2694,
+      "text_payload_sha256": "d1974b6ab6d5581532c8ab8c3c9eb5bbcb5c6d35b99171044a9a7e76b3d307ea"
+    },
+    {
+      "path": "source/analyze-results.py",
+      "sha256": "fccf162466627cbc1da5c689c204aa03525b8bd89647654baedf1bec3ec8f27c",
+      "bytes": 4073,
+      "original_path": "source/analyze-results.py",
+      "original_sha256": "fccf162466627cbc1da5c689c204aa03525b8bd89647654baedf1bec3ec8f27c",
+      "original_bytes": 4073,
+      "text_payload_sha256": "fccf162466627cbc1da5c689c204aa03525b8bd89647654baedf1bec3ec8f27c"
+    },
+    {
+      "path": "source/run.sh",
+      "sha256": "6d6d45ffebdced956bab8de4fbc42cea74b55a40589090042f77d6372d400946",
+      "bytes": 1682,
+      "original_path": "source/run.sh",
+      "original_sha256": "6d6d45ffebdced956bab8de4fbc42cea74b55a40589090042f77d6372d400946",
+      "original_bytes": 1682,
+      "text_payload_sha256": "6d6d45ffebdced956bab8de4fbc42cea74b55a40589090042f77d6372d400946"
+    },
+    {
+      "path": "source/verify-original-bodies.py",
+      "sha256": "f84719cb122bf037d77658344f3eacb21b8a3737431d8ad5739d37941dc624c7",
+      "bytes": 1187,
+      "original_path": "source/verify-original-bodies.py",
+      "original_sha256": "f84719cb122bf037d77658344f3eacb21b8a3737431d8ad5739d37941dc624c7",
+      "original_bytes": 1187,
+      "text_payload_sha256": "f84719cb122bf037d77658344f3eacb21b8a3737431d8ad5739d37941dc624c7"
+    },
+    {
+      "path": "source/xbench-linux.c",
+      "sha256": "3492eba3fadc47328790e3e7fa4cf5601d3ce36eda1f7a21df37c46ef66fbb1a",
+      "bytes": 18469,
+      "original_path": "source/xbench-linux.c",
+      "original_sha256": "3492eba3fadc47328790e3e7fa4cf5601d3ce36eda1f7a21df37c46ef66fbb1a",
+      "original_bytes": 18469,
+      "text_payload_sha256": "3492eba3fadc47328790e3e7fa4cf5601d3ce36eda1f7a21df37c46ef66fbb1a"
+    },
+    {
+      "path": "input/xbench.c",
+      "sha256": "4cdf751b82442361a5b1ff07df3575e5216be51b57fb0ae0304ac8eb43838b3c",
+      "bytes": 9100,
+      "original_path": "input/xbench.c",
+      "original_sha256": "4cdf751b82442361a5b1ff07df3575e5216be51b57fb0ae0304ac8eb43838b3c",
+      "original_bytes": 9100,
+      "text_payload_sha256": "4cdf751b82442361a5b1ff07df3575e5216be51b57fb0ae0304ac8eb43838b3c"
+    }
+  ]
+}

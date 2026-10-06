@@ -1,0 +1,8 @@
+# Class 1 observed rules
+
+- Full-YMM checks: SSE rows 72585, VEX128 rows 73224, VEX256 rows 29052. Register-writing legacy forms preserve the initial YMM upper 128 bits. VEX128 register writes zero the upper 128 bits; store and GPR-destination instructions do not modify YMM0. VEXTRACT128 writes an XMM destination and zeros its YMM high half even though its source encoding uses L=1.
+- Scalar legacy MOVSS/MOVSD register moves preserve untouched destination lanes; memory loads zero the rest of low XMM. VEX scalar register moves merge the explicit first source and zero the YMM high half.
+- Every immediate byte is executed; extraction and insertion lane selectors ignore unused high bits. INSERTPS memory form ignores its source-lane selector, while its destination selector and zero-mask remain effective.
+- Boundary guard-off cases: 144 succeed, 18 fault. All-off protected-address cases: 144 succeed, 18 fault. The faults in these two categories are MASKMOVDQU/VMASKMOVDQU on this host. VMASKMOVPS/PD and VPMASKMOVD/Q suppress protected-memory faults for disabled lanes and preserve disabled store bytes / zero disabled load lanes.
+- All 378 fault rows retain actual kernel signal-context snapshots, including YMM upper halves from XSAVE. Checked fault invariants: SIGSEGV, unchanged vector destination/mask/GPR, and accessible memory bytes equal either the original or the permitted scalar store result. MASKMOVDQU protected-address fault behavior is observed rather than assumed.
+- 174483 non-faulting rows match byte-for-byte scalar C models for destination, mask, GPR and accessible memory. 378 fault rows match the stated invariants. Input/output rows and gzip bytes matched across two independent executions (gzip -n).

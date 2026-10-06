@@ -1,0 +1,8 @@
+{
+  "pass": true,
+  "measured_rows": 264,
+  "na_rows": 264,
+  "requested_core_measured_rows": 176,
+  "core_coverage_complete": true,
+  "errors": []
+}

@@ -1,0 +1,12 @@
+{
+  "forms": 15410,
+  "encodings": {
+    "SSE": 678,
+    "VEX": 1280,
+    "EVEX": 13452
+  },
+  "instruction_encoding_errors": 0,
+  "mnemonic_errors": 0,
+  "GPR_width_errors": 0,
+  "target_instructions_executed": false
+}

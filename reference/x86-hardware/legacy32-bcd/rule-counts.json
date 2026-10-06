@@ -1,0 +1,3647 @@
+{
+  "rules": {
+    "DAA.undefined_OF": {
+      "supporting": 2048,
+      "contradicting": 0,
+      "total": 2048,
+      "description": "OF equals 8-bit ADD overflow for old AL + d, where d = (low-nibble > 9 or input AF ? 6 : 0) + (old AL > 0x99 or input CF ? 0x60 : 0)"
+    },
+    "DAS.undefined_OF": {
+      "supporting": 2048,
+      "contradicting": 0,
+      "total": 2048,
+      "description": "OF equals 8-bit SUB overflow for old AL - d, with the same d condition as DAA"
+    },
+    "AAA.undefined_OSZP": {
+      "supporting": 262144,
+      "contradicting": 0,
+      "total": 262144,
+      "description": "OF, SF, ZF and PF equal flags of 16-bit AX + d BEFORE AL is masked to four bits; d = 0x106 when adjustment is selected, otherwise zero"
+    },
+    "AAS.undefined_OSZP": {
+      "supporting": 262144,
+      "contradicting": 0,
+      "total": 262144,
+      "description": "OF, SF, ZF and PF equal flags of 16-bit AX - d BEFORE AL is masked to four bits; d = 0x106 when adjustment is selected, otherwise zero"
+    },
+    "AAM.undefined_OAC": {
+      "supporting": 11688,
+      "contradicting": 0,
+      "total": 11688,
+      "description": "On successful AAM, OF = AF = CF = 0"
+    },
+    "AAD.undefined_OAC": {
+      "supporting": 142292,
+      "contradicting": 0,
+      "total": 142292,
+      "description": "OF, AF and CF equal flags of an 8-bit ADD of old AL and ((old AH * immediate) & 0xff)"
+    },
+    "AAM.zero_trap": {
+      "supporting": 44,
+      "contradicting": 0,
+      "total": 44,
+      "description": "AAM immediate zero traps and preserves input AX and all six arithmetic flags in the saved fault context"
+    },
+    "SALC.observed": {
+      "supporting": 512,
+      "contradicting": 0,
+      "total": 512,
+      "description": "SALC gives AL = input CF ? 0xff : 0, preserving all six arithmetic flags"
+    },
+    "PUSHSEG32.upper": {
+      "supporting": 264,
+      "contradicting": 0,
+      "total": 264,
+      "description": "32-bit segment PUSH zeroes the upper 16 bits of its four-byte stack slot, overwriting the initial 0xa5a5 high half"
+    },
+    "STACK.flags": {
+      "supporting": 176,
+      "contradicting": 0,
+      "total": 176,
+      "description": "PUSHA/PUSHAD/POPA/POPAD preserve all six arithmetic flags"
+    },
+    "SEGMENT.flags": {
+      "supporting": 968,
+      "contradicting": 0,
+      "total": 968,
+      "description": "PUSH/POP of measured segment registers preserve all six arithmetic flags"
+    },
+    "INCDEC.CF": {
+      "supporting": 1264,
+      "contradicting": 0,
+      "total": 1264,
+      "description": "All measured INC/DEC register forms preserve CF"
+    },
+    "BOUND.flags": {
+      "supporting": 352,
+      "contradicting": 0,
+      "total": 352,
+      "description": "BOUND preserves all six arithmetic flags, including saved out-of-range fault contexts"
+    },
+    "INTO.flags": {
+      "supporting": 44,
+      "contradicting": 0,
+      "total": 44,
+      "description": "INTO preserves all six arithmetic flags, including saved overflow trap contexts"
+    },
+    "ARPL.preserved": {
+      "supporting": 968,
+      "contradicting": 0,
+      "total": 968,
+      "description": "ARPL preserves CF, PF, AF, SF and OF (ZF alone is the architecturally modified arithmetic flag)"
+    },
+    "LAHF.flags": {
+      "supporting": 44,
+      "contradicting": 0,
+      "total": 44,
+      "description": "LAHF preserves all six arithmetic flags"
+    },
+    "SAHF.OF": {
+      "supporting": 512,
+      "contradicting": 0,
+      "total": 512,
+      "description": "SAHF preserves OF"
+    },
+    "SHL.undefined_AF": {
+      "supporting": 2904,
+      "contradicting": 0,
+      "total": 2904,
+      "description": "SHL in compatibility mode: count zero preserves AF; every nonzero masked count sets AF"
+    },
+    "SHL.undefined_OF": {
+      "supporting": 2640,
+      "contradicting": 0,
+      "total": 2640,
+      "description": "SHL in compatibility mode, masked count > 1: OF equals sign(final result) XOR output CF"
+    }
+  },
+  "forms": [
+    {
+      "name": "AAA.ax",
+      "width": 16,
+      "immediate": -1,
+      "rows": 262144
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 0,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 1,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 2,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 3,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 4,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 5,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 6,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 7,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 8,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 9,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 10,
+      "rows": 131072
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 11,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 12,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 13,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 14,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 15,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 16,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 17,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 18,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 19,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 20,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 21,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 22,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 23,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 24,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 25,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 26,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 27,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 28,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 29,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 30,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 31,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 32,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 33,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 34,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 35,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 36,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 37,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 38,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 39,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 40,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 41,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 42,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 43,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 44,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 45,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 46,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 47,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 48,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 49,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 50,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 51,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 52,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 53,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 54,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 55,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 56,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 57,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 58,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 59,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 60,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 61,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 62,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 63,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 64,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 65,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 66,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 67,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 68,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 69,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 70,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 71,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 72,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 73,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 74,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 75,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 76,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 77,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 78,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 79,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 80,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 81,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 82,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 83,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 84,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 85,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 86,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 87,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 88,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 89,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 90,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 91,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 92,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 93,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 94,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 95,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 96,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 97,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 98,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 99,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 100,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 101,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 102,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 103,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 104,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 105,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 106,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 107,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 108,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 109,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 110,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 111,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 112,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 113,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 114,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 115,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 116,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 117,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 118,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 119,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 120,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 121,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 122,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 123,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 124,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 125,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 126,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 127,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 128,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 129,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 130,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 131,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 132,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 133,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 134,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 135,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 136,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 137,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 138,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 139,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 140,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 141,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 142,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 143,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 144,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 145,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 146,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 147,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 148,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 149,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 150,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 151,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 152,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 153,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 154,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 155,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 156,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 157,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 158,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 159,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 160,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 161,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 162,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 163,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 164,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 165,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 166,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 167,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 168,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 169,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 170,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 171,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 172,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 173,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 174,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 175,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 176,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 177,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 178,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 179,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 180,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 181,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 182,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 183,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 184,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 185,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 186,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 187,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 188,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 189,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 190,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 191,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 192,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 193,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 194,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 195,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 196,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 197,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 198,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 199,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 200,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 201,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 202,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 203,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 204,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 205,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 206,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 207,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 208,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 209,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 210,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 211,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 212,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 213,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 214,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 215,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 216,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 217,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 218,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 219,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 220,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 221,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 222,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 223,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 224,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 225,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 226,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 227,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 228,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 229,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 230,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 231,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 232,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 233,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 234,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 235,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 236,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 237,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 238,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 239,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 240,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 241,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 242,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 243,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 244,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 245,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 246,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 247,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 248,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 249,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 250,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 251,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 252,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 253,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 254,
+      "rows": 44
+    },
+    {
+      "name": "AAD.imm",
+      "width": 16,
+      "immediate": 255,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 0,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 1,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 2,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 3,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 4,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 5,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 6,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 7,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 8,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 9,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 10,
+      "rows": 512
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 11,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 12,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 13,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 14,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 15,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 16,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 17,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 18,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 19,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 20,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 21,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 22,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 23,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 24,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 25,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 26,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 27,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 28,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 29,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 30,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 31,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 32,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 33,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 34,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 35,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 36,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 37,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 38,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 39,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 40,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 41,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 42,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 43,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 44,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 45,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 46,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 47,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 48,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 49,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 50,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 51,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 52,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 53,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 54,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 55,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 56,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 57,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 58,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 59,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 60,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 61,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 62,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 63,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 64,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 65,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 66,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 67,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 68,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 69,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 70,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 71,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 72,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 73,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 74,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 75,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 76,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 77,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 78,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 79,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 80,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 81,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 82,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 83,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 84,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 85,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 86,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 87,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 88,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 89,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 90,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 91,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 92,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 93,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 94,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 95,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 96,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 97,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 98,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 99,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 100,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 101,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 102,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 103,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 104,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 105,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 106,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 107,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 108,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 109,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 110,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 111,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 112,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 113,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 114,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 115,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 116,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 117,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 118,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 119,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 120,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 121,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 122,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 123,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 124,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 125,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 126,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 127,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 128,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 129,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 130,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 131,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 132,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 133,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 134,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 135,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 136,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 137,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 138,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 139,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 140,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 141,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 142,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 143,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 144,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 145,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 146,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 147,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 148,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 149,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 150,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 151,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 152,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 153,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 154,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 155,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 156,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 157,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 158,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 159,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 160,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 161,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 162,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 163,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 164,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 165,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 166,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 167,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 168,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 169,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 170,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 171,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 172,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 173,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 174,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 175,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 176,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 177,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 178,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 179,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 180,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 181,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 182,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 183,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 184,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 185,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 186,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 187,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 188,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 189,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 190,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 191,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 192,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 193,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 194,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 195,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 196,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 197,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 198,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 199,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 200,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 201,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 202,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 203,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 204,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 205,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 206,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 207,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 208,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 209,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 210,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 211,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 212,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 213,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 214,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 215,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 216,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 217,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 218,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 219,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 220,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 221,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 222,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 223,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 224,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 225,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 226,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 227,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 228,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 229,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 230,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 231,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 232,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 233,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 234,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 235,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 236,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 237,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 238,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 239,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 240,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 241,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 242,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 243,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 244,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 245,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 246,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 247,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 248,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 249,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 250,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 251,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 252,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 253,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 254,
+      "rows": 44
+    },
+    {
+      "name": "AAM.imm",
+      "width": 16,
+      "immediate": 255,
+      "rows": 44
+    },
+    {
+      "name": "AAS.ax",
+      "width": 16,
+      "immediate": -1,
+      "rows": 262144
+    },
+    {
+      "name": "ADD.compat",
+      "width": 32,
+      "immediate": -1,
+      "rows": 968
+    },
+    {
+      "name": "ADD.long",
+      "width": 32,
+      "immediate": -1,
+      "rows": 968
+    },
+    {
+      "name": "ARPL.ax_bx",
+      "width": 16,
+      "immediate": -1,
+      "rows": 968
+    },
+    {
+      "name": "BOUND.mem",
+      "width": 16,
+      "immediate": -1,
+      "rows": 176
+    },
+    {
+      "name": "BOUND.mem",
+      "width": 32,
+      "immediate": -1,
+      "rows": 176
+    },
+    {
+      "name": "DAA.al",
+      "width": 8,
+      "immediate": -1,
+      "rows": 2048
+    },
+    {
+      "name": "DAS.al",
+      "width": 8,
+      "immediate": -1,
+      "rows": 2048
+    },
+    {
+      "name": "DEC.ax",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.bp",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.bx",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.cx",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.di",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.dx",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.eax",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.ebp",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.ebx",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.ecx",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.edi",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.edx",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.esi",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.esp",
+      "width": 32,
+      "immediate": -1,
+      "rows": 8
+    },
+    {
+      "name": "DEC.si",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "DEC.sp",
+      "width": 16,
+      "immediate": -1,
+      "rows": 8
+    },
+    {
+      "name": "INC.ax",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.bp",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.bx",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.cx",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.di",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.dx",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.eax",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.ebp",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.ebx",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.ecx",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.edi",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.edx",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.esi",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.esp",
+      "width": 32,
+      "immediate": -1,
+      "rows": 8
+    },
+    {
+      "name": "INC.si",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "INC.sp",
+      "width": 16,
+      "immediate": -1,
+      "rows": 8
+    },
+    {
+      "name": "INTO.of",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "LAHF.ah",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.ds",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.ds",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.es",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.es",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.fs",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.fs",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.gs",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.gs",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.ss",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POP.ss",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POPA.regs",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "POPAD.regs",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.cs",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.cs",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.ds",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.ds",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.es",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.es",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.fs",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.fs",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.gs",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.gs",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.ss",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSH.ss",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSHA.regs",
+      "width": 16,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "PUSHAD.regs",
+      "width": 32,
+      "immediate": -1,
+      "rows": 44
+    },
+    {
+      "name": "SAHF.ah",
+      "width": 16,
+      "immediate": -1,
+      "rows": 512
+    },
+    {
+      "name": "SALC.al",
+      "width": 8,
+      "immediate": -1,
+      "rows": 512
+    },
+    {
+      "name": "SHL.compat",
+      "width": 32,
+      "immediate": -1,
+      "rows": 2904
+    },
+    {
+      "name": "SHL.long",
+      "width": 32,
+      "immediate": -1,
+      "rows": 2904
+    },
+    {
+      "name": "SUB.compat",
+      "width": 32,
+      "immediate": -1,
+      "rows": 968
+    },
+    {
+      "name": "SUB.long",
+      "width": 32,
+      "immediate": -1,
+      "rows": 968
+    }
+  ],
+  "traps": {
+    "AAM": 44,
+    "BOUND": 208,
+    "INTO": 22
+  }
+}
