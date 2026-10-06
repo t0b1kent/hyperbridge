@@ -1,0 +1,169 @@
+diff --git a/FEXCore/Source/Interface/IR/Passes/RegisterAllocationPass.cpp b/FEXCore/Source/Interface/IR/Passes/RegisterAllocationPass.cpp
+--- a/FEXCore/Source/Interface/IR/Passes/RegisterAllocationPass.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/RegisterAllocationPass.cpp
+@@ -18,11 +18,96 @@
+ #include <FEXCore/fextl/vector.h>
+ #include <bit>
+ #include <cstdint>
++#include <array>
++#include <cstdlib>
+ 
+ using namespace FEXCore;
+ 
+ namespace FEXCore::IR {
+ namespace {
++  // A scalar conversion already clears its unused lanes. When the legacy SSE
++  // destination is proven zero, inserting into that zero vector is redundant.
++  // Keep guest register stores in place: memory faults still observe the state
++  // preceding the conversion. Only the conversion's unused merge input changes.
++  bool FoldZeroCVTSI(IREmitter* Emit) {
++    const char* Enabled = std::getenv("MACRUNNER_FEX_HW_CVTSI_ZERO");
++    const char* ScalarMerge = std::getenv("MACRUNNER_FEX_HW_SCALAR_MERGE");
++    if (!Enabled || Enabled[0] != '1' || Enabled[1] != '\0' ||
++        (ScalarMerge && ScalarMerge[0] == '1')) {
++      return false;
++    }
++
++    auto View = Emit->ViewIR();
++    fextl::vector<bool> IsZero(View.GetSSACount(), false);
++    fextl::vector<Ref> Conversions;
++    for (auto [BlockNode, BlockHeader] : View.GetBlocks()) {
++      std::fill(IsZero.begin(), IsZero.end(), false);
++      std::array<bool, 32> RegisterZero {};
++      for (auto [Node, Header] : View.GetCode(BlockNode)) {
++        const auto ID = View.GetID(Node).Value;
++        const auto ZeroSource = [&](OrderedNodeWrapper Value) {
++          return !Value.IsInvalid() && IsZero[Value.ID().Value];
++        };
++
++        if (Header->Op == OP_LOADNAMEDVECTORCONSTANT) {
++          IsZero[ID] = Header->Size == OpSize::i128Bit &&
++                       Header->C<IROp_LoadNamedVectorConstant>()->Constant == NamedVectorConstant::NAMED_VECTOR_ZERO;
++        } else if (Header->Op == OP_LOADREGISTER) {
++          const auto Op = Header->C<IROp_LoadRegister>();
++          IsZero[ID] = Op->Class == RegClass::FPR && Op->Reg < RegisterZero.size() &&
++                       Header->Size == OpSize::i128Bit && RegisterZero[Op->Reg];
++        } else if (Header->Op == OP_STOREREGISTER) {
++          const auto Register = PhysicalRegister(Node);
++          if (Register.AsRegClass() == RegClass::FPRFixed && Register.Reg < RegisterZero.size()) {
++            RegisterZero[Register.Reg] = Header->Size == OpSize::i128Bit &&
++                                         ZeroSource(Header->C<IROp_StoreRegister>()->Value);
++          }
++        } else if (Header->Op == OP_VSTOFGPRINSERT) {
++          const auto Op = Header->C<IROp_VSToFGPRInsert>();
++          if (Header->Size == OpSize::i128Bit && !Op->ZeroUpperBits &&
++              (Header->ElementSize == OpSize::i32Bit || Header->ElementSize == OpSize::i64Bit) &&
++              (Op->SrcElementSize == OpSize::i32Bit || Op->SrcElementSize == OpSize::i64Bit) && ZeroSource(Op->Vector)) {
++            Conversions.push_back(Node);
++          }
++        } else if (Header->Op == OP_VSTOFVECTORINSERT) {
++          const auto Op = Header->C<IROp_VSToFVectorInsert>();
++          if (Header->Size == OpSize::i128Bit && !Op->ZeroUpperBits && !Op->HasTwoElements &&
++              (Header->ElementSize == OpSize::i32Bit || Header->ElementSize == OpSize::i64Bit) && ZeroSource(Op->Vector1)) {
++            Conversions.push_back(Node);
++          }
++        } else if (Header->Op != OP_GUESTOPCODE && HasSideEffects(Header->Op)) {
++          // Unknown effects do not transport a register proof through a call,
++          // fault barrier, or other operation outside this narrow fold.
++          RegisterZero.fill(false);
++        }
++      }
++    }
++
++    for (auto Node : Conversions) {
++      const auto Header = View.GetOp<IROp_Header>(Node);
++      Emit->SetWriteCursorBefore(Node);
++      Ref Result;
++      Ref MergeInput;
++      if (Header->Op == OP_VSTOFGPRINSERT) {
++        const auto Op = Header->C<IROp_VSToFGPRInsert>();
++        MergeInput = View.GetNode(Op->Vector);
++        Result = Emit->_Float_FromGPR_S(Header->ElementSize, Op->SrcElementSize, Op->Src);
++      } else {
++        const auto Op = Header->C<IROp_VSToFVectorInsert>();
++        MergeInput = View.GetNode(Op->Vector1);
++        Result = Emit->_Vector_SToF(Header->ElementSize, Header->ElementSize, Op->Vector2);
++      }
++      Emit->ReplaceUsesWithAfter(Node, Result, Node);
++      Emit->Remove(Node);
++      // A dead static load otherwise pins the destination for RA, generating
++      // copies to preserve a value which no guest operation actually reads.
++      if (MergeInput->NumUses == 0 && View.GetOp<IROp_Header>(MergeInput)->Op == OP_LOADREGISTER) {
++        Emit->Remove(MergeInput);
++      }
++    }
++    return !Conversions.empty();
++  }
++
+   struct RegisterClassData {
+     uint32_t Available;
+     uint32_t Count;
+@@ -117,6 +202,8 @@
+   fextl::vector<uint32_t> NextUses;
+ 
+   bool AnySpilled {};
++  bool CVTSIZeroFolded {};
++  bool HoistedStaticCopy {};
+ 
+   bool IsValidArg(OrderedNodeWrapper Arg) const {
+     if (Arg.IsInvalid()) {
+@@ -383,6 +470,38 @@
+         RegisterClassData* Class = GetClass(Reg);
+         uint32_t RegBits = GetRegBits(Reg);
+ 
++        // The folded scalar operation does not read its old SIMD destination.
++        // Move a still-live old definition before producing the new value,
++        // rather than producing a temporary and copying it at StoreRegister.
++        if (CVTSIZeroFolded && Reg.AsRegClass() == RegClass::FPRFixed &&
++            (IROp->Op == OP_FLOAT_FROMGPR_S || (IROp->Op == OP_VECTOR_STOF && IROp->Size == IROp->ElementSize)) &&
++            (Class->Available & RegBits) != RegBits && !HasSource(IROp, Reg)) {
++          Ref Old = Class->RegToSSA[Reg.Reg];
++          const auto Header = IR->GetOp<IROp_Header>(Old);
++          IREmit->SetWriteCursorBefore(CodeNode);
++          Ref Copy = IREmit->_VMov(Header->Size, OrderedNodeWrapper::FromImmediate(Reg.Raw));
++          FreeReg(Reg);
++          auto CopyHeader = IR->GetOp<IROp_Header>(Copy);
++          const RegClass CopyClassType = GetRegClassFromNode(CopyHeader);
++          auto CopyClass = &Classes[FEXCore::ToUnderlying(CopyClassType)];
++
++          // The current instruction's killed sources have already been freed.
++          // Its destination may reuse them after reading, but this preservation
++          // copy runs before that read. Keep those sources out of its free set.
++          uint32_t ReservedSources = 0;
++          for (int s = 0; s < IR::GetRAArgs(IROp->Op); ++s) {
++            auto Source = PhysicalRegister(IROp->Args[s]);
++            if (Source.AsRegClass() == CopyClassType) {
++              ReservedSources |= CopyClass->Available & GetRegBits(Source);
++            }
++          }
++          CopyClass->Available &= ~ReservedSources;
++          AssignReg(CopyHeader, Block, Copy, Pivot);
++          CopyClass->Available |= ReservedSources;
++          RemapReg(Old, PhysicalRegister(Copy));
++          HoistedStaticCopy = true;
++        }
++
+         if ((Class->Available & RegBits) == RegBits) {
+           SetReg(CodeNode, Reg);
+           return;
+@@ -575,6 +694,7 @@
+ void ConstrainedRAPass::Run(IREmitter* IREmit_) {
+   FEXCORE_PROFILE_SCOPED("PassManager::RA");
+ 
++  CVTSIZeroFolded = FoldZeroCVTSI(IREmit_);
+   IREmit = IREmit_;
+   auto IR_ = IREmit->ViewIR();
+   IR = &IR_;
+@@ -759,8 +879,12 @@
+       }
+ 
+       // Assign destinations.
++      HoistedStaticCopy = false;
+       if (GetHasDest(IROp->Op) && PhysicalRegister(CodeNode).IsInvalid()) {
+         AssignReg(IROp, BlockIROp, CodeNode, IROp);
++      }
++      if (HoistedStaticCopy) {
++        LastNode = nullptr;
+       }
+ 
+       if (IsTrivial(CodeNode, IROp)) {

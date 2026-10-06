@@ -1,0 +1,684 @@
+diff --git a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+--- a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+@@ -1,9 +1,11 @@
+ // SPDX-License-Identifier: MIT
+ #include "Interface/Core/ArchHelpers/Arm64Emitter.h"
++#include "Interface/Core/HBX87IR.h"
+ #include "Interface/Core/Dispatcher/Dispatcher.h"
+ #include "Interface/Context/Context.h"
+ 
+ #include <FEXCore/Core/CoreState.h>
++#include <FEXCore/Debug/InternalThreadState.h>
+ #include <FEXCore/Core/X86Enums.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/MathUtils.h>
+@@ -445,6 +447,12 @@ Arm64Emitter::Arm64Emitter(FEXCore::Context::ContextImpl* ctx, void* EmissionPtr
+ 
+     StaticFPRegisters = x32::SRAFPR;
+     GeneralFPRegisters = x32::RAFPR;
++    if (FEXCore::HBX87::StaticRegsEnabled()) {
++      // v24-v31 must not be allocated to unrelated dynamic IR while the
++      // persistent x87 bank owns them. v2-v15 remain dynamic; XMM SRA is
++      // still exactly v16-v23 and its public reconstruction count stays 8.
++      GeneralFPRegisters = GeneralFPRegisters.first(14);
++    }
+   }
+ }
+ 
+@@ -749,7 +757,77 @@ void Arm64Emitter::FillSpecialRegs(ARMEmitter::Register TmpReg, ARMEmitter::Regi
+   }
+ }
+ 
++// The bank is reserved only in PE32. Save the four emitter temporaries and
++// NZCV, including on conditional/partial helper spills; no loader or calls.
++void Arm64Emitter::SpillX87StaticBank() {
++  if (EmitterCTX->Config.Is64BitMode() || !FEXCore::HBX87::StaticRegsEnabled()) return;
++#ifdef ARCHITECTURE_arm64ec
++  return; // PE64 bank is a separate ABI audit, not enabled by this experiment.
++#else
++  using Size = ARMEmitter::Size;
++  using Thread = FEXCore::Core::InternalThreadState;
++  constexpr size_t CacheOffset = offsetof(Thread, X87Cache);
++  ARMEmitter::ForwardLabel Done, PC24, Packed;
++  sub(Size::i64Bit, ARMEmitter::Reg::rsp, ARMEmitter::Reg::rsp, 48);
++  stp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, ARMEmitter::Reg::rsp, 0);
++  stp<ARMEmitter::IndexType::OFFSET>(TMP3, TMP4, ARMEmitter::Reg::rsp, 16);
++  mrs(TMP4, ARMEmitter::SystemRegister::NZCV); str(TMP4, ARMEmitter::Reg::rsp, 32);
++  ldr(TMP1, STATE, offsetof(FEXCore::Core::CpuStateFrame, Thread));
++  LoadConstant(Size::i64Bit, TMP2, CacheOffset); add(Size::i64Bit, TMP1, TMP1, TMP2);
++  ldrb(TMP2, TMP1, offsetof(Thread::X87StaticCache, Live));
++  (void)cbz(Size::i64Bit, TMP2, &Done);
++  mrs(TMP2, ARMEmitter::SystemRegister::FPSR); str(TMP2.W(), TMP1, offsetof(Thread::X87StaticCache, ObservedFPSR));
++  ldr(TMP2.W(), TMP1, offsetof(Thread::X87StaticCache, SavedFPSR)); msr(ARMEmitter::SystemRegister::FPSR, TMP2);
++  ldr(TMP2, ARMEmitter::Reg::rsp, 32); str(TMP2, TMP1, offsetof(Thread::X87StaticCache, SavedNZCV));
++  mov(Size::i64Bit, TMP2, 1); strb(TMP2, TMP1, offsetof(Thread::X87StaticCache, FlushActive));
++  for (unsigned Slot = 0; Slot < 8; ++Slot) str(ARMEmitter::VRegister(24 + Slot).D(), TMP1, Slot * 8);
++  ldrb(TMP2, TMP1, offsetof(Thread::X87StaticCache, Precision));
++  sub(Size::i64Bit, TMP2, TMP2, 2); (void)cbz(Size::i64Bit, TMP2, &PC24);
++  auto Export = [&](unsigned F, unsigned E, unsigned Bias) {
++    for (unsigned Slot = 0; Slot < 8; ++Slot) {
++      ARMEmitter::ForwardLabel Skip, Zero, Special, Store;
++      ldrb(TMP4, TMP1, offsetof(Thread::X87StaticCache, DirtyMask));
++      (void)tbz(TMP4, Slot, &Skip);
++      ldr(TMP2, TMP1, Slot * 8); ubfx(Size::i64Bit, TMP3, TMP2, F, E);
++      lsr(Size::i64Bit, TMP4, TMP2, F + E); and_(Size::i64Bit, TMP4, TMP4, 1);
++      lsl(Size::i64Bit, TMP4, TMP4, 15);
++      cmp(Size::i64Bit, TMP3, (1U << E) - 1); (void)b(ARMEmitter::Condition::CC_EQ, &Special);
++      (void)cbz(Size::i64Bit, TMP3, &Zero);
++      LoadConstant(Size::i64Bit, TMP2, 16383 - Bias); add(Size::i64Bit, TMP3, TMP3, TMP2);
++      orr(Size::i64Bit, TMP3, TMP3, TMP4);
++      ldr(TMP2, TMP1, Slot * 8); ubfx(Size::i64Bit, TMP2, TMP2, 0, F);
++      orr(Size::i64Bit, TMP2, TMP2, uint64_t{1} << F); lsl(Size::i64Bit, TMP2, TMP2, 63 - F);
++      (void)b(&Store);
++      (void)Bind(&Special); LoadConstant(Size::i64Bit, TMP3, 0x7fff); orr(Size::i64Bit, TMP3, TMP3, TMP4);
++      ubfx(Size::i64Bit, TMP2, TMP2, 0, F); lsl(Size::i64Bit, TMP2, TMP2, 63 - F);
++      orr(Size::i64Bit, TMP2, TMP2, uint64_t{1} << 63); (void)b(&Store);
++      (void)Bind(&Zero); ubfx(Size::i64Bit, TMP2, TMP2, 0, F);
++      ARMEmitter::ForwardLabel SubnormalDone;
++      mov(Size::i64Bit, TMP3, TMP4); (void)cbz(Size::i64Bit, TMP2, &SubnormalDone);
++      clz(Size::i64Bit, TMP3, TMP2); lslv(Size::i64Bit, TMP2, TMP2, TMP3);
++      LoadConstant(Size::i64Bit, TMP4, 16383 + 64 - Bias - F); sub(Size::i64Bit, TMP3, TMP4, TMP3);
++      ldr(TMP4, TMP1, Slot * 8); lsr(Size::i64Bit, TMP4, TMP4, F + E);
++      and_(Size::i64Bit, TMP4, TMP4, 1); lsl(Size::i64Bit, TMP4, TMP4, 15); orr(Size::i64Bit, TMP3, TMP3, TMP4);
++      (void)Bind(&SubnormalDone); (void)Bind(&Store);
++      str(TMP2, STATE, offsetof(FEXCore::Core::CPUState, mm) + Slot * 16);
++      str(TMP3, STATE, offsetof(FEXCore::Core::CPUState, mm) + Slot * 16 + 8);
++      (void)Bind(&Skip);
++    }
++  };
++  Export(52, 11, 1023); (void)b(&Packed); (void)Bind(&PC24); Export(23, 8, 127); (void)Bind(&Packed);
++  strb(ARMEmitter::XReg::zr, TMP1, offsetof(Thread::X87StaticCache, Live));
++  strb(ARMEmitter::XReg::zr, TMP1, offsetof(Thread::X87StaticCache, DirtyMask));
++  strb(ARMEmitter::XReg::zr, TMP1, offsetof(Thread::X87StaticCache, FlushActive));
++  (void)Bind(&Done);
++  ldr(TMP4, ARMEmitter::Reg::rsp, 32); msr(ARMEmitter::SystemRegister::NZCV, TMP4);
++  ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, ARMEmitter::Reg::rsp, 0);
++  ldp<ARMEmitter::IndexType::OFFSET>(TMP3, TMP4, ARMEmitter::Reg::rsp, 16);
++  add(Size::i64Bit, ARMEmitter::Reg::rsp, ARMEmitter::Reg::rsp, 48);
++#endif
++}
++
+ void Arm64Emitter::SpillStaticRegs(ARMEmitter::Register TmpReg, SpillStaticRegOptions Options) {
++  SpillX87StaticBank();
+ #ifndef VIXL_SIMULATOR
+   if (EmitterCTX->HostFeatures.SupportsAppleAFP) {
+     // Native callees run with both denormal controls disabled. Fill restores them.
+diff --git a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
+--- a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
+@@ -172,6 +172,8 @@ protected:
+ 
+   void SpillStaticRegs(ARMEmitter::Register TmpReg, SpillStaticRegOptions Options);
+   void FillStaticRegs(FillStaticRegOptions Options);
++  // Does not touch ordinary SRA, guest flags, or the host FP environment.
++  void SpillX87StaticBank();
+ 
+ 
+   void SpillStaticRegs(ARMEmitter::Register TmpReg) {
+diff --git a/FEXCore/Source/Interface/Core/CodeCache.cpp b/FEXCore/Source/Interface/Core/CodeCache.cpp
+--- a/FEXCore/Source/Interface/Core/CodeCache.cpp
++++ b/FEXCore/Source/Interface/Core/CodeCache.cpp
+@@ -314,6 +314,18 @@ static std::array<uint8_t,20> CurrentCacheVersion() {
+     const char* Phase=std::getenv("MACRUNNER_HB_X87_REGION_FAULT_PHASE");
+     if(Phase && Phase[0]>='1' && Phase[0]<='7' && !Phase[1]) Version[10]^=Phase[0];
+   }
++  // Register-allocation changes must never reuse a cache compiled without
++  // the bank reservation, even before arithmetic emission is enabled.
++  if(FEXCore::HBX87::StaticRegsEnabled()) {
++    Version[8]^=0x24;
++    constexpr uint8_t StaticRevision[8]={'X','8','7','B','0','0','0','1'};
++    for(unsigned i=0;i<8;++i) Version[12+i]^=StaticRevision[i];
++    if(!FEXCore::HBX87::InlineRegionEnabled()) {
++      if(FEXCore::HBX87::Stats::Enabled()) Version[11]^=0x53;
++      const char* Phase=std::getenv("MACRUNNER_HB_X87_REGION_FAULT_PHASE");
++      if(Phase && Phase[0]>='1' && Phase[0]<='7' && !Phase[1]) Version[10]^=Phase[0];
++    }
++  }
+   return Version;
+ }
+ 
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -40,6 +40,7 @@ $end_info$
+ #include <FEXCore/Core/Context.h>
+ #include <FEXCore/Core/CoreState.h>
+ #include <FEXCore/Core/X87Region.h>
++#include <FEXCore/Core/X87Static.h>
+ #include <FEXCore/Core/SignalDelegator.h>
+ #include <FEXCore/Core/Thunks.h>
+ #include <FEXCore/Core/X86Enums.h>
+@@ -454,8 +455,59 @@ int MacRunnerWritableValidationMode() {
+   return MRWritableValidationMode();
+ }
+ 
++namespace FEXCore::Core::X87Static {
++bool Prepare(CpuStateFrame* Frame, const X87Region::GuardRequest* Request, X87Region::GuardValues* Values) noexcept {
++  if (!Frame || !Frame->Thread || !Request || !Values || !Request->Iterations ||
++      !(uint8_t(Request->Op) & 0x80) || (uint8_t(Request->Op) & 0x7f) > uint8_t(X87Region::Arithmetic::Sqrt) ||
++      Request->SourceA >= 8 || Request->SourceB >= 8 || Request->Destination >= 8 ||
++      (Request->FPCR & 0x03c09f03U)) return false;
++  const auto& State = Frame->State;
++  const unsigned Top = State.flags[X86State::X87FLAG_TOP_LOC];
++  const uint16_t CW = State.FCW & 0x0f3f;
++  if (Top >= 8 || (CW != 0x023f && CW != 0x003f) ||
++      State.flags[X86State::X87FLAG_C1_LOC] || (State.flags[X86State::RFLAG_TF_RAW_LOC] & 1U)) return false;
++  InternalThreadState::X87StaticCache Cache {};
++  const auto Precision = CW == 0x023f ? Format::Binary53 : Format::Binary24;
++  for (unsigned Slot = 0; Slot < 8; ++Slot) {
++    if ((State.AbridgedFTW & (1U << Slot)) &&
++        Narrow({State.mm[Slot][0], State.mm[Slot][1]}, Precision, Cache.Values[Slot])) Cache.FormatMask |= 1U << Slot;
++  }
++  const unsigned A = (Top + Request->SourceA) & 7, B = (Top + Request->SourceB) & 7;
++  const unsigned Required = (1U << A) | (1U << B) | (1U << ((Top + Request->Destination) & 7));
++  if ((Cache.FormatMask & Required) != Required) return false;
++  Cache.Precision = uint8_t(Precision); Cache.Live = 0; // Published after all eight scalar loads.
++  if (FEXCore::HBX87::Stats::Enabled())
++    std::atomic_ref<uint64_t>(FEXCore::HBX87::Stats::Values[Precision == Format::Binary53 ?
++      FEXCore::HBX87::Stats::StaticPrepare53 : FEXCore::HBX87::Stats::StaticPrepare24]).fetch_add(1,std::memory_order_relaxed);
++  Frame->Thread->X87Cache = Cache;
++  *Values = {Cache.Values[A], Cache.Values[B], Precision};
++  return true;
++}
++bool MaterializeHost(CpuStateFrame* Frame, const __uint128_t* HostQ) noexcept {
++  if (!Frame || !Frame->Thread) return false;
++  auto& Cache = Frame->Thread->X87Cache;
++  if (!Cache.Live) { Cache.FlushActive = 0; return true; }
++  if (Cache.Live != 1 || !HostQ || (Cache.DirtyMask & ~Cache.FormatMask)) return false;
++  Raw80 Raw[8] {};
++  for (unsigned Slot = 0; Slot < 8; ++Slot) if (Cache.DirtyMask & (1U << Slot)) {
++    if (!(Frame->State.AbridgedFTW & (1U << Slot)) ||
++        !WidenIEEE(uint64_t(HostQ[24 + Slot]), Format(Cache.Precision), Raw[Slot])) return false;
++  }
++  for (unsigned Slot = 0; Slot < 8; ++Slot) if (Cache.DirtyMask & (1U << Slot)) {
++    Frame->State.mm[Slot][0] = Raw[Slot].Significand;
++    Frame->State.mm[Slot][1] = Raw[Slot].SignExponent;
++  }
++  Cache.Live = Cache.DirtyMask = Cache.FlushActive = 0;
++  return true;
++}
++}
++
+ namespace FEXCore::Core::X87Region {
+ bool Guard(const CpuStateFrame* Frame, const GuardRequest* Request, GuardValues* Values) noexcept {
++  if (Request && (uint8_t(Request->Op) & 0x80)) {
++    return FEXCore::HBX87::StaticRegsEnabled() &&
++      X87Static::Prepare(const_cast<CpuStateFrame*>(Frame), Request, Values);
++  }
+   struct EntryCounter {
+     bool Active {FEXCore::HBX87::Stats::Enabled()};
+     unsigned Outcome {FEXCore::HBX87::Stats::RegionReject};
+@@ -596,7 +648,8 @@ Recovery Materialize(CpuStateFrame* Frame, uint64_t HostPC, const uint64_t* Host
+     if (Entry.HostBegin < sizeof(*BlockHeader) || Entry.HostBegin < PreviousEnd || Entry.HostEnd <= Entry.HostBegin ||
+         Entry.HostEnd > TailOffset || Entry.GuestRIP < Tail->RIP || Entry.GuestRIP >= Tail->RIP + Tail->GuestSize ||
+         Entry.Reserved || !Entry.LogicalSlotMask ||
+-        (Entry.Precision != Format::Binary53 && Entry.Precision != Format::Binary24) ||
++        (Entry.Precision != Format::Binary53 && Entry.Precision != Format::Binary24 &&
++         Entry.Precision != Format::IEEE53 && Entry.Precision != Format::IEEE24) ||
+         (Entry.Controls & ~(CompleteDec32 | CounterCommitted | KeepEntryFlagsIfInitial)) ||
+         ((Entry.Controls & CounterCommitted) && !(Entry.Controls & CompleteDec32)) ||
+         ((Entry.Controls & KeepEntryFlagsIfInitial) &&
+@@ -614,7 +667,7 @@ Recovery Materialize(CpuStateFrame* Frame, uint64_t HostPC, const uint64_t* Host
+   }
+   if (!Found) return {};
+   if (!HostQ) return Failed;
+-  const uint16_t RequiredCW = Selected.Precision == Format::Binary53 ? 0x023f : 0x003f;
++  const uint16_t RequiredCW = (Selected.Precision == Format::Binary53 || Selected.Precision == Format::IEEE53) ? 0x023f : 0x003f;
+   if ((Frame->State.FCW & 0x0f3f) != RequiredCW) return Failed;
+   const unsigned Top = Frame->State.flags[X86State::X87FLAG_TOP_LOC];
+   if (Top >= 8) return Failed;
+@@ -622,7 +675,11 @@ Recovery Materialize(CpuStateFrame* Frame, uint64_t HostPC, const uint64_t* Host
+   for (unsigned Slot = 0; Slot < 8; ++Slot) {
+     if (!(Selected.LogicalSlotMask & (1U << Slot))) continue;
+     if (!(Frame->State.AbridgedFTW & (1U << ((Top + Slot) & 7)))) return Failed;
+-    if (!Widen(static_cast<uint64_t>(HostQ[Selected.HostQForSlot[Slot]]), Selected.Precision, Values[Slot])) return Failed;
++    const auto Bits = static_cast<uint64_t>(HostQ[Selected.HostQForSlot[Slot]]);
++    if (Selected.Precision == Format::IEEE53 || Selected.Precision == Format::IEEE24) {
++      if (!FEXCore::HBX87::StaticRegsEnabled() || !X87Static::WidenIEEE(Bits,
++          Selected.Precision == Format::IEEE53 ? Format::Binary53 : Format::Binary24, Values[Slot])) return Failed;
++    } else if (!Widen(Bits, Selected.Precision, Values[Slot])) return Failed;
+   }
+   uint32_t Before {}, After {}, CF {}, Flags {};
+   bool RepairDec=Selected.Controls & CompleteDec32;
+@@ -1196,8 +1253,11 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+       Thread->OpDispatcher->StartNewBlock();
+ 
+       const uint64_t InstsInBlock = Block.NumInstructions;
+-      bool X87RecoveryBoundaries {};
+-      if (FEXCore::HBX87::InlineRegionEnabled()) {
++      // A PE32 bank crosses GPR leaf blocks too: their fallthrough RIP
++      // and flags remain observable on asynchronous recovery.
++      bool X87RecoveryBoundaries = FEXCore::HBX87::StaticRegsEnabled() && !Config.Is64BitMode();
++      if (FEXCore::HBX87::InlineRegionEnabled() ||
++          (FEXCore::HBX87::StaticRegsEnabled() && !Config.Is64BitMode())) {
+         const auto FirstX87 = reinterpret_cast<uintptr_t>(X86Tables::X87F80Ops.data());
+         for (size_t i = 0; i < InstsInBlock; ++i) {
+           const auto Table = reinterpret_cast<uintptr_t>(Block.DecodedInstructions[i].TableInfo);
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -3,6 +3,7 @@
+ #include "Common/VectorRegType.h"
+ #include "Interface/Context/Context.h"
+ #include "Interface/Core/CPUBackend.h"
++#include "Interface/Core/HBX87IR.h"
+ #include "Interface/Core/Dispatcher/Dispatcher.h"
+ #include "Interface/Core/LookupCache.h"
+ #include "Utils/MemberFunctionToPointer.h"
+@@ -35,14 +36,18 @@ static void SleepThread(FEXCore::Context::ContextImpl* CTX, FEXCore::Core::CpuSt
+   CTX->SyscallHandler->SleepThread(CTX, Frame);
+ }
+ 
+-constexpr size_t MAX_DISPATCHER_CODE_SIZE = FEXCore::Utils::FEX_PAGE_SIZE * 4;
++static size_t DispatcherCodeCapacity(const FEXCore::Context::ContextImpl* CTX) {
++  return FEXCore::Utils::FEX_PAGE_SIZE *
++    ((!CTX->Config.Is64BitMode() && FEXCore::HBX87::StaticRegsEnabled()) ? 64 : 4);
++}
+ 
+ Dispatcher::Dispatcher(FEXCore::Context::ContextImpl* ctx)
+-  : Arm64Emitter(ctx, FEXCore::Allocator::VirtualAlloc(MAX_DISPATCHER_CODE_SIZE, true), MAX_DISPATCHER_CODE_SIZE)
++  : Arm64Emitter(ctx, FEXCore::Allocator::VirtualAlloc(DispatcherCodeCapacity(ctx), true), DispatcherCodeCapacity(ctx))
+   , CTX {ctx} {
+   EmitDispatcher();
++  LOGMAN_THROW_A_FMT(GetCursorOffset() <= GetBufferSize(), "Dispatcher emission exceeds owned capacity");
+ 
+-  FEXCore::Allocator::VirtualName("FEXMem_Misc", reinterpret_cast<void*>(GetBufferBase()), MAX_DISPATCHER_CODE_SIZE);
++  FEXCore::Allocator::VirtualName("FEXMem_Misc", reinterpret_cast<void*>(GetBufferBase()), DispatcherCodeCapacity(ctx));
+ }
+ 
+ Dispatcher::~Dispatcher() {
+diff --git a/FEXCore/Source/Interface/Core/HBX87IR.h b/FEXCore/Source/Interface/Core/HBX87IR.h
+--- a/FEXCore/Source/Interface/Core/HBX87IR.h
++++ b/FEXCore/Source/Interface/Core/HBX87IR.h
+@@ -25,7 +25,16 @@ inline bool InlineRegionEnabled() {
+  static const bool v=Gate("MACRUNNER_HB_X87_INLINE_REGION");return v;
+ #endif
+ }
+-inline bool ArithmeticEnabled() { return Enabled() || InlineRegionEnabled(); }
++// 0164: reserve the PE32 bank before enabling persistent-cache emission.
++// The precise INLINE_REGION path remains an independent experiment.
++inline bool StaticRegsEnabled() {
++#ifdef VIXL_SIMULATOR
++ return false;
++#else
++ static const bool v=Gate("MACRUNNER_HB_X87_STATIC_REGS");return v;
++#endif
++}
++inline bool ArithmeticEnabled(bool Guest32 = false) { return Enabled() || InlineRegionEnabled() || (Guest32 && StaticRegsEnabled()); }
+ inline constexpr uint8_t InlineExactKindBit = 0x80;
+ inline bool Supports(IR::IROps op) {
+   return op==IR::OP_F80ADD||op==IR::OP_F80SUB||op==IR::OP_F80MUL||op==IR::OP_F80DIV||op==IR::OP_F80SQRT;
+@@ -39,12 +48,12 @@ template<class Builder> struct GuardIR {
+   V Clz(V a){return B._CountLeadingZeroes(S,a);}
+ };
+ template<class Builder>
+-IR::Ref Emit(Builder& B,IR::IROps op,IR::Ref a,IR::Ref d) {
++IR::Ref Emit(Builder& B,IR::IROps op,IR::Ref a,IR::Ref d,bool Guest32 = false) {
+   const Kind k=op==IR::OP_F80ADD?Add:op==IR::OP_F80SUB?Sub:op==IR::OP_F80MUL?Mul:op==IR::OP_F80DIV?Div:Sqrt;
+   const auto Q=IR::OpSize::i128Bit, D=IR::OpSize::i64Bit;
+   GuardIR<Builder> g{B};
+   IR::Ref cw=B._LoadContextGPR(IR::OpSize::i16Bit,offsetof(FEXCore::Core::CPUState,FCW));
+-  if(InlineRegionEnabled()) return B._HBX87FastCW(a,d,cw,uint8_t(k)|InlineExactKindBit);
++  if(InlineRegionEnabled() || (Guest32 && StaticRegsEnabled())) return B._HBX87FastCW(a,d,cw,uint8_t(k)|InlineExactKindBit);
+   static const bool early=Gate("MACRUNNER_HB_X87_EARLY_FCW");
+   if(early) return B._HBX87FastCW(a,d,cw,uint8_t(k));
+   IR::Ref as=B._VExtractToGPR(Q,D,a,0),ae=B._VExtractToGPR(Q,D,a,1);
+diff --git a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+@@ -4,7 +4,9 @@
+ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+   using namespace FEXCore::Core::X87Region;
+   using Size = ARMEmitter::Size;
+-  if (!FEXCore::HBX87::InlineRegionEnabled() || SingleInst || X87Recipes.size()+10>MaxRecipes) return false;
++  const bool StaticMode = FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode();
++  if ((!FEXCore::HBX87::InlineRegionEnabled() && !StaticMode) || SingleInst ||
++      X87Recipes.size()+(StaticMode ? 80 : 10)>MaxRecipes) return false;
+   const char* FaultSetting=std::getenv("MACRUNNER_HB_X87_REGION_FAULT_PHASE");
+   const unsigned FaultPhase=FaultSetting && FaultSetting[0]>='1' && FaultSetting[0]<='7' && !FaultSetting[1] ? FaultSetting[0]-'0' : 0;
+   struct Expr {enum Type {Unknown,Top,Index,Address,Constant,CS,CW} T {}; uint64_t Value {};};
+@@ -114,7 +116,7 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+       HaveCounter=true;break;
+     case IR::OP_STOREMEM: {
+       const auto O=Op->C<IR::IROp_StoreMem>();const auto E=ExprFor(O->Addr);const auto F=V[GetVReg(O->Value).Idx()];
+-      if(!HaveCounter || HaveStore || E.T!=Expr::Address || !F.Known || !F.Result ||
++      if(!(HaveCounter || (StaticMode && HaveDec && DecResult==Counter)) || HaveStore || E.T!=Expr::Address || !F.Known || !F.Result ||
+           O->Class!=IR::RegClass::FPR || Op->Size!=IR::OpSize::i128Bit || O->OffsetScale!=1 ||
+           !Inline(O->Offset,offsetof(FEXCore::Core::CPUState,mm))) return false;
+       DSlot=E.Value;HaveStore=true;break;
+@@ -127,7 +129,7 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+     default: return false;
+     }
+   }
+-  if(!Branch || (ASlot==BSlot && (Math->Kind&~FEXCore::HBX87::InlineExactKindBit)!=unsigned(Arithmetic::Sqrt)) ||
++  if(!Branch || (!StaticMode && ASlot==BSlot && (Math->Kind&~FEXCore::HBX87::InlineExactKindBit)!=unsigned(Arithmetic::Sqrt)) ||
+       (DSlot!=ASlot && DSlot!=BSlot)) return false;
+   const auto FalseID=IR->GetOp<IR::IROp_CodeBlock>(Branch->FalseBlock)->ID;
+   for(auto [OtherNode,OtherHeader]:IR->GetBlocks()) {
+@@ -137,6 +139,9 @@ auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
+     for(auto [Node,Op]:IR->GetCode(OtherNode)) if(Op->Op==IR::OP_GUESTOPCODE) {FalsePC=Entry+Op->C<IR::IROp_GuestOpcode>()->GuestEntryOffset;break;}
+   }
+   if(FalsePC<=BranchPC) return false;
++  if (StaticMode) {
++#include "Interface/Core/HBX87StaticRegionEmit.inl"
++  }
+   // Original bookkeeping (FIP/CS) is emitted once before the entry-only call.
+   for(size_t i=0;i<MathIndex;++i) EmitIR(Ops[i].second,Ops[i].first);
+   ARMEmitter::BiDirectionalLabel Cold;
+diff --git a/FEXCore/Source/Interface/Core/HBX87StaticRegionEmit.inl b/FEXCore/Source/Interface/Core/HBX87StaticRegionEmit.inl
+new file mode 100644
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/HBX87StaticRegionEmit.inl
+@@ -0,0 +1,145 @@
++// SPDX-License-Identifier: MIT
++// Initial persistent-bank family: register ADD/SUB/MUL/DIV/SQRT + DEC32/JNZ.
++// Physical slots have no permutation at block boundaries. PC24 uses scalar S
++// bits in each reserved D register; all spills remain scalar 64-bit stores.
++using Thread = FEXCore::Core::InternalThreadState;
++constexpr size_t CacheOffset = offsetof(Thread, X87Cache);
++ARMEmitter::BiDirectionalLabel StaticCold;
++ARMEmitter::ForwardLabel Initialize, Ready, RejectStatic, HaveBank;
++for (size_t i=0;i<MathIndex;++i) EmitIR(Ops[i].second,Ops[i].first);
++sub(Size::i64Bit,ARMEmitter::Reg::rsp,ARMEmitter::Reg::rsp,64);
++mrs(TMP4,ARMEmitter::SystemRegister::NZCV);str(TMP4,ARMEmitter::Reg::rsp,40);
++str(Counter.W(),ARMEmitter::Reg::rsp,0);
++mrs(TMP1,ARMEmitter::SystemRegister::FPCR);str(TMP1.W(),ARMEmitter::Reg::rsp,4);
++LoadConstant(Size::i32Bit,TMP1,uint32_t(Math->Kind)|ASlot<<8|BSlot<<16|DSlot<<24);
++str(TMP1.W(),ARMEmitter::Reg::rsp,8);
++auto CacheAddress = [&]() {
++  ldr(TMP1,STATE,offsetof(FEXCore::Core::CpuStateFrame,Thread));
++  LoadConstant(Size::i64Bit,TMP2,CacheOffset);add(Size::i64Bit,TMP1,TMP1,TMP2);
++};
++CacheAddress();ldrb(TMP2,TMP1,offsetof(Thread::X87StaticCache,Live));
++(void)cbz(Size::i64Bit,TMP2,&Initialize);
++(void)b(&Ready);
++(void)Bind(&Initialize);
++const auto Pushed=PushDynamicRegs(TMP1);SpillStaticRegs(TMP1);
++mov(Size::i64Bit,ARMEmitter::Reg::r0,STATE);
++add(Size::i64Bit,ARMEmitter::Reg::r1,ARMEmitter::Reg::rsp,Pushed);
++add(Size::i64Bit,ARMEmitter::Reg::r2,ARMEmitter::Reg::rsp,Pushed+16);
++ARMEmitter::BiDirectionalLabel StaticGuardLiteral;
++ARMEmitter::ForwardLabel StaticCall;
++ldr(TMP4,&StaticGuardLiteral);(void)b(&StaticCall);Align(8);BindOrRestart(&StaticGuardLiteral);
++PlaceNamedSymbolLiteral(InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_X87_REGION_GUARD));
++(void)Bind(&StaticCall);
++if(!CTX->Config.DisableVixlIndirectCalls) GenerateIndirectRuntimeCall<bool,const FEXCore::Core::CpuStateFrame*,const GuardRequest*,GuardValues*>(TMP4);
++else blr(TMP4);
++str(ARMEmitter::XReg::x0,ARMEmitter::Reg::rsp,Pushed+48);
++FillStaticRegs();PopDynamicRegs();ldr(TMP1,ARMEmitter::Reg::rsp,48);
++(void)cbz(Size::i64Bit,TMP1,&RejectStatic);
++CacheAddress();
++for (unsigned Slot=0;Slot<8;++Slot) ldr(ARMEmitter::VRegister(24+Slot).D(),TMP1,Slot*8);
++mrs(TMP2,ARMEmitter::SystemRegister::FPSR);str(TMP2.W(),TMP1,offsetof(Thread::X87StaticCache,SavedFPSR));
++mov(Size::i64Bit,TMP2,1);strb(TMP2,TMP1,offsetof(Thread::X87StaticCache,Live));
++msr(ARMEmitter::SystemRegister::FPSR,ARMEmitter::XReg::zr);
++(void)Bind(&Ready);
++// A live bank may contain slots outside its representable input subset.
++// Only the three slots needed by this region must carry the format bit.
++(void)cbz(Size::i32Bit,Counter,&RejectStatic);
++CacheAddress();ldrb(TMP2,TMP1,offsetof(Thread::X87StaticCache,Precision));
++ldrh(TMP3,STATE,offsetof(FEXCore::Core::CPUState,FCW));
++LoadConstant(Size::i64Bit,TMP4,0x0f3f);and_(Size::i64Bit,TMP3,TMP3,TMP4);
++ARMEmitter::ForwardLabel Expected24, CWChecked;
++cmp(Size::i64Bit,TMP2,1);(void)b(ARMEmitter::Condition::CC_NE,&Expected24);
++cmp(Size::i64Bit,TMP3,0x023f);(void)b(ARMEmitter::Condition::CC_NE,&RejectStatic);(void)b(&CWChecked);
++(void)Bind(&Expected24);cmp(Size::i64Bit,TMP3,0x003f);(void)b(ARMEmitter::Condition::CC_NE,&RejectStatic);
++(void)Bind(&CWChecked);
++ldrb(TMP3,STATE,offsetof(FEXCore::Core::CPUState,flags)+X86State::X87FLAG_TOP_LOC);
++std::array<ARMEmitter::ForwardLabel,8> TopTargets;
++for (unsigned Top=0;Top<7;++Top) {cmp(Size::i64Bit,TMP3,Top);(void)b(ARMEmitter::Condition::CC_EQ,&TopTargets[Top]);}
++cmp(Size::i64Bit,TMP3,7);(void)b(ARMEmitter::Condition::CC_NE,&RejectStatic);(void)b(&TopTargets[7]);
++for (unsigned Top=0;Top<8;++Top) {
++  (void)Bind(&TopTargets[Top]);CacheAddress();
++  const unsigned A=(Top+ASlot)&7,B=(Top+BSlot)&7,D=(Top+DSlot)&7;
++  const unsigned Required=(1U<<A)|(1U<<B)|(1U<<D);
++  ldrb(TMP2,TMP1,offsetof(Thread::X87StaticCache,FormatMask));
++  LoadConstant(Size::i64Bit,TMP4,Required);and_(Size::i64Bit,TMP2,TMP2,TMP4);cmp(Size::i64Bit,TMP2,Required);
++  (void)b(ARMEmitter::Condition::CC_NE,&RejectStatic);
++  ldrb(TMP2,TMP1,offsetof(Thread::X87StaticCache,DirtyMask));
++  orr(Size::i64Bit,TMP2,TMP2,1U<<D);strb(TMP2,TMP1,offsetof(Thread::X87StaticCache,DirtyMask));
++  ldrb(TMP2,TMP1,offsetof(Thread::X87StaticCache,Precision));
++  ldr(TMP4,ARMEmitter::Reg::rsp,40);msr(ARMEmitter::SystemRegister::NZCV,TMP4);
++  add(Size::i64Bit,ARMEmitter::Reg::rsp,ARMEmitter::Reg::rsp,64);
++  mov(Size::i32Bit,TMP3,Counter);cset(Size::i64Bit,TMP4,MapCC(IR::CondClass::UGE));
++  ARMEmitter::ForwardLabel Body24;
++  sub(Size::i64Bit,TMP1,TMP2,2);(void)cbz(Size::i64Bit,TMP1,&Body24);
++  auto Body = [&](bool Narrow) {
++    ARMEmitter::BiDirectionalLabel Hot;BindOrRestart(&Hot);
++    const uint32_t Start=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    auto Fault=[&](unsigned Phase) {if(FaultPhase==Phase) brk(0xcafd);};
++    auto LaterFault=[&](unsigned Phase) {
++      if(FaultPhase!=Phase) return;
++      ARMEmitter::ForwardLabel First;sub(Size::i32Bit,TMP1,TMP3,Counter);
++      (void)cbz(Size::i32Bit,TMP1,&First);brk(0xcafd);(void)Bind(&First);
++    };
++    Fault(1);LaterFault(7);
++    const auto VA=ARMEmitter::VRegister(24+A),VB=ARMEmitter::VRegister(24+B),VD=ARMEmitter::VRegister(24+D);
++    const auto Op=Arithmetic(Math->Kind&~FEXCore::HBX87::InlineExactKindBit);
++    if (Narrow) {
++      switch (Op) {
++      case Arithmetic::Add:fadd(VD.S(),VA.S(),VB.S());break;
++      case Arithmetic::Sub:fsub(VD.S(),VA.S(),VB.S());break;
++      case Arithmetic::Mul:fmul(VD.S(),VA.S(),VB.S());break;
++      case Arithmetic::Div:fdiv(VD.S(),VA.S(),VB.S());break;
++      case Arithmetic::Sqrt:fsqrt(VD.S(),VA.S());break;
++      }
++    } else {
++      switch (Op) {
++      case Arithmetic::Add:fadd(VD.D(),VA.D(),VB.D());break;
++      case Arithmetic::Sub:fsub(VD.D(),VA.D(),VB.D());break;
++      case Arithmetic::Mul:fmul(VD.D(),VA.D(),VB.D());break;
++      case Arithmetic::Div:fdiv(VD.D(),VA.D(),VB.D());break;
++      case Arithmetic::Sqrt:fsqrt(VD.D(),VA.D());break;
++      }
++    }
++    const uint32_t AfterFP=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    Fault(2);LaterFault(6);subs(Size::i32Bit,Counter,Counter,1);
++    const uint32_t AfterDEC=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    Fault(3);EmitSuspendInterruptCheck();b_OrRestart(MapCC(IR::CondClass::NEQ),&Hot);
++    const uint32_t Flush=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    auto RecipeFor=[&](uint32_t Begin,uint32_t End,uint64_t RIP,uint8_t Controls) {
++      Recipe R{};R.HostBegin=Begin;R.HostEnd=End;R.GuestRIP=RIP;R.LogicalSlotMask=1U<<DSlot;
++      R.Precision=Narrow?Format::IEEE24:Format::IEEE53;R.HostQForSlot[DSlot]=VD.Idx();
++      R.CounterGuest=CounterGuest;R.CounterHost=Counter.Idx();R.CarryHost=TMP4.Idx();
++      R.InitialCounterHost=TMP3.Idx();R.Controls=Controls;X87Recipes.push_back(R);
++    };
++    RecipeFor(Start,AfterFP,MathPC,CompleteDec32|CounterCommitted|KeepEntryFlagsIfInitial);
++    RecipeFor(AfterFP,AfterDEC,DecPC,CompleteDec32|CounterCommitted|KeepEntryFlagsIfInitial);
++    RecipeFor(AfterDEC,Flush,BranchPC,CompleteDec32|CounterCommitted);
++    Fault(4);
++    if (FEXCore::HBX87::Stats::Enabled()) {
++      LOGMAN_THROW_A_FMT(CTX->HostFeatures.SupportsAtomics,"x87 static stats require LSE");
++      ARMEmitter::BiDirectionalLabel StatsLiteral;ARMEmitter::ForwardLabel HaveStats;
++      ldr(TMP1,&StatsLiteral);(void)b(&HaveStats);Align(8);BindOrRestart(&StatsLiteral);
++      PlaceNamedSymbolLiteral(InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_X87_REGION_STATS));
++      (void)Bind(&HaveStats);ldr(TMP1,TMP1,0);
++      add(Size::i64Bit,TMP1,TMP1,sizeof(uint64_t)*(Narrow?FEXCore::HBX87::Stats::StaticRetired24:FEXCore::HBX87::Stats::StaticRetired53));
++      ldaddal(ARMEmitter::SubRegSize::i64Bit,TMP3,TMP2,TMP1);
++    }
++    mov(Size::i32Bit,REG_PF,Counter);add(Size::i32Bit,REG_AF,Counter,1);
++    mrs(TMP1,ARMEmitter::SystemRegister::NZCV);bfi(Size::i64Bit,TMP1,TMP4,29,1);msr(ARMEmitter::SystemRegister::NZCV,TMP1);
++    const uint32_t FlagsDone=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    RecipeFor(Flush,FlagsDone,FalsePC,CompleteDec32|CounterCommitted);
++    Fault(5);const uint32_t BranchEnd=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin+4;
++    RecipeFor(FlagsDone,BranchEnd,FalsePC,0);b_OrRestart(JumpTarget(Branch->FalseBlock));
++  };
++  Body(false);(void)Bind(&Body24);Body(true);
++}
++(void)Bind(&RejectStatic);
++if (FaultPhase==1) brk(0xcafd); // Diagnostic only: entry guard failure snapshot.
++ldr(TMP4,ARMEmitter::Reg::rsp,40);msr(ARMEmitter::SystemRegister::NZCV,TMP4);
++add(Size::i64Bit,ARMEmitter::Reg::rsp,ARMEmitter::Reg::rsp,64);
++SpillX87StaticBank();BindOrRestart(&StaticCold);
++for (const auto& [Node,Op]:Ops) {
++  if(Op->Op==IR::OP_CONDJUMP) {b_OrRestart(MapCC(IR::CondClass::NEQ),&StaticCold);PendingTargetLabel=JumpTarget(Branch->FalseBlock);}
++  else EmitIR(Op,Node);
++}
++return true;
+diff --git a/FEXCore/Source/Interface/Core/HBX87Stats.h b/FEXCore/Source/Interface/Core/HBX87Stats.h
+--- a/FEXCore/Source/Interface/Core/HBX87Stats.h
++++ b/FEXCore/Source/Interface/Core/HBX87Stats.h
+@@ -17,7 +17,8 @@ enum Outcome : unsigned {
+  Store32Hit, Store64Hit, StorePC64, StoreRC, StoreUnmasked, StorePC,
+  StoreDomain, StoreRange, StoreRounding, Load32Subnormal, Load64Subnormal,
+  LoadCWChanged, LoadCWRemoved, ClearChanged, ClearRemoved,
+- RegionEntry53, RegionEntry24, RegionReject, RegionRetired53, RegionRetired24, Count
++ RegionEntry53, RegionEntry24, RegionReject, RegionRetired53, RegionRetired24,
++ StaticPrepare53, StaticPrepare24, StaticRetired53, StaticRetired24, Count
+ };
+ inline constexpr const char* Names[Count] = {
+  "arith53", "arith24", "arith_pc64", "arith_rc", "arith_unmasked", "arith_reserved_pc",
+@@ -25,7 +26,8 @@ inline constexpr const char* Names[Count] = {
+  "store32_hit", "store64_hit", "store_pc64", "store_rc", "store_unmasked", "store_pc",
+  "store_domain", "store_range", "store_rounding", "load32_subnormal", "load64_subnormal",
+  "fldcw_changed", "fldcw_store_removed", "ie_sf_byte_changed", "ie_sf_byte_store_removed",
+- "region_entry53", "region_entry24", "region_reject", "region_retired53", "region_retired24"
++ "region_entry53", "region_entry24", "region_reject", "region_retired53", "region_retired24",
++ "static_prepare53", "static_prepare24", "static_retired53", "static_retired24"
+ };
+ alignas(64) inline uint64_t LocalValues[Count] {};
+ inline uint64_t* Values = LocalValues;
+diff --git a/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp b/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
+--- a/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
+@@ -636,8 +636,8 @@ void X87StackOptimization::HandleUnop(IROps Op64, bool VFOp64, IROps Op80) {
+       DeriveOp(Value, Op64, IREmit->_F64SIN(St0));
+     }
+   } else {
+-    if (FEXCore::HBX87::ArithmeticEnabled() && Op80 == IR::OP_F80SQRT) {
+-      Value = FEXCore::HBX87::Emit(*IREmit, Op80, St0, St0);
++    if (FEXCore::HBX87::ArithmeticEnabled(GPROpSize == OpSize::i32Bit) && Op80 == IR::OP_F80SQRT) {
++      Value = FEXCore::HBX87::Emit(*IREmit, Op80, St0, St0, GPROpSize == OpSize::i32Bit);
+     } else {
+       DeriveOp(Value, Op80, IREmit->_F80SQRT(St0));
+     }
+@@ -664,9 +664,9 @@ void X87StackOptimization::HandleBinopValue(IROps Op64, bool VFOp64, IROps Op80,
+       }
+     }
+   } else {
+-    if (FEXCore::HBX87::ArithmeticEnabled() && FEXCore::HBX87::Supports(Op80)) {
++    if (FEXCore::HBX87::ArithmeticEnabled(GPROpSize == OpSize::i32Bit) && FEXCore::HBX87::Supports(Op80)) {
+       Node = FEXCore::HBX87::Emit(*IREmit, Op80,
+-        Reverse ? ValueNode : StackNode, Reverse ? StackNode : ValueNode);
++        Reverse ? ValueNode : StackNode, Reverse ? StackNode : ValueNode, GPROpSize == OpSize::i32Bit);
+     } else {
+     if (Reverse) {
+       DeriveOp(Node, Op80, IREmit->_F80Add(ValueNode, StackNode));
+diff --git a/FEXCore/include/FEXCore/Core/X87Region.h b/FEXCore/include/FEXCore/Core/X87Region.h
+--- a/FEXCore/include/FEXCore/Core/X87Region.h
++++ b/FEXCore/include/FEXCore/Core/X87Region.h
+@@ -8,7 +8,7 @@
+ namespace FEXCore::Core {
+ struct CpuStateFrame;
+ namespace X87Region {
+-enum class Format : uint8_t { Binary53 = 1, Binary24 = 2 };
++enum class Format : uint8_t { Binary53 = 1, Binary24 = 2, IEEE53 = 3, IEEE24 = 4 };
+ enum class Status : uint8_t { Empty, Present, Failed };
+ inline constexpr uint32_t Magic = 0x52373858; // X87R, immutable JIT-tail extension.
+ inline constexpr uint16_t Version = 2;
+diff --git a/FEXCore/include/FEXCore/Core/X87Static.h b/FEXCore/include/FEXCore/Core/X87Static.h
+new file mode 100644
+--- /dev/null
++++ b/FEXCore/include/FEXCore/Core/X87Static.h
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: MIT
++// Persistent PE32 approximation is separate from the exact x87 region.
++#pragma once
++#include <FEXCore/Core/X87Region.h>
++
++namespace FEXCore::Core::X87Static {
++using X87Region::Format;
++using X87Region::Raw80;
++// Exact admission of a stored 80-bit value to a binary format. FILD m64 and
++// m80 values with additional significand bits remain on the precise path.
++inline bool Narrow(Raw80 In, Format Precision, uint64_t& Out) noexcept {
++  if ((Precision != Format::Binary53 && Precision != Format::Binary24) || In.SignExponent > 0xffff) return false;
++  const unsigned F = Precision == Format::Binary53 ? 52 : 23;
++  const unsigned Bias = Precision == Format::Binary53 ? 1023 : 127;
++  const unsigned E = In.SignExponent & 0x7fff;
++  const uint64_t Sign = (In.SignExponent >> 15) << (F + (F == 52 ? 11 : 8));
++  if (!E && !In.Significand) { Out = Sign; return true; }
++  if (!E || E == 0x7fff || !(In.Significand >> 63)) return false;
++  const int Power = int(E) - 16383;
++  if (Power > int(Bias) || Power < 1 - int(Bias) - int(F)) return false;
++  const unsigned Shift = Power >= 1 - int(Bias) ? 63 - F : unsigned(63 - F + 1 - int(Bias) - Power);
++  if (Shift >= 64 || (In.Significand & ((uint64_t{1} << Shift) - 1))) return false;
++  const uint64_t Sig = In.Significand >> Shift;
++  Out = Sign | (Power >= 1 - int(Bias) ? (uint64_t(Power + int(Bias)) << F) | (Sig & ((uint64_t{1} << F) - 1)) : Sig);
++  return true;
++}
++// Unlike the exact region, approximation must export IEEE overflow/NaN.
++// This is representation conversion, without any host FP or rounding.
++inline bool WidenIEEE(uint64_t Bits, Format Precision, Raw80& Out) noexcept {
++  if (Precision != Format::Binary53 && Precision != Format::Binary24) return false;
++  const unsigned F = Precision == Format::Binary53 ? 52 : 23;
++  const unsigned E = F == 52 ? 11 : 8;
++  const uint64_t MaxE = (uint64_t{1} << E) - 1;
++  if (((Bits >> F) & MaxE) != MaxE) return X87Region::Widen(Bits, Precision, Out);
++  const uint64_t Fraction = Bits & ((uint64_t{1} << F) - 1);
++  Out = {(uint64_t{1} << 63) | (Fraction << (63 - F)), 0x7fff | (((Bits >> (F + E)) & 1) << 15)};
++  return true;
++}
++FEX_DEFAULT_VISIBILITY bool Prepare(CpuStateFrame* Frame, const X87Region::GuardRequest* Request,
++    X87Region::GuardValues* Values) noexcept;
++// HostQ is an exception snapshot, not an assumed live ABI register bank.
++// All validation completes before any state is committed.
++FEX_DEFAULT_VISIBILITY bool MaterializeHost(CpuStateFrame* Frame, const __uint128_t* HostQ) noexcept;
++}
+diff --git a/FEXCore/include/FEXCore/Debug/InternalThreadState.h b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
+--- a/FEXCore/include/FEXCore/Debug/InternalThreadState.h
++++ b/FEXCore/include/FEXCore/Debug/InternalThreadState.h
+@@ -135,6 +135,21 @@ struct alignas(FEXCore::Utils::FEX_PAGE_SIZE) InternalThreadState : public FEXCo
+   alignas(16) MRSavedEFlagsEntry MRSavedEFlags[8] {};
+   uint64_t MRSavedEFlagsCount {};
+   uint64_t MRSavedEFlagsPad {};
++
++  // Explicit PE32 bank backing. Keep every existing Frame/Thread offset;
++  // WOW59's isolated interrupt page precedes this cache. Native/EC page
++  // protection is not made correct by this tail field.
++  struct alignas(16) X87StaticCache {
++    uint64_t Values[8] {};
++    uint8_t FormatMask {};
++    uint8_t DirtyMask {};
++    uint8_t Precision {};
++    uint8_t Live {};
++    uint64_t SavedNZCV {};
++    uint8_t FlushActive {};
++    uint32_t SavedFPSR {};
++    uint32_t ObservedFPSR {};
++  } X87Cache {};
+ };
+ static_assert(std::is_standard_layout_v<FEXCore::Core::InternalThreadState>);
+ // Maximum unsigned-offset store range for fault page.
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -18,6 +18,7 @@ extern std::atomic<uint64_t> MacRunnerJitSMC; // ★ MacRunner Opus 19.09: оп
+ #include <FEXCore/Core/Context.h>
+ #include <FEXCore/Core/CoreState.h>
+ #include <FEXCore/Core/X87Region.h>
++#include <FEXCore/Core/X87Static.h>
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include <FEXCore/HLE/SyscallHandler.h>
+ #include <FEXCore/Config/Config.h>
+@@ -490,13 +491,18 @@ static void ReconstructThreadState(FEXCore::Core::InternalThreadState* Thread, A
+   }
+ 
+   // Spill EFlags
++  const bool StaticBank = Thread->X87Cache.Live || Thread->X87Cache.FlushActive;
++  if (Thread->X87Cache.FlushActive) Context.Cpsr = uint32_t(Thread->X87Cache.SavedNZCV);
++  if (StaticBank) Context.Fpsr = Thread->X87Cache.SavedFPSR;
+   uint32_t EFlags = CTX->ReconstructCompactedEFLAGS(Thread, true, Context.X, Context.Cpsr);
+   CTX->SetFlagsFromCompactedEFLAGS(Thread, EFlags);
+   static_assert(sizeof(Context.V[0]) == sizeof(__uint128_t));
+   const auto Cached = FEXCore::Core::X87Region::Materialize(Thread->CurrentFrame, Context.Pc, Context.X,
+       reinterpret_cast<const __uint128_t*>(Context.V));
++  if (Cached.State != FEXCore::Core::X87Region::Status::Failed &&
++      !FEXCore::Core::X87Static::MaterializeHost(Thread->CurrentFrame, reinterpret_cast<const __uint128_t*>(Context.V))) __fastfail(7);
+   if (Cached.State == FEXCore::Core::X87Region::Status::Failed) __fastfail(7); // FAST_FAIL_FATAL_APP_EXIT
+-  if (Cached.State == FEXCore::Core::X87Region::Status::Present) {
++  if (Cached.State == FEXCore::Core::X87Region::Status::Present || StaticBank) {
+     EFlags = (EFlags & ~Cached.EFlagsMask) | Cached.EFlagsValue;
+     CTX->SetFlagsFromCompactedEFLAGS(Thread, EFlags);
+     Context.Pc = Config.AbsoluteLoopTopAddressFillSRA;
