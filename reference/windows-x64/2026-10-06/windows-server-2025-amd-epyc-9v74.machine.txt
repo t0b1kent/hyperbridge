@@ -1,0 +1,5 @@
+AMD EPYC 9V74 80-Core Processor                
+cores=2
+arch=AMD64 id=AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD
+windows=Windows Server 2025 Datacenter 24H2 build 26100.33438
+powershell=7.6.6
