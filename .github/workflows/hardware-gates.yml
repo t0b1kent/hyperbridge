@@ -4,7 +4,7 @@ name: hardware-gates
 
 on:
   push:
-    paths: ['fex/**', 'stands/hardware/**', 'stands/synthetic/**', '.github/workflows/hardware-gates.yml', '.github/workflows/hardware-native-build.yml']
+    paths: ['fex/**', 'stands/hardware/**', 'stands/synthetic/**', 'stands/instruction-cost/**', '.github/workflows/hardware-gates.yml', '.github/workflows/hardware-native-build.yml']
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
@@ -106,6 +106,51 @@ jobs:
           if-no-files-found: error
           compression-level: 1
           retention-days: 7
+
+  instruction-cost:
+    if: ${{ !inputs.reuse_run }}
+    needs: build-accepted
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hardware-runner-accepted
+          path: build/hardware
+      - name: Restore native emission frontend
+        run: |
+          test "$(uname -m)" = arm64
+          mkdir -p build/hardware/bundle
+          tar -xzf build/hardware/runner.tar.gz -C build/hardware/bundle
+          python3 -m venv build/cost-venv
+          build/cost-venv/bin/pip install capstone==5.0.7
+      - name: Validate counting and authored generators
+        run: build/cost-venv/bin/python -m unittest discover -s stands/instruction-cost -p 'test_*.py'
+      - name: Read last measured successful main baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN: ${{ github.run_id }}
+        run: |
+          python3 stands/instruction-cost/baseline.py --repository "$REPOSITORY" \
+            --current-run "$CURRENT_RUN" --out build/instruction-baseline
+      - name: Count static ARM instructions and compare both repeated arms
+        run: |
+          python3 stands/hardware/plan.py --candidate "$CANDIDATE" --prepare-only
+          baseline=()
+          if test -f build/instruction-baseline/RESULT.json; then
+            baseline=(--baseline build/instruction-baseline/RESULT.json)
+          fi
+          build/cost-venv/bin/python stands/instruction-cost/measure.py --candidate "$CANDIDATE" \
+            --bundle build/hardware/bundle --out build/instruction-cost "${baseline[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: instruction-cost-RESULT
+          path: build/instruction-cost/
+          if-no-files-found: error
+          retention-days: 30
 
   negative:
     if: ${{ !inputs.reuse_run }}

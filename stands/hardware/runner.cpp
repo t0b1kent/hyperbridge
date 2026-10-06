@@ -21,6 +21,11 @@
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/vector.h>
 #include "Interface/Context/Context.h"
+#ifdef HB_STAND_CODEGEN_ONLY
+#include "Interface/Core/Frontend.h"
+#include "Interface/Core/JIT/DebugData.h"
+#include <chrono>
+#endif
 
 #include <mach/mach.h>
 #include <CommonCrypto/CommonDigest.h>
@@ -827,6 +832,50 @@ void run_case(Case& c, OracleSyscallHandler& SH) {
   }
   g_ctx->SetXMMRegistersFromState(Thread, xl, yh);
   Thread->CurrentFrame->SynchronousFaultData = {};
+
+#ifdef HB_STAND_CODEGEN_ONLY
+  // The instruction-cost stand uses the same prepared frontend and mappings,
+  // but only compiles our generated inputs. No guest instruction is executed.
+  {
+    auto* Impl = static_cast<FEXCore::Context::ContextImpl*>(g_ctx);
+    const auto Begin = std::chrono::steady_clock::now();
+    auto Result = Impl->CompileCode(Thread, c.rip, 128);
+    const auto Nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - Begin).count();
+    const auto* Info = Thread->FrontendDecoder->GetDecodedBlockInfo();
+    uint64_t BadEnds = 0;
+    for (const auto& Block : Info->Blocks)
+      BadEnds += Block.BlockStatus != FEXCore::Frontend::Decoder::DecodedBlockStatus::SUCCESS;
+    const uint64_t GuestInstructions = Info->TotalInstructionCount - std::min<uint64_t>(Info->TotalInstructionCount, BadEnds);
+    const bool Complete = Result.DebugData && Result.CompiledCode.BlockBegin &&
+      Result.CompiledCode.Size > 0 && Result.CompiledCode.Size <= 262144 && GuestInstructions > 0;
+    printf("{\"id\":%" PRIu64 ",\"status\":\"%s\",\"guest_instructions\":%" PRIu64
+           ",\"compile_ns\":%lld,\"execution\":\"NOT_RUN\"", c.id, Complete ? "COMPILED" : "INCOMPLETE",
+           GuestInstructions, static_cast<long long>(Nanoseconds));
+    if (Complete) {
+      printf(",\"host_code_bytes\":%" PRIu64 ",\"allocation_bytes\":%zu,\"host_hex\":\"",
+             Result.DebugData->HostCodeSize, size_t(Result.CompiledCode.Size));
+      print_hex(stdout, Result.CompiledCode.BlockBegin, Result.CompiledCode.Size);
+      printf("\",\"subblocks\":[");
+      size_t Index = 0;
+      for (const auto& Block : Result.DebugData->Subblocks)
+        printf("%s[%u,%u]", Index++ ? "," : "", Block.HostCodeOffset, Block.HostCodeSize);
+      printf("],\"guest_opcodes\":[");
+      Index = 0;
+      for (const auto& Opcode : Result.DebugData->GuestOpcodes)
+        printf("%s[%" PRIu64 ",%td]", Index++ ? "," : "", Opcode.GuestEntryOffset, Opcode.HostEntryOffset);
+      printf("]");
+    }
+    printf("}\n");
+    fflush(stdout);
+  }
+  g_ctx->DestroyThread(Thread);
+  for (const auto& [Address, Length] : c.mapped) release_guest_range(Address, Length);
+  munmap(reinterpret_cast<void*>(g_crs_alloc), g_crs_alloc_end - g_crs_alloc);
+  g_crs_alloc = g_crs_alloc_end = 0;
+  release_guest_range(g_code_base, CODE_MAP);
+  return;
+#endif
 
   memset((void*)&g_fault, 0, sizeof(g_fault));
   g_exit_span = 0;

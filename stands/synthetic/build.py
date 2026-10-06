@@ -20,6 +20,7 @@ def main():
     ap.add_argument('--build-dir', default='build/stand-native')
     ap.add_argument('--runner-source', default='stands/synthetic/runner.cpp')
     ap.add_argument('--hardware-tso', action='store_true')
+    ap.add_argument('--instruction-cost', action='store_true')
     args = ap.parse_args()
     source = (ROOT / args.fex_source).resolve()
     build = (ROOT / args.build_dir).resolve()
@@ -60,8 +61,11 @@ def main():
         command += ['-DCMAKE_C_COMPILER_LAUNCHER=ccache', '-DCMAKE_CXX_COMPILER_LAUNCHER=ccache']
     if args.hardware_tso:
         command += ['-DSTAND_HARDWARE_TSO=ON']
+    if args.instruction_cost:
+        command += ['-DSTAND_CODEGEN_SOURCE=' + str(ROOT / 'stands/instruction-cost/runner.cpp')]
     run(*command)
-    run('cmake', '--build', str(build / 'cmake'), '--target', 'stand_runner', '-j2')
+    targets = ['stand_runner', 'codegen_runner'] if args.instruction_cost else ['stand_runner']
+    run('cmake', '--build', str(build / 'cmake'), '--target', *targets, '-j2')
     print('RUNNER=' + str((build / 'cmake/Bin/stand_runner').relative_to(ROOT)))
 
 

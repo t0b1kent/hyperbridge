@@ -3,8 +3,19 @@
 Hardware correctness gates: [hardware](hardware/README.md) runs native FEXCore
 against the authored flags/SIMD tables (quick on push, full by dispatch/schedule).
 [Vendor flags](vendor-flags/README.md) captures the same integer probes on Windows
-x64 Intel/AMD hosts and produces a per-cell agreement table. Initial cloud
-qualification of these new workflows is pending; no game inputs are included.
+x64 Intel/AMD hosts and produces a per-cell agreement table. CPU quick gates and
+the deliberately broken translator control passed on macOS ARM64 in
+[run 37398907615](https://github.com/t0b1kent/hyperbridge/actions/runs/37398907615).
+They run on every push affecting the patch series or gate sources. Full tables
+also matched the local two-part fingerprints after correcting the aggregate
+hash format; the original run's final verdict remains red pending re-reduction.
+Vendor coverage requires actual CPUID evidence for both vendors. No game inputs
+are included.
+
+[Synthetic instruction cost](instruction-cost/README.md) adds 26 authored forms
+to candidate builds, recording static ARM/guest instruction counts and code size.
+Its first native cloud qualification is pending. VM compilation timing is a
+reference only; this compile-only check does not measure game or loop execution.
 
 Published October 2, 2026. The CPU and 32-bit stands contain our MIT-licensed source, data formats and own synthetic examples. FEX, Unicorn and Capstone are external dependencies; no dependency source or binaries are bundled.
 
