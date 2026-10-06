@@ -171,9 +171,12 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(merge.negative_check(report))
 
     def test_env_is_data_and_has_no_private_paths(self):
-        common.validate_environment({'FEX_TSOENABLED': '1', 'MACRUNNER_FEX_DIV_OVERFLOW_DE': '1'})
+        common.validate_environment({'FEX_TSOENABLED': '1', 'MACRUNNER_FEX_DIV_OVERFLOW_DE': '1',
+                                     'MACRUNNER_HB_X87_FAST64': '1', 'MACRUNNER_HB_JIT_HOST_GUARD': '1'})
         for env in [{'DYLD_LIBRARY_PATH': '.'}, {'FEX_SECRET_KEY': '1'}, {'FEX_SMCCHECKS': 'x;echo'},
-                    {'MACRUNNER_FEX_OVERLAY': 'path'}, {'FEX_SMCCHECKS': '/private/path'}]:
+                    {'MACRUNNER_FEX_OVERLAY': 'path'}, {'FEX_SMCCHECKS': '/private/path'},
+                    {'MACRUNNER_HB_OVERLAY': 'x'}, {'MACRUNNER_HB_X87_FAST64': '/tmp/x'},
+                    {'MACRUNNER_DX12_FINE_LOCKS': '1'}, {'WINEPREFIX': 'x'}]:
             with self.assertRaises(ValueError):
                 common.validate_environment(env)
 

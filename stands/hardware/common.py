@@ -84,7 +84,9 @@ def validate_environment(env):
     if not isinstance(env, dict) or not env:
         raise ValueError('nonempty environment object required')
     for key, value in env.items():
-        if not re.fullmatch(r'(?:MACRUNNER_FEX_|FEX_)[A-Z0-9_]+', key):
+        # MACRUNNER_HB_ keys belong to the same product environment; the translator reads some of them (x87 paths,
+        # the code buffer guard), the rest are inert in the native runner. An arm is the literal product environment.
+        if not re.fullmatch(r'(?:MACRUNNER_FEX_|MACRUNNER_HB_|FEX_)[A-Z0-9_]+', key):
             raise ValueError('only translator environment keys are accepted')
         if re.search(r'(PATH|OVERLAY|TOKEN|SECRET|PASSWORD|CREDENTIAL|KEY)', key):
             raise ValueError('path or credential environment key forbidden')
