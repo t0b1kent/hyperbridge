@@ -31,8 +31,10 @@ skip correctness gates. Compiler/source changes remain part of ccache's own key.
 Each component has one quick job and four modulo-distributed full jobs per arm:
 hwflags 2,204 / 1,624,804 rows; hwsimd 3,021 / 919,405 rows. One runner per shard,
 native build parallelism two. Each job has a 30-minute limit; shards stop after a
-23-minute budget between batches. Completion within 30 minutes remains unmeasured
-until the first cloud run; queue delay is not covered by a job timeout.
+23-minute budget between batches. Full run 37399191673 completed its 20 cells in
+21–185 seconds per job; total workflow time including queue was 23 min 39 sec.
+Its first aggregate was red because of the hash-format mismatch described below.
+Queue delay is not covered by a job timeout, and this run is not a future SLA.
 
 `hardware-gates-RESULT/RESULT.json` and `VERDICT.txt` are the aggregate result.
 Cell artifacts preserve raw states, native logs, row comparisons, counts, CPU

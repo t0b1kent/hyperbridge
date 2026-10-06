@@ -47,8 +47,11 @@ def main():
         command([sys.executable, 'stands/hardware/check_negative.py', '--source', str(source),
                  '--out', 'build/hardware/negative-apply-check.json'])
         command(['git', '-C', str(source), 'apply', '--index', str(patch)])
-    command([sys.executable, 'stands/synthetic/build.py', '--fex-source', 'build/hardware/fex/src',
-             '--build-dir', 'build/hardware/native', '--runner-source', 'stands/hardware/runner.cpp', '--hardware-tso'], env=env)
+    native_command = [sys.executable, 'stands/synthetic/build.py', '--fex-source', 'build/hardware/fex/src',
+                      '--build-dir', 'build/hardware/native', '--runner-source', 'stands/hardware/runner.cpp', '--hardware-tso']
+    if args.flavor == 'accepted':
+        native_command.append('--instruction-cost')
+    command(native_command, env=env)
     command([sys.executable, 'stands/hardware/assemble.py', '--out', 'build/hardware/cache'], env=env)
     import hwsimd
     hwsimd.CACHE = work / 'cache/simd-code.json.gz'
@@ -58,6 +61,8 @@ def main():
     for source_file in [work / 'native/cmake/Bin/stand_runner',
                         work / 'native/cmake/Bin/libmacrunner-hwtso.dylib', hwsimd.CACHE]:
         shutil.copy2(source_file, bundle / source_file.name)
+    if args.flavor == 'accepted':
+        shutil.copy2(work / 'native/cmake/Bin/codegen_runner', bundle / 'codegen_runner')
     cpu = resource.getrusage(resource.RUSAGE_CHILDREN)
     own_cpu = resource.getrusage(resource.RUSAGE_SELF)
     host = {}
@@ -78,6 +83,7 @@ def main():
                'candidate_source_diff_sha256': hashlib.sha256(subprocess.check_output(['git', '-C', str(source), 'diff', '--cached', '--binary', '--no-ext-diff'])).hexdigest(),
                'frontend_sources': {str(p.relative_to(common.ROOT)): common.sha(p) for p in
                                     [common.HERE / 'runner.cpp', common.HERE / 'OracleRanges.h',
+                                     common.ROOT / 'stands/instruction-cost/runner.cpp',
                                      common.ROOT / 'stands/synthetic/build.py', common.ROOT / 'stands/synthetic/CMakeLists.txt',
                                      common.ROOT / 'stands/synthetic/native-portability.patch', common.ROOT / 'fex/build.sh']},
                'published_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=common.ROOT, text=True).strip()}
