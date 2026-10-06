@@ -44,7 +44,8 @@ def main():
     if args.flavor == 'negative':
         # This is a translator source mutation, not a changed reference or runner output.
         patch = common.HERE / 'controls/div-overflow-disabled.patch'
-        command(['git', '-C', str(source), 'apply', '--check', str(patch)])
+        command([sys.executable, 'stands/hardware/check_negative.py', '--source', str(source),
+                 '--out', 'build/hardware/negative-apply-check.json'])
         command(['git', '-C', str(source), 'apply', '--index', str(patch)])
     command([sys.executable, 'stands/synthetic/build.py', '--fex-source', 'build/hardware/fex/src',
              '--build-dir', 'build/hardware/native', '--runner-source', 'stands/hardware/runner.cpp', '--hardware-tso'], env=env)

@@ -4,7 +4,7 @@ name: hardware-gates
 
 on:
   push:
-    paths: ['fex/**', 'stands/hardware/**', 'stands/synthetic/**', '.github/workflows/hardware-gates.yml']
+    paths: ['fex/**', 'stands/hardware/**', 'stands/synthetic/**', '.github/workflows/hardware-gates.yml', '.github/workflows/hardware-native-build.yml']
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
@@ -43,58 +43,22 @@ jobs:
       - uses: actions/checkout@v4
       - id: plan
         run: python3 stands/hardware/plan.py --candidate "$CANDIDATE" --mode "$MODE"
-  build:
+  build-accepted:
     needs: plan
-    strategy:
-      fail-fast: false
-      matrix:
-        flavor: [accepted, negative]
-    runs-on: macos-15
-    timeout-minutes: 30
-    env:
-      CMAKE_BUILD_PARALLEL_LEVEL: '2'
-      CCACHE_DIR: ${{ github.workspace }}/build/hardware-ccache
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: build/hardware-ccache
-          key: hardware-fexcore-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fex/patches/**') }}-${{ matrix.flavor }}-${{ hashFiles('stands/synthetic/**', 'stands/hardware/*.cpp', 'stands/hardware/*.h', 'stands/hardware/candidates/**', 'stands/hardware/controls/**') }}
-          restore-keys: |
-            hardware-fexcore-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('fex/patches/**') }}-${{ matrix.flavor }}-
-      - name: Dependencies and protocol tests
-        run: |
-          test "$(uname -m)" = arm64
-          brew install cmake ninja ccache
-          python3 -m venv build/hardware-venv
-          build/hardware-venv/bin/python -m pip install capstone==5.0.7
-          python3 -m unittest discover -s stands/hardware/tests -v
-      - name: Build native runner from reviewed candidate
-        env:
-          FLAVOR: ${{ matrix.flavor }}
-        run: |
-          python3 stands/hardware/plan.py --candidate "$CANDIDATE" --prepare-only
-          build/hardware-venv/bin/python stands/hardware/build.py --candidate "$CANDIDATE" --flavor "$FLAVOR" > build/hardware-build.log 2>&1
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: hardware-build-evidence-${{ matrix.flavor }}
-          path: |
-            build/hardware-build.log
-            build/hardware/bundle/BUILD.json
-            build/hardware/cache/simd-assembler.log
-          if-no-files-found: warn
-          retention-days: 7
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hardware-runner-${{ matrix.flavor }}
-          path: build/hardware/runner.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
+    uses: ./.github/workflows/hardware-native-build.yml
+    with:
+      candidate: ${{ inputs.candidate || 'stands/hardware/candidates/published-ci' }}
+      flavor: accepted
+
+  build-negative:
+    needs: plan
+    uses: ./.github/workflows/hardware-native-build.yml
+    with:
+      candidate: ${{ inputs.candidate || 'stands/hardware/candidates/published-ci' }}
+      flavor: negative
 
   hardware:
-    needs: [plan, build]
+    needs: [plan, build-accepted]
     runs-on: macos-15
     timeout-minutes: 30
     strategy:
@@ -133,7 +97,7 @@ jobs:
           retention-days: 7
 
   negative:
-    needs: build
+    needs: build-negative
     runs-on: macos-15
     timeout-minutes: 30
     steps:

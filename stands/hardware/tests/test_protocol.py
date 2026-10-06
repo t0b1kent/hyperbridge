@@ -18,6 +18,7 @@ import hwflags
 import merge
 import run
 import plan
+import check_negative
 
 
 class MergeTests(unittest.TestCase):
@@ -90,7 +91,8 @@ class ComparisonTests(unittest.TestCase):
         # Regression for first hosted failure: a hunk starting at line 1 implies
         # start-of-file context and cannot be relocated to this actual function.
         negative = Path(__file__).resolve().parents[1] / 'controls/div-overflow-disabled.patch'
-        body = ('int MacRunnerDivOverflowMode() {\n'
+        body = ('std::atomic<uint64_t> MacRunnerDivOverflowChecks {0};\n'
+                'int MacRunnerDivOverflowMode() {\n'
                 '  static const int Mode = [] {\n'
                 '    const char* Value = getenv("MACRUNNER_FEX_DIV_OVERFLOW_DE");\n'
                 "    return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;\n"
@@ -99,6 +101,9 @@ class ComparisonTests(unittest.TestCase):
             source = Path(directory) / 'FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp'
             source.parent.mkdir(parents=True)
             source.write_text('// prefix\n' * 100 + body + '// suffix\n')
+            receipt = check_negative.check(Path(directory), negative)
+            self.assertEqual(receipt['changed_switches'], 1)
+            self.assertTrue(receipt['source_unchanged'])
             checked = subprocess.run(['git', 'apply', '--check', str(negative)], cwd=directory, capture_output=True)
             self.assertEqual(checked.returncode, 0, checked.stderr)
             applied = subprocess.run(['git', 'apply', str(negative)], cwd=directory, capture_output=True)
