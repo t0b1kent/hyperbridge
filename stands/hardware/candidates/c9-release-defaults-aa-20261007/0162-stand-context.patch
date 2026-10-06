@@ -1,0 +1,75 @@
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -25,6 +25,7 @@
+ #include "Utils/variable_length_integer.h"
+ 
+ #include <FEXCore/Core/X86Enums.h>
++#include <FEXCore/Core/X87Region.h>
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include <FEXCore/Utils/Allocator.h>
+ #include <FEXCore/Utils/CompilerDefs.h>
+@@ -931,6 +932,17 @@
+   PendingTargetLabel = nullptr;
+   PendingCallReturnTargetLabel = nullptr;
+ 
++  std::vector<FEXCore::Core::X87Region::Recipe> X87Recipes;
++  auto EmitIR = [&](const IR::IROp_Header* IROp, IR::Ref CodeNode) {
++    switch (IROp->Op) {
++#define REGISTER_OP(op, x) case FEXCore::IR::IROps::OP_##op: Op_##x(IROp, CodeNode); break
++#define IROP_DISPATCH_DISPATCH
++#include <FEXCore/IR/IRDefines_Dispatch.inc>
++#undef REGISTER_OP
++    default: Op_Unhandled(IROp, CodeNode); break;
++    }
++  };
++#include "Interface/Core/HBX87RegionEmit.inl"
+   for (auto [BlockNode, BlockHeader] : IR->GetBlocks()) {
+     auto BlockIROp = BlockHeader->CW<FEXCore::IR::IROp_CodeBlock>();
+ #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
+@@ -984,14 +996,5 @@
+-    for (auto [CodeNode, IROp] : IR->GetCode(BlockNode)) {
+-      switch (IROp->Op) {
+-#define REGISTER_OP(op, x) \
+-  case FEXCore::IR::IROps::OP_##op: Op_##x(IROp, CodeNode); break
+-
+-#define IROP_DISPATCH_DISPATCH
+-#include <FEXCore/IR/IRDefines_Dispatch.inc>
+-#undef REGISTER_OP
+-
+-      default: Op_Unhandled(IROp, CodeNode); break;
+-      }
++    if (!EmitX87Region(BlockNode, BlockIROp)) {
++      for (auto [CodeNode, IROp] : IR->GetCode(BlockNode)) EmitIR(IROp, CodeNode);
+     }
+ 
+     DebugData->Subblocks.push_back({static_cast<uint32_t>(BlockStartHostCode - CodeData.BlockBegin),
+@@ -1085,6 +1088,28 @@
+   }
+ 
+   SetCursorOffset(JITRIPEntriesLocation - CodeData.BlockBegin);
++  if (!X87Recipes.empty()) {
++    using namespace FEXCore::Core::X87Region;
++    Align(alignof(Recipe));
++    const Header Extension {Magic,Version,sizeof(Recipe),uint32_t(X87Recipes.size()),
++      uint32_t(sizeof(Header)+X87Recipes.size()*sizeof(Recipe))};
++    for (size_t i=0;i<sizeof(Extension);i+=8) {
++      uint64_t Word;
++      memcpy(&Word,reinterpret_cast<const uint8_t*>(&Extension)+i,8);
++      dc64(Word);
++    }
++    for (const auto& Recipe : X87Recipes) for (size_t i=0;i<sizeof(Recipe);i+=8) {
++      if(i==offsetof(FEXCore::Core::X87Region::Recipe,GuestRIP)) {
++        PlaceNamedSymbolLiteral(InsertGuestRIPLiteral(Recipe.GuestRIP));
++        continue;
++      }
++      uint64_t Word;
++      memcpy(&Word,reinterpret_cast<const uint8_t*>(&Recipe)+i,8);
++      dc64(Word);
++    }
++    JITBlockTail._Pad[0]=TailMarker;
++    JITBlockTail._Pad[1]=Version;
++  }
+   Align();
+ 
+   CodeData.Size = GetCursorAddress<uint8_t*>() - CodeData.BlockBegin;

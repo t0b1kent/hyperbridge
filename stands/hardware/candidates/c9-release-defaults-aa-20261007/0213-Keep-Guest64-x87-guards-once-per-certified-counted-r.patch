@@ -1,0 +1,17 @@
+diff --git a/FEXCore/Source/Interface/Core/HBX87IR.h b/FEXCore/Source/Interface/Core/HBX87IR.h
+--- a/FEXCore/Source/Interface/Core/HBX87IR.h
++++ b/FEXCore/Source/Interface/Core/HBX87IR.h
+@@ -43,7 +43,12 @@ inline bool Guest64Enabled() {
+  static const bool v=Gate("MACRUNNER_HB_X87_FAST64");return v;
+ #endif
+ }
+-inline bool ExactFormsEnabled(bool Guest32) { return Guest32 ? StaticRegsEnabled() : Guest64Enabled(); }
++// 0213: a per-operation Guest64 guard duplicates both precision paths and
++// exact fallback, expanding short real-code blocks by more than 25%.
++// FAST64 admits certified counted regions with one guard per loop; isolated
++// operations retain the precise RAW80 path. The explicit INLINE_REGION
++// experiment and the accepted Guest32 bank remain independent.
++inline bool ExactFormsEnabled(bool Guest32) { return Guest32 && StaticRegsEnabled(); }
+ inline bool RegionEnabled(bool Guest32) { return InlineRegionEnabled() || (!Guest32 && Guest64Enabled()); }
+ inline bool ArithmeticEnabled(bool Guest32 = false) { return Enabled() || InlineRegionEnabled() || ExactFormsEnabled(Guest32); }
+ inline constexpr uint8_t InlineExactKindBit = 0x80;

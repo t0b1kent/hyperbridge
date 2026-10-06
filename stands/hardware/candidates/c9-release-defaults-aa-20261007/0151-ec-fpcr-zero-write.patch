@@ -1,0 +1,16 @@
+diff --git a/Source/Windows/ARM64EC/Module.S b/Source/Windows/ARM64EC/Module.S
+--- a/Source/Windows/ARM64EC/Module.S
++++ b/Source/Windows/ARM64EC/Module.S
+@@ -158,8 +158,12 @@
+ ExitFunctionEC:
+   // Clear any the AFP NEP and AH bits in FPCR as native code won't expect their behaviour.
+   mrs x17, fpcr
++  // x16 is scratch here. Preserve NZCV: native callees observe the caller's flags.
++  ubfx x16, x17, #1, #2
++  cbz x16, .Lnative_fpcr_ready
+   and x17, x17, #~6 // NEP + AH
+   msr fpcr, x17
++.Lnative_fpcr_ready:
+   ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
+   strb wzr, [x17, #0x0] // ChpeV2CpuAreaInfo->InSimulation
+   ldr x17, [x17, #0x20] // ChpeV2CpuAreaInfo->SuspendDoorbell
