@@ -5,6 +5,30 @@ measures 26 authored assembly shapes: the 21 forms in the root `COMPARISON.md`
 and five linked-list, array, call and integer-division kernels. Inputs are
 assembled afresh with Clang. There are no application captures or saved states.
 
+## Submit a candidate and read its cost
+
+1. Supply plain source patches over the current `fex/patches` series and two
+   literal environment maps, `off` and `on`. Declare at most one differing key.
+   Include no binary, captured input, personal path or credential.
+2. Prepare `stands/hardware/candidates/<neutral-name>/` using the
+   [hardware candidate contract](../hardware/README.md): `candidate.json` pins
+   the base-series hash and ordered patch hashes; `arms.json` contains the maps.
+   Give the coordinator the local commit and candidate path for publication review.
+3. The coordinator publishes and dispatches `hardware-gates.yml`, selecting that
+   candidate and `mode=quick`, with `reuse_run` empty. A push alone tests the
+   published series; it does **not** select an overlay candidate automatically.
+4. Download `instruction-cost-RESULT` from that run:
+
+   ```sh
+   gh run download RUN_ID -R t0b1kent/hyperbridge -n instruction-cost-RESULT -D cost-result
+   ```
+
+5. Read `TABLE.md` and `RESULT.json`: `rows[].off/on.arm_per_guest`,
+   `arm_instructions`, `guest_instructions`, `host_code_bytes`; `on_minus_off`
+   exposes the candidate key's static delta. Check A/A, features and the
+   comparison status before interpreting the numbers. ENGINE-108, ARITH,
+   SHORT-SEQ, X87-FAST and DIV use this same path; no local FEX build is needed.
+
 Each arm is compiled twice in a fresh process. The artifact
 `instruction-cost-RESULT` contains generated assembly, object files, exact input
 requests, native output and feature logs, `RESULT.json` and `TABLE.md`. Generated
