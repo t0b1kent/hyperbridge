@@ -1,1 +1,3 @@
 stands/exceptions/src/windows_process64-v5c.c -text
+stands/exceptions/src/stack-context64.c -text
+stands/exceptions/src/stack-context64.S -text

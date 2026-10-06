@@ -17,6 +17,7 @@ artifacts and serve as the reference. The same binaries can then be run under a 
 | `eflags_highbits64` | which upper flag bits survive `pushfq`/`popfq` |
 | `windows_process64-v5c` | 83 cells, one per process: what an ordinary (not debugged) process is told about itself — process and thread information classes, handle closing and handle flags, mitigation policies, system information, and the four clock sources |
 | `thread_priority_starvation64` | five cells: a fixed amount of work on threads at normal, below-normal, lowest and idle priority while as many polling threads as there are processors spin, yield and sleep briefly; prints wall and CPU time per work thread. On Windows low-priority work still finishes; a layer that maps priorities onto strict host priorities can starve it |
+| `stack-context64` | the flags and registers a handler is given for `RaiseException` and `RtlRaiseException` at sixteen caller stack depths (every aligned value of the low byte of the stack pointer), through vectored and structured handlers; stored byte for byte as measured |
 
 `windows_process64-v5c.c` is stored byte for byte as the measured revision (the workflow writes its SHA-256 next to the
 outputs), so it carries no per-file licence header; it is MIT-licensed like everything else in this directory.
