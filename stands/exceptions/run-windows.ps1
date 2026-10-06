@@ -25,6 +25,13 @@ $v1 = Build 'exception_context64-v1' $probe @('-lntdll')
 $v3 = Build 'exception_context64-v3' $probe @('-lntdll')
 $v4 = Build 'exception_context64-v4' $probe @('-lntdll')
 $hb = Build 'eflags_highbits64' $common @()
+function BuildC($name, $flags) {
+  $exe = Join-Path $bin "$name.exe"
+  & $cc @flags (Join-Path $src "$name.c") -o $exe
+  if ($LASTEXITCODE -ne 0) { throw "build failed: $name" }
+  return $exe
+}
+$p5 = BuildC 'windows_process64-v5c' $probe
 
 $m = Join-Path $Out 'machine.txt'
 (Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name) | Set-Content $m
@@ -69,6 +76,11 @@ foreach ($k in 62, 63, 64) {
   RunOne $v4 $d4 ("cell-{0:d2}-seh" -f $k) "cell $k 15 1" 25000
 }
 
+$d5 = NewDir 'process-v5c'
+(Get-FileHash -Algorithm SHA256 (Join-Path $src 'windows_process64-v5c.c')).Hash.ToLower() | Set-Content (Join-Path $d5 'source-sha256.txt')
+RunOne $p5 $d5 'list' '--list' 25000
+foreach ($k in 0..82) { RunOne $p5 $d5 ("cell-{0:d2}" -f $k) "cell $k" 25000 }
+
 Get-Content $m
-foreach ($d in $d1, $d3, $d4) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+foreach ($d in $d1, $d3, $d4, $d5) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
 exit 0

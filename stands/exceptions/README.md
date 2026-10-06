@@ -1,6 +1,6 @@
 # Exception delivery probes (Windows x86-64)
 
-Published October 6, 2026. MIT-licensed source of four small programs that deliberately raise processor exceptions and print
+Published October 6, 2026. MIT-licensed source of small programs that deliberately raise processor exceptions and print
 what a Windows x86-64 program observes: the exception code and parameters, the faulting address, the register and flag
 context handed to vectored and structured handlers, and the x87/SSE state before and after a handled exception.
 
@@ -15,6 +15,10 @@ artifacts and serve as the reference. The same binaries can then be run under a 
 | `exception_context64-v3` | 64 kinds: the above plus `int` forms, non-canonical addresses, misaligned SSE operands, debug registers set from a handler, x87 state across a handled exception, fast-fail |
 | `exception_context64-v4` | the `int 2d` cells of v3 with a bounded stop, to tell apart "next byte skipped" from "next byte executed" |
 | `eflags_highbits64` | which upper flag bits survive `pushfq`/`popfq` |
+| `windows_process64-v5c` | 83 cells, one per process: what an ordinary (not debugged) process is told about itself — process and thread information classes, handle closing and handle flags, mitigation policies, system information, and the four clock sources |
+
+`windows_process64-v5c.c` is stored byte for byte as the measured revision (the workflow writes its SHA-256 next to the
+outputs), so it carries no per-file licence header; it is MIT-licensed like everything else in this directory.
 
 ## Running it yourself
 
