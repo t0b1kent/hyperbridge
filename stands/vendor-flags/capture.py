@@ -45,6 +45,8 @@ def capture(compiler, work, out):
         for path in (HERE / 'probes').iterdir():
             if path.is_file():
                 shutil.copy2(path, work / path.name)
+        # Match the already exercised Windows exception stand's compiler/link recipe.
+        compiler_flags = ['-static', '-fno-stack-protector'] if platform.system() == 'Windows' else []
         with (out / 'build.log').open('wb') as log:
             def build(argv):
                 subprocess.run(argv, cwd=work, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=300)
@@ -55,9 +57,9 @@ def capture(compiler, work, out):
                 diff = ''.join(line for p, text in before.items() for line in
                                difflib.unified_diff(text.splitlines(True), (work / p).read_text().splitlines(True), fromfile='original/' + p, tofile='windows/' + p))
                 (out / 'windows-adapter.patch').write_text(diff)
-            build([compiler, '-O2', '-std=gnu11', '-fno-strict-aliasing', 'core.c', 'build/core.S', '-o', 'core.exe'])
-            build([compiler, '-O2', '-mno-red-zone', 'bmi.c', '-o', 'bmi.exe'])
-            build([compiler, '-O2', str(HERE / 'cpuid.c'), '-o', 'cpuid.exe'])
+            build([compiler, *compiler_flags, '-O2', '-std=gnu11', '-fno-strict-aliasing', 'core.c', 'build/core.S', '-o', 'core.exe'])
+            build([compiler, *compiler_flags, '-O2', '-mno-red-zone', 'bmi.c', '-o', 'bmi.exe'])
+            build([compiler, *compiler_flags, '-O2', str(HERE / 'cpuid.c'), '-o', 'cpuid.exe'])
         result['machine'] = json.loads(subprocess.check_output([str(work / 'cpuid.exe')], text=True, timeout=10))
         result['machine']['os'] = platform.system() + ' ' + platform.release()
         result['machine']['compiler'] = subprocess.check_output([compiler, '--version'], text=True, timeout=10).splitlines()[0]
