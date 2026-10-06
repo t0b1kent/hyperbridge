@@ -1,0 +1,124 @@
+{
+  "base_series_sha256": "113ba7bf4502f7946131608c5f66b81cf09cf8a0889084bdd77b50f17573a4ea",
+  "independent_keys": [],
+  "patches": [
+    {
+      "file": "0162-0163-guarded-region.patch",
+      "sha256": "6628bddaf972111bbefffb8a02d6f7a5156192662b9c63678496d7cb457b49cd"
+    },
+    {
+      "file": "0162-stand-context.patch",
+      "sha256": "899b90b24eba337af8e3aaff3571f86065c7569bc14f4d11abc410ac6b8f6118"
+    },
+    {
+      "file": "0164-static-bank.patch",
+      "sha256": "364ed08921de99e66dee80f3d826e2ffcad6c969dbff427a48a6a0cf00838b02"
+    },
+    {
+      "file": "0164-stand-context.patch",
+      "sha256": "decf42b1f8ab64092053857596e7ea350abab966855c9f0f0d8a21281d53ae74"
+    },
+    {
+      "file": "0165-static-store.patch",
+      "sha256": "ba76856796518e566bef401741dda8125f89aa4edecd53ecfc483c0241f23326"
+    },
+    {
+      "file": "0166-exact-dyadic.patch",
+      "sha256": "92dfefc74ffae1befc36ea872071cd87bc766c48f8c1bc894967dcd9bc872055"
+    },
+    {
+      "file": "0167-exact-int-load.patch",
+      "sha256": "7a5ad0a30d990a43ff883998f99360f857c37d1e58d2b95eb97ff5a585723400"
+    },
+    {
+      "file": "0168-exact-product.patch",
+      "sha256": "77a7fb0f27e7fae836d6236c4dd28b8863456971b90af86abccfe01c18dc8d12"
+    },
+    {
+      "file": "0169-static-ieee-load.patch",
+      "sha256": "38c3d08e6c9b0f297f3d0f0e43f2f2a05b76eeb5826c80261a5b2b47f258e171"
+    },
+    {
+      "file": "0171-hardware-scalar-merge.patch",
+      "sha256": "6a3a53007b11b187f74a6426d838510cea387f24273942c96261a88640c7e591"
+    },
+    {
+      "file": "0174-cvtsi-zero.patch",
+      "sha256": "a88bfde564811c03ac9eb23bb5ec9166ed46d831c08f5981610e8e0a377bf169"
+    },
+    {
+      "file": "0200-split-atomic-exact-candidate.patch",
+      "sha256": "2ae9f7e5b013a7e8bc96b3a8f298733a0d8049fe67a080f1232e80febd555d96"
+    },
+    {
+      "file": "0201-lower-neighbor-retry-candidate.patch",
+      "sha256": "cd699e808384070c249428273bb87889aeb436865bde1bc8e422b8832d45cb41"
+    },
+    {
+      "file": "0202-split-write-intent-candidate.patch",
+      "sha256": "cf59af91343d006a05f2552d6c1936c8a98bc44f3dd24aedb9ba42dd210ef35b"
+    },
+    {
+      "file": "0203-bit-memory-footprint-candidate.patch",
+      "sha256": "1796cd77b6c42a348f69a6fdeeb0a3b4659297c72424f300c93dafc17b9330e9"
+    },
+    {
+      "file": "0210-Open-exact-guarded-x87-forms-for-Guest64-behind-FAST.patch",
+      "sha256": "5a8ab8664b1ec569faef1e72f35997b6fbec0cad4ad14327953e23e792b29029"
+    },
+    {
+      "file": "0211-Admit-bounded-Guest64-DEC64-in-exact-x87-counted-reg.patch",
+      "sha256": "e20554a64954c530c44e139f76a31458a3fa9f20e382e1c93996586326d3b72f"
+    },
+    {
+      "file": "0212-Admit-only-P53-exact-Guest64-x87-trajectories-under-.patch",
+      "sha256": "aad75bfd2f70ab660e7a5b9385cd8da561741724e99d05190094f0810e4be128"
+    },
+    {
+      "file": "0213-Keep-Guest64-x87-guards-once-per-certified-counted-r.patch",
+      "sha256": "53358d0a3afab1a8334e1ee143a622244426665bd0b58467debf3a3577e22334"
+    },
+    {
+      "file": "0214-Separate-Guest64-FAST64-translation-cache-versions.patch",
+      "sha256": "2921890fcc2b0fc2c029bda36d34859614251ea51b5cd967d7017cbdb8dc4a80"
+    },
+    {
+      "file": "0215-Restore-Guest64-counted-region-IR-candidates-without.patch",
+      "sha256": "4b9b15a2c4703597f75330f587e24ce930042b9c7ea0bd875d7a92bac93bd486"
+    },
+    {
+      "file": "0216-PC64-recovery.patch",
+      "sha256": "27422e09addb56ce1241bda05cf79f4a89396df3de1c83c02613689f8ccdfba3"
+    },
+    {
+      "file": "0220-div-fast-proven-cold-de.patch",
+      "sha256": "e90154455e0a3b79b63fee756e530588d5bc104228faeec45f6451f3b70319d7"
+    },
+    {
+      "file": "0221-div-fast-native-w-zero-outputs.patch",
+      "sha256": "825ae8305525bdad85b6709c95cd6f8711684cb92733d98dcfe03a011657719e"
+    },
+    {
+      "file": "0222-div-fast-width-correct-zero-guard.patch",
+      "sha256": "cc67acbe50d004e4835633103e3dc347a9c4338d2575410881eb0daa5c0eb307"
+    },
+    {
+      "file": "0223-div-fast-unsigned32-general-high.patch",
+      "sha256": "cf1e79df5381b840282ea9183b016f54f99827c22d3be96700b1b07b19256382"
+    },
+    {
+      "file": "FEX-51-upstream-wrap-guard.patch",
+      "sha256": "830bf46ac0936a56d76b1f67e337fd71123bab812ce5b94ef36206781dab2746"
+    },
+    {
+      "file": "0176-precise-memory-flags.patch",
+      "sha256": "dcd7daf5e716c82ff0ecc2c3d4b2100af29c355eccd94fc149ef3d6b8b93abd1"
+    },
+    {
+      "file": "0177-rmw-flags-after-store.c3-context.patch",
+      "sha256": "f839b2ee91fffecd39c822e9d2358f911802a84ae965773b57ac363400e591b7"
+    }
+  ],
+  "require_local_equality": false,
+  "schema": 1
+}

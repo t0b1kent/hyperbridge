@@ -1,0 +1,20 @@
+diff --git a/FEXCore/Source/Interface/Core/HBX87Emit.inl b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87Emit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+@@ -105,13 +105,14 @@
+ }
+ // Exact binary32/64 -> F80 for normal or signed-zero inputs. Specials/subnormals
+ // retain the original converter. No additional guest memory read.
+-if (FEXCore::HBX87::Enabled() && IROp->Op==IR::OP_F80CVTTO) {
++const bool HBStaticLoad = FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode();
++if ((FEXCore::HBX87::Enabled() || HBStaticLoad) && IROp->Op==IR::OP_F80CVTTO) {
+   const auto Cvt=IROp->C<IR::IROp_F80CVTTo>();
+   if(Cvt->SrcSize==IR::OpSize::i32Bit || Cvt->SrcSize==IR::OpSize::i64Bit) {
+     const bool D=Cvt->SrcSize==IR::OpSize::i64Bit;
+     const unsigned f=D?52:23,shift=D?11:40,bias=D?1023:127,expmax=D?2047:255;
+     const uint64_t frac=(UINT64_C(1)<<f)-1;
+-    const bool Subnormals = FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_LOAD_SUBNORMAL");
++    const bool Subnormals = HBStaticLoad || FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_LOAD_SUBNORMAL");
+     ForwardLabel Slow,Zero,Subnormal,Pack,Done;
+     umov<SubRegSize::i64Bit>(TMP2,GetVReg(Cvt->X80Src),0);
+     if(!D)uxtw(Size::i64Bit,TMP2,TMP2);

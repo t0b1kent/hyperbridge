@@ -1,0 +1,83 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -2525,12 +2525,20 @@
+   } else {
+     // Load the address to the memory location
+     Ref Dest = MakeSegmentAddress(Op, Op->Dest);
++    // 0203: byte-sized atomics lose the architectural operand's permission
++    // footprint. Keep the complete 16/32/64-bit word for the entire BT family.
++    // This value is selected during ordinary lifting, never in a signal handler.
++    const char* ExactValue = std::getenv("MACRUNNER_FEX_SPLIT_ATOMIC_EXACT");
++    const bool ExactFootprint = ExactValue && ExactValue[0] == '1' && ExactValue[1] == 0;
++    const OpSize MemorySize = ExactFootprint ? IR::SizeToOpSize(Size / 8) : OpSize::i8Bit;
++    const unsigned IndexBits = ExactFootprint ? (Size == 16 ? 4 : Size == 32 ? 5 : 6) : 3;
+     // Get the bit selection from the src
+-    auto BitSelect = Src.Bfe(0, 3);
++    auto BitSelect = Src.Bfe(0, IndexBits);
+ 
+     // Address is provided as bits we want BYTE offsets
+     // Extract Signed offset
+-    Src = Src.Sbfe(3, Size - 3);
++    Src = Src.Sbfe(IndexBits, Size - IndexBits);
++    if (ExactFootprint) Src = Src.Lshl(IndexBits - 3);
+ 
+     // Get the address offset by shifting out the size of the op (To shift out the bit selection)
+     // Then use that to index in to the memory location by size of op
+@@ -2538,7 +2546,7 @@
+ 
+     switch (Action) {
+     case BTAction::BTNone: {
+-      Value = _LoadMemGPRAutoTSO(OpSize::i8Bit, Address, OpSize::i8Bit);
++      Value = _LoadMemGPRAutoTSO(MemorySize, Address, MemorySize);
+       break;
+     }
+ 
+@@ -2547,12 +2555,12 @@
+ 
+       if (DestIsLockedMem(Op)) {
+         HandledLock = true;
+-        Value = _AtomicFetchCLR(OpSize::i8Bit, BitMask, LoadEffectiveAddress(this, Address, GetGPROpSize(), true));
++        Value = _AtomicFetchCLR(MemorySize, BitMask, LoadEffectiveAddress(this, Address, GetGPROpSize(), true));
+       } else {
+-        Value = _LoadMemGPRAutoTSO(OpSize::i8Bit, Address, OpSize::i8Bit);
++        Value = _LoadMemGPRAutoTSO(MemorySize, Address, MemorySize);
+ 
+         auto Modified = _Andn(OpSize::i64Bit, Value, BitMask);
+-        _StoreMemGPRAutoTSO(OpSize::i8Bit, Address, Modified, OpSize::i8Bit);
++        _StoreMemGPRAutoTSO(MemorySize, Address, Modified, MemorySize);
+       }
+       break;
+     }
+@@ -2562,12 +2570,12 @@
+ 
+       if (DestIsLockedMem(Op)) {
+         HandledLock = true;
+-        Value = _AtomicFetchOr(OpSize::i8Bit, BitMask, LoadEffectiveAddress(this, Address, GetGPROpSize(), true));
++        Value = _AtomicFetchOr(MemorySize, BitMask, LoadEffectiveAddress(this, Address, GetGPROpSize(), true));
+       } else {
+-        Value = _LoadMemGPRAutoTSO(OpSize::i8Bit, Address, OpSize::i8Bit);
++        Value = _LoadMemGPRAutoTSO(MemorySize, Address, MemorySize);
+ 
+         auto Modified = _Or(OpSize::i64Bit, Value, BitMask);
+-        _StoreMemGPRAutoTSO(OpSize::i8Bit, Address, Modified, OpSize::i8Bit);
++        _StoreMemGPRAutoTSO(MemorySize, Address, Modified, MemorySize);
+       }
+       break;
+     }
+@@ -2577,12 +2585,12 @@
+ 
+       if (DestIsLockedMem(Op)) {
+         HandledLock = true;
+-        Value = _AtomicFetchXor(OpSize::i8Bit, BitMask, LoadEffectiveAddress(this, Address, GetGPROpSize(), true));
++        Value = _AtomicFetchXor(MemorySize, BitMask, LoadEffectiveAddress(this, Address, GetGPROpSize(), true));
+       } else {
+-        Value = _LoadMemGPRAutoTSO(OpSize::i8Bit, Address, OpSize::i8Bit);
++        Value = _LoadMemGPRAutoTSO(MemorySize, Address, MemorySize);
+ 
+         auto Modified = _Xor(OpSize::i64Bit, Value, BitMask);
+-        _StoreMemGPRAutoTSO(OpSize::i8Bit, Address, Modified, OpSize::i8Bit);
++        _StoreMemGPRAutoTSO(MemorySize, Address, Modified, MemorySize);
+       }
+       break;
+     }

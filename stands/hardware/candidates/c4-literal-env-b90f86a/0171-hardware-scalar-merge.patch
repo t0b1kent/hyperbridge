@@ -1,0 +1,170 @@
+diff --git a/FEXCore/Source/Interface/Core/ArchHelpers/HardwareScalarMerge.h b/FEXCore/Source/Interface/Core/ArchHelpers/HardwareScalarMerge.h
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/HardwareScalarMerge.h
+@@ -0,0 +1,82 @@
++// SPDX-License-Identifier: MIT
++// Modifications (c) 2026 MacRunner contributors, MIT
++#pragma once
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++
++namespace FEXCore::CPU {
++inline bool HardwareScalarMergeRequested() {
++  const auto Value = std::getenv("MACRUNNER_FEX_HW_SCALAR_MERGE");
++  return Value && std::strcmp(Value, "1") == 0;
++}
++
++#if defined(__aarch64__) || defined(__arm64ec__) || defined(_M_ARM64) || defined(_M_ARM64EC)
++struct alignas(16) ScalarMergeProbeVector { uint64_t Lo, Hi; };
++
++#define MR_SCALAR_MERGE_PROBE(Op, Type, D) \
++  asm volatile("ldr q0, [%1]\n\tldr q1, [%2]\n\t" Op " " Type #D ", " Type "0, " Type "1\n\tstr q" #D ", [%0]" \
++    : : "r"(&Result), "r"(&A), "r"(&B) : "v0", "v1", "v2", "memory")
++#define MR_SCALAR_MERGE_OPERATION(Name, Op) \
++  inline void Name(bool Wide, unsigned Alias, const ScalarMergeProbeVector& A, \
++                   const ScalarMergeProbeVector& B, ScalarMergeProbeVector& Result) { \
++    if (Wide) { \
++      if (Alias == 0) { MR_SCALAR_MERGE_PROBE(Op, "d", 2); } \
++      else if (Alias == 1) { MR_SCALAR_MERGE_PROBE(Op, "d", 0); } \
++      else { MR_SCALAR_MERGE_PROBE(Op, "d", 1); } \
++    } else { \
++      if (Alias == 0) { MR_SCALAR_MERGE_PROBE(Op, "s", 2); } \
++      else if (Alias == 1) { MR_SCALAR_MERGE_PROBE(Op, "s", 0); } \
++      else { MR_SCALAR_MERGE_PROBE(Op, "s", 1); } \
++    } \
++  }
++MR_SCALAR_MERGE_OPERATION(ProbeScalarMergeAdd, "fadd")
++MR_SCALAR_MERGE_OPERATION(ProbeScalarMergeSub, "fsub")
++MR_SCALAR_MERGE_OPERATION(ProbeScalarMergeMul, "fmul")
++MR_SCALAR_MERGE_OPERATION(ProbeScalarMergeDiv, "fdiv")
++#undef MR_SCALAR_MERGE_OPERATION
++#undef MR_SCALAR_MERGE_PROBE
++#endif
++
++// Does not enable a host mode or change FPCR/AFPCR. Called on the newly created
++// backend's thread, after Wine's HardwareTSOThreadEnter, before guest execution.
++// Check all four operations, both widths and all destination aliases. Ordinary
++// AArch64/AFP semantics fail this test and retain the existing emitter path.
++inline bool ProbeHardwareScalarMerge() {
++#if defined(__aarch64__) || defined(__arm64ec__) || defined(_M_ARM64) || defined(_M_ARM64EC)
++  uint64_t SavedFPSR;
++  asm volatile("mrs %0, fpsr" : "=r"(SavedFPSR));
++  using Probe = void (*)(bool, unsigned, const ScalarMergeProbeVector&, const ScalarMergeProbeVector&, ScalarMergeProbeVector&);
++  constexpr Probe Operations[] = {ProbeScalarMergeAdd, ProbeScalarMergeSub, ProbeScalarMergeMul, ProbeScalarMergeDiv};
++  constexpr uint64_t Finite32[] = {0x40400000, 0x3f800000, 0x40000000, 0x40000000};
++  constexpr uint64_t Finite64[] = {0x4008000000000000ULL, 0x3ff0000000000000ULL, 0x4000000000000000ULL, 0x4000000000000000ULL};
++  bool Passed = true;
++  for (unsigned Width = 0; Width != 2; ++Width) {
++    const bool Wide = Width != 0;
++    const uint64_t Mask = Wide ? ~0ULL : 0xffffffffULL;
++    const uint64_t Quiet = Wide ? 0x0008000000000000ULL : 0x00400000;
++    for (unsigned Case = 0; Case != 3; ++Case) {
++      const uint64_t AScalar = Case == 0 ? (Wide ? 0x4000000000000000ULL : 0x40000000) :
++        Case == 1 ? (Wide ? 0x7ff8000000001234ULL : 0x7fc01234) : (Wide ? 0xfff0000000005678ULL : 0xff805678);
++      const uint64_t BScalar = Case == 0 ? (Wide ? 0x3ff0000000000000ULL : 0x3f800000) :
++        Case == 1 ? (Wide ? 0xfff0000000009abcULL : 0xff809abc) : (Wide ? 0x7ff800000000def0ULL : 0x7fc0def0);
++      const ScalarMergeProbeVector A {AScalar | (Wide ? 0 : 0xa1a2a3a400000000ULL), 0xa5a6a7a8a9aaabacULL};
++      const ScalarMergeProbeVector B {BScalar | (Wide ? 0 : 0xb1b2b3b400000000ULL), 0xb5b6b7b8b9babbbcULL};
++      for (unsigned Op = 0; Op != 4; ++Op) {
++        const uint64_t Low = Case == 0 ? (Wide ? Finite64[Op] : Finite32[Op]) : (AScalar | Quiet);
++        const uint64_t Expected = (A.Lo & ~Mask) | Low;
++        for (unsigned Alias = 0; Alias != 3; ++Alias) {
++          ScalarMergeProbeVector Result {};
++          Operations[Op](Wide, Alias, A, B, Result);
++          Passed &= Result.Lo == Expected && Result.Hi == A.Hi;
++        }
++      }
++    }
++  }
++  asm volatile("msr fpsr, %0" : : "r"(SavedFPSR));
++  return Passed;
++#else
++  return false;
++#endif
++}
++}
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -14,6 +14,7 @@
+ */
+ 
+ #include "Interface/Context/Context.h"
++#include "Interface/Core/ArchHelpers/HardwareScalarMerge.h"
+ #include "Interface/Core/LookupCache.h"
+ #include "Interface/Core/Dispatcher/Dispatcher.h"
+ #include "Interface/Core/Interpreter/InterpreterOps.h"
+@@ -647,8 +648,14 @@
+   , HostSupportsAVX256 {ctx->HostFeatures.SupportsAVX && ctx->HostFeatures.SupportsSVE256}
+   , HostSupportsRPRES {ctx->HostFeatures.SupportsRPRES}
+   , HostSupportsAFP {ctx->HostFeatures.SupportsAFP}
++  , HostSupportsHardwareScalarMerge {HardwareScalarMergeRequested() && ctx->HasHardwareTSOSupport() && ProbeHardwareScalarMerge()}
+   , CTX {ctx}
+   , TempCodeBufferAllocator(ctx->CPUBackendAllocator, 0) {
++
++  if (HardwareScalarMergeRequested()) {
++    LogMan::Msg::IFmt("ARITH_SCALAR_MERGE thread_probe={} hardware_tso={} bounded_cases=72",
++                     HostSupportsHardwareScalarMerge, ctx->HasHardwareTSOSupport());
++  }
+ 
+   RAPass = Thread->PassManager->GetPass<IR::RegisterAllocationPass>("RA");
+ 
+diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -66,6 +66,7 @@
+   const bool HostSupportsAVX256 {};
+   const bool HostSupportsRPRES {};
+   const bool HostSupportsAFP {};
++  const bool HostSupportsHardwareScalarMerge {};
+ 
+   struct RestartOptions {
+     enum class Control : uint64_t {
+@@ -607,7 +608,8 @@
+                             ARMEmitter::VRegister Addend);
+   using ScalarBinaryOpCaller = std::function<void(ARMEmitter::VRegister Dst, ARMEmitter::VRegister Src1, ARMEmitter::VRegister Src2)>;
+   void VFScalarOperation(IR::OpSize OpSize, IR::OpSize ElementSize, bool ZeroUpperBits, ScalarBinaryOpCaller ScalarEmit,
+-                         ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2);
++                         ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2,
++                         bool AllowHardwareScalarMerge = false);
+   using ScalarUnaryOpCaller = std::function<void(ARMEmitter::VRegister Dst, std::variant<ARMEmitter::VRegister, ARMEmitter::Register> SrcVar)>;
+   void VFScalarUnaryOperation(IR::OpSize OpSize, IR::OpSize ElementSize, bool ZeroUpperBits, ScalarUnaryOpCaller ScalarEmit,
+                               ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1,
+diff --git a/FEXCore/Source/Interface/Core/JIT/VectorOps.cpp b/FEXCore/Source/Interface/Core/JIT/VectorOps.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/VectorOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/VectorOps.cpp
+@@ -193,7 +193,7 @@
+     const auto Vector1 = GetVReg(Op->Vector1);                                                                                \
+     const auto Vector2 = GetVReg(Op->Vector2);                                                                                \
+                                                                                                                               \
+-    VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2);                         \
++    VFScalarOperation(IROp->Size, ElementSize, Op->ZeroUpperBits, ScalarEmit, Dst, Vector1, Vector2, true);                   \
+   }
+ 
+ #define DEF_FMAOP_SCALAR_INSERT(FEXOp, ARMOp)                                                                                \
+@@ -294,7 +294,8 @@
+ // The result is stored into the destination. The untouched bits of the destination come from Vector1, unless it's a 256 vector
+ // and ZeroUpperBits is true, in which case the upper bits are zero.
+ void Arm64JITCore::VFScalarOperation(IR::OpSize OpSize, IR::OpSize ElementSize, bool ZeroUpperBits, ScalarBinaryOpCaller ScalarEmit,
+-                                     ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2) {
++                                     ARMEmitter::VRegister Dst, ARMEmitter::VRegister Vector1, ARMEmitter::VRegister Vector2,
++                                     bool AllowHardwareScalarMerge) {
+   const auto Is256Bit = OpSize == IR::OpSize::i256Bit;
+   LOGMAN_THROW_A_FMT(!Is256Bit || HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
+   LOGMAN_THROW_A_FMT(Is256Bit || !ZeroUpperBits, "128-bit operation doesn't support ZeroUpperBits in {}", __func__);
+@@ -308,6 +309,14 @@
+                                                                                            ARMEmitter::SubRegSize::i64Bit);
+ 
+   constexpr auto Predicate = ARMEmitter::PReg::p0;
++
++  if (AllowHardwareScalarMerge && HostSupportsHardwareScalarMerge && !Is256Bit && !ZeroUpperBits &&
++      (ElementSize == IR::OpSize::i32Bit || ElementSize == IR::OpSize::i64Bit)) {
++    // The admitted compatibility mode takes every untouched lane from Rn,
++    // including D == Rm. No temporary, copy or lane insertion is necessary.
++    ScalarEmit(Dst, Vector1, Vector2);
++    return;
++  }
+ 
+   if (Dst == Vector1) {
+     if (ZeroUpperBits) {
