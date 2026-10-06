@@ -72,8 +72,11 @@ add_subdirectory(${FEXSRC}/FEXHeaderUtils FEXHeaderUtils)
 add_subdirectory(${FEXSRC}/CodeEmitter CodeEmitter)
 add_subdirectory(${FEXSRC}/FEXCore FEXCore)
 
+if (NOT STAND_RUNNER_SOURCE)
+  set(STAND_RUNNER_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/runner.cpp)
+endif()
 add_executable(stand_runner
-  ${CMAKE_CURRENT_SOURCE_DIR}/runner.cpp
+  ${STAND_RUNNER_SOURCE}
   ${CMAKE_CURRENT_SOURCE_DIR}/MacHostFeatures.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/MacAllocatorHooks.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/MacFrontendStubs.cpp
@@ -86,4 +89,13 @@ target_include_directories(stand_runner PRIVATE ${FEXSRC}/Source ${FEXSRC}/FEXCo
 target_compile_options(stand_runner PRIVATE -Wno-unused-variable -Wno-unused-parameter)
 target_link_libraries(stand_runner PRIVATE FEXCore FEXCore_Base fmt::fmt xxHash::xxhash cephes_128bit)
 target_link_options(stand_runner PRIVATE -Wl,-dead_strip)
+if (STAND_HARDWARE_TSO)
+  add_library(stand_hwtso SHARED ${FEXSRC}/Source/Windows/UnixLib/MacRunnerHardwareTSO.cpp)
+  target_compile_options(stand_hwtso PRIVATE -fno-exceptions -fno-rtti)
+  set_target_properties(stand_hwtso PROPERTIES OUTPUT_NAME macrunner-hwtso
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/Bin
+    INSTALL_NAME_DIR "@rpath" BUILD_WITH_INSTALL_NAME_DIR ON)
+  target_link_libraries(stand_runner PRIVATE stand_hwtso)
+  set_target_properties(stand_runner PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "@loader_path")
+endif()
 set_source_files_properties(${FEXSRC}/Source/Common/HostFeatures.cpp PROPERTIES COMPILE_DEFINITIONS "_LIBCPP_TEMPLATE_VIS=")

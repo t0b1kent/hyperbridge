@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "ownership": "MacRunner/HyperBridge hardware oracle measurements and authored synthetic stand data; MIT. No game inputs.",
+  "sources": {
+    "amd-flags": "AMD EPYC 9V74 Zen4 accepted work-0002",
+    "amd-simd": "AMD EPYC 9V74 Zen4 accepted work-0006 final",
+    "intel-flags": "Intel accepted run 37123100337, first repeat; four accepted repeats, 1624804 rows each. Not substituted into AMD known registry."
+  },
+  "files": {
+    "SIMD-ENCODING-MAP.json": {
+      "bytes": 30080,
+      "sha256": "c98fd62197dc0dcf39f12172836204df152f5bb6e820fe2f55adc9298e31fd43"
+    },
+    "amd-flags/CURATOR-RULES.md": {
+      "bytes": 11210,
+      "sha256": "603d7218848f3aeb22540b7c45e6fbd8e8fe37007ed1f5aace73edef25cf7271"
+    },
+    "amd-flags/out-09-bmi.txt.gz": {
+      "bytes": 874072,
+      "sha256": "05ec7ca83c44f5ba13cec3f844f672f1d28d8c84763b570967112406b81988a8"
+    },
+    "amd-flags/out-bitscan.txt.gz": {
+      "bytes": 40846,
+      "sha256": "46ddd2e03ea0fce9910d4f28b19faf517ef61b217ec983df4f4057fca7c50474"
+    },
+    "amd-flags/out-bittest.txt.gz": {
+      "bytes": 126596,
+      "sha256": "1487e7f9d0abc86c24084d92c381150664d0ed7cb87d332479292868225f952d"
+    },
+    "amd-flags/out-divide.txt.gz": {
+      "bytes": 659726,
+      "sha256": "8dbfc7d72ff468ef2c897fd0a21e4c24d56154901c75fb641744de5f6e7b277b"
+    },
+    "amd-flags/out-double.txt.gz": {
+      "bytes": 2394061,
+      "sha256": "28986ab09ceeebaaec791385bbbde94c5b314becbfb511a77654605dc0d7d344"
+    },
+    "amd-flags/out-logic.txt.gz": {
+      "bytes": 48602,
+      "sha256": "0cd0f926db8a597c128c66e0c2a53fbdd5435932a864238d62711b79ec9effd0"
+    },
+    "amd-flags/out-misc.txt.gz": {
+      "bytes": 410882,
+      "sha256": "14eac5fa2c0e48823804aadffd39fe6c0a65d11cf23fbc2719c685b9d3d319e5"
+    },
+    "amd-flags/out-multiply.txt.gz": {
+      "bytes": 155979,
+      "sha256": "12bca4109eec5ddeac893f9343d22f9c66a9a36761cf7ae18ffc312272512bc8"
+    },
+    "amd-flags/out-rotates.txt.gz": {
+      "bytes": 406083,
+      "sha256": "a1d4e58282ad4f187975a14c3f4b935c1d73bb537459ab1f0b848f564ebb1fa7"
+    },
+    "amd-flags/out-shifts.txt.gz": {
+      "bytes": 331574,
+      "sha256": "c5970080c5e600c8726bb0b6bd7a0642b751534525df0bc6c909e75a85472783"
+    },
+    "amd-simd/out-arithmetic.txt.gz": {
+      "bytes": 144730,
+      "sha256": "c459750b462d4b8492f69d315f8ccd2b3be11453fd431ec7f59ac6bf852877ce"
+    },
+    "amd-simd/out-crypto.txt.gz": {
+      "bytes": 330144,
+      "sha256": "07038db7d285173db5c65dfcd8f2e4ca41ff9de74cf93da4c0dbd3379984f131"
+    },
+    "amd-simd/out-gather.txt.gz": {
+      "bytes": 139374,
+      "sha256": "ebc7fef56732fdd861905dd781f9a7c2afaa74fe943b641482a261a97d193b2a"
+    },
+    "amd-simd/out-logic.txt.gz": {
+      "bytes": 38998,
+      "sha256": "6f4fe63a06692f5bb7f17c2e88c01d3f1d468c874283857cd4954817576117e7"
+    },
+    "amd-simd/out-movement.txt.gz": {
+      "bytes": 2092041,
+      "sha256": "21867dfd9161d3536b4de55bbb9c8f9b58845a9b39209ac2c1bb0e1564cab95a"
+    },
+    "amd-simd/out-pack.txt.gz": {
+      "bytes": 7874,
+      "sha256": "1b94bd2868c818a50ebb4a53b3676f93b4faf3c82b8fdfe506757f9d88c994be"
+    },
+    "amd-simd/out-permutation.txt.gz": {
+      "bytes": 537008,
+      "sha256": "961c2fcd89eff3df9fd1fe1cd4eb49ea85a8c6bc9b653a48c8d4587ba5720e66"
+    },
+    "amd-simd/out-shifts.txt.gz": {
+      "bytes": 320595,
+      "sha256": "9fb92fe14f485d80a9f58ae4773ea3c832dd789b2bf495db324741b7e0b74e62"
+    },
+    "amd-simd/out-strings.txt.gz": {
+      "bytes": 3726439,
+      "sha256": "b6248d3a338673d0b570446b0f49593474c325dadb49b3138686f73613a109ea"
+    },
+    "amd-simd/out-upper.txt.gz": {
+      "bytes": 2619,
+      "sha256": "8252e82b6f09d99934bde1430e3b8bf47cbe311dc528a1828cb65171f25b44bb"
+    },
+    "intel-flags/out-09-bmi.txt.gz": {
+      "bytes": 867717,
+      "sha256": "2b9c34ce8fbb14c4f996d430835c459820529c64e89f3b8f8333420e002fd710"
+    },
+    "intel-flags/out-bitscan.txt.gz": {
+      "bytes": 38947,
+      "sha256": "409c4235f3ad06d551dd600a682de78fa1758e72ca6a35db5ab9c584a2fb793d"
+    },
+    "intel-flags/out-bittest.txt.gz": {
+      "bytes": 125659,
+      "sha256": "35db72a60bdeb44ad37f5fbb6f0dbc6e3c12374103160325bee103ba8d42617f"
+    },
+    "intel-flags/out-divide.txt.gz": {
+      "bytes": 638725,
+      "sha256": "62edc5e24c7e6f2c11be9fb4ee1f2a293f31fbedfa061e89bb45998934360596"
+    },
+    "intel-flags/out-double.txt.gz": {
+      "bytes": 2491002,
+      "sha256": "49ea8e5684da8030ea8c766aafa433477074d07e8699ee9d456685d7ee6652f3"
+    },
+    "intel-flags/out-logic.txt.gz": {
+      "bytes": 47568,
+      "sha256": "c0be416784573ddbde8b8bb2579c80fd450e436997c934634e484b78e0fe3eec"
+    },
+    "intel-flags/out-misc.txt.gz": {
+      "bytes": 404125,
+      "sha256": "4625ff15ae3776a3c4f31cf1e9dbcc4627bde295887e68ccf1d988ec6a69b668"
+    },
+    "intel-flags/out-multiply.txt.gz": {
+      "bytes": 148052,
+      "sha256": "40666d239aca6123b0c9eb639d69a6a51e4c52a1133aacd8ac65ee39300295a5"
+    },
+    "intel-flags/out-rotates.txt.gz": {
+      "bytes": 400220,
+      "sha256": "678799cb5810af7587088be336769dce1cbe202895fc5027d3667d15b94dc333"
+    },
+    "intel-flags/out-shifts.txt.gz": {
+      "bytes": 328622,
+      "sha256": "ba3b95c8bcae0c37ad1bd23716ce3200f7b6255fdc8902dadefa5cf38896ec48"
+    },
+    "known-baseline.jsonl.gz": {
+      "bytes": 5796963,
+      "sha256": "6453b6b215d8895db4aa2c5d43e1ff97a2d1bf4ae40cef0f3fc40dbe9bf3e278"
+    },
+    "known-hwflags.json": {
+      "bytes": 4364,
+      "sha256": "57c5a7bf9e178b59d27a463bb5f4b77203b96d3061fe778304edf6df87cc16ba"
+    },
+    "known-hwsimd-baseline.jsonl.gz": {
+      "bytes": 475066,
+      "sha256": "e44060d12305fea953c1bf6a37a300645be97f32901c301acc939be859fe03d3"
+    },
+    "known-hwsimd.json": {
+      "bytes": 4132,
+      "sha256": "d7ed26fb4f817a4f6c7ce760aaafc260966d77525369ae97e6f786b325395fe3"
+    },
+    "local-reference.json": {
+      "bytes": 1058,
+      "sha256": "996f048461398621457103b9254ea7ccf33f7eb3c061988cd01ac9ff37c770d0"
+    },
+    "reviewed-flags.json": {
+      "bytes": 1471582,
+      "sha256": "52f81b5177f25061c1c34c3aaaf110996dfb28072dacab085de6a412662f8e81"
+    }
+  }
+}

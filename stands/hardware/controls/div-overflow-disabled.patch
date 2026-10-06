@@ -1,0 +1,13 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 2eb5729c2..4545a6ec6 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -44,7 +44,7 @@ void Raw(const char* Message);
+ std::atomic<uint64_t> MacRunnerDivOverflowChecks {0};
+ int MacRunnerDivOverflowMode() {
+   static const int Mode = [] {
+-    const char* Value = getenv("MACRUNNER_FEX_DIV_OVERFLOW_DE");
++    const char* Value = nullptr; // Deliberately broken translator: suppress overflow #DE.
+     return (Value && Value[0] == '1' && !Value[1]) ? 1 : 0;
+   }();
+   return Mode;

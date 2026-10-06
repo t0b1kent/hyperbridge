@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "base_series_sha256": "113ba7bf4502f7946131608c5f66b81cf09cf8a0889084bdd77b50f17573a4ea",
+  "patches": [],
+  "independent_keys": [],
+  "require_local_equality": true,
+  "purpose": "Published 1.0.8 patch series A/A, both arms use accepted translator environment. Historical local hashes are a comparison target, not prior cloud proof."
+}
