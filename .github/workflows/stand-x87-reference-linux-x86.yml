@@ -1,0 +1,36 @@
+name: x87 reference stand (Linux x86-64 hardware)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.os }} attempt ${{ matrix.attempt }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        attempt: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Processor
+        run: |
+          grep -m1 'vendor_id' /proc/cpuinfo
+          grep -m1 'model name' /proc/cpuinfo
+          grep -m1 -E '^flags' /proc/cpuinfo | tr ' ' '\n' | grep -c -x hypervisor || true
+      - name: Run the probe (the script runs it twice and compares)
+        working-directory: stands/x87-reference
+        run: |
+          bash run.sh full
+          cat output/hardware.txt output/SUMMARY.txt output/raw.sha256
+          rm -f output/probe output/raw.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x87-reference-${{ matrix.os }}-${{ matrix.attempt }}
+          path: stands/x87-reference/output
+          if-no-files-found: error
