@@ -19,3 +19,7 @@ clang -O2 -Wall -Wextra -Werror -msse2 -mno-red-zone probe.c -o probe-bin && ./p
 
 The workflow `stand-mxcsr-family` runs it on an Intel machine (`macos-15-intel`) and on Linux runners.
 MIT, see the header of `probe.c`.
+
+`approx_status_probe.c` asks one more question of the same hardware: do the approximate reciprocal instructions
+(RCPSS, RCPPS, RSQRTSS, RSQRTPS) ever change the six status bits? 48 cases: four instructions, six inputs (zero, -1, 3,
+the smallest subnormal, quiet and signalling NaN), two starting values of the status bits.

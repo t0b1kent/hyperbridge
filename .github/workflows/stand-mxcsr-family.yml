@@ -33,6 +33,13 @@ jobs:
           echo $? > out/rc.txt
           set -e
           cat out/cpu.txt out/rc.txt out/stdout.txt
+          (shasum -a 256 approx_status_probe.c 2>/dev/null || sha256sum approx_status_probe.c) >> out/source.sha256
+          clang -O2 -Wall -Wextra -Werror -msse2 -mno-red-zone approx_status_probe.c -o approx-bin
+          set +e
+          perl -e 'alarm 30; exec @ARGV' ./approx-bin > out/approx.stdout.txt 2> out/approx.stderr.txt
+          echo $? > out/approx.rc.txt
+          set -e
+          cat out/approx.rc.txt out/approx.stdout.txt
       - uses: actions/upload-artifact@v4
         with:
           name: mxcsr-family-${{ matrix.os }}-${{ matrix.attempt }}
