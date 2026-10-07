@@ -8,7 +8,7 @@
   "candidate_order_file": "candidate.json",
   "candidate_manifest_sha256": "955394673fcd6f3eb83f4330435f516dc884280b1755ab6fcb8d6a31db5bed48",
   "candidate_patch_count": 34,
-  "product_manifest_sha256": "f7f5b449f668da2fc1ac206bfcd3c9beb9b6cf8ac2a28e6a5ba3c3a5e8f7dfe8",
+  "product_manifest_sha256": "70b2beb8d1a34b33d0ead2f489a532499ff13b3113d2de2c4c4c83413ef19567",
   "engine_sha256": "fd19d3809694f29ac594d5c21dde9d264e4892d90391bdf85dbb000b16ed2cb0",
   "supplement_source": "c9/patches/0162-0163-guarded-region.patch",
   "supplement_source_sha256": "47b714cf2a861000a79d77397a64b00d1fcc15b35be81985f1463d8b643c39d9",

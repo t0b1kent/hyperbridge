@@ -116,7 +116,7 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(seen, ['c9-check-01'])
 
     def test_product_missing_extra_and_changed_refused(self):
-        expected = {f'own/{i}': 'a' * 64 for i in range(6925)}
+        expected = {f'own/{i}': 'a' * 64 for i in range(6928)}
         for kind in ['missing', 'extra', 'changed']:
             with self.subTest(kind=kind):
                 actual = dict(expected)
@@ -134,6 +134,23 @@ class CandidateTests(unittest.TestCase):
         (self.root / 'foreign').symlink_to(self.tail, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, 'directory symlink'):
             source.inventory(self.root)
+
+    def test_vscode_files_remain_byte_pinned_and_are_never_filtered(self):
+        _, product, _, _, _ = recipe.inputs()
+        expected = product['product_source_postimages']
+        paths = [p for p in expected if p.startswith('External/range-v3/.vscode/')]
+        self.assertEqual(len(paths), 3)
+        for p in paths:
+            for kind in ['missing', 'changed']:
+                with self.subTest(path=p, kind=kind):
+                    actual = dict(expected)
+                    if kind == 'missing':
+                        actual.pop(p)
+                    else:
+                        actual[p] = '0' * 64
+                    with patch.object(source, 'inventory', return_value=actual):
+                        with self.assertRaisesRegex(ValueError, 'postimages differ'):
+                            source.verify_product(self.root, product)
 
     def test_archive_preserves_licenses_and_excludes_compile_logs(self):
         for name in ['fex64/engine/own.dll', 'fex64/licenses/FEX/LICENSE',
@@ -153,7 +170,7 @@ class CandidateTests(unittest.TestCase):
     def test_recipe_plan_without_network(self):
         with patch.object(subprocess, 'Popen', side_effect=AssertionError('unexpected command')):
             pin, product, engine, locks, tools = recipe.inputs()
-        self.assertEqual(len(product['product_source_postimages']), 6925)
+        self.assertEqual(len(product['product_source_postimages']), 6928)
         self.assertEqual(len(engine['environment']), 60)
         self.assertEqual(len(locks['fex32']['patches']), 61)
 

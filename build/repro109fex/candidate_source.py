@@ -99,7 +99,7 @@ def inventory(root):
 
 def verify_product(source, product):
     expected = product['product_source_postimages']
-    require(type(expected) is dict and len(expected) == 6925, 'Product postimages incomplete')
+    require(type(expected) is dict and len(expected) == 6928, 'Product postimages incomplete')
     actual = inventory(source)
     missing = sorted(set(expected) - set(actual))
     extra = sorted(set(actual) - set(expected))
