@@ -41,3 +41,26 @@ run; the text files next to it hold the raw program output. `machine.txt` record
   shaped by the hypervisor.
 - A green workflow means the probes ran, not that any translator matches them. The comparison is a separate step.
 - No compiled files, game data or third-party code are stored here.
+
+
+## MXCSR restore and SEH unwind
+
+`mxcsr_restore64` records fault-time and post-SEH-unwind x87 control words and
+MXCSR for two input families, each repeated twice in the same process:
+
+- `reserved`: 30 records for LDMXCSR, FXRSTOR and XRSTOR with valid and reserved
+  MXCSR bits, including the AMD misaligned-SSE bit when the host supports it.
+- `request-bv`: 72 records for XRSTOR with request masks 0, 1, 2, 4, 6 and 7,
+  XSTATE_BV 0 or 3, and valid or reserved MXCSR values.
+
+Every case resets x87 and MXCSR before the instruction. The faulting instruction
+lives in a noinline callee covered by the caller's SEH scope. The filter records
+the context and selects EXCEPTION_EXECUTE_HANDLER, so the after-state measures
+SEH unwind rather than a continue-execution handler. Each record is one bounded
+WriteFile; outcomes and completion counts must also be checked. The two modes
+test restore request semantics and exception transport; they do not duplicate
+the arithmetic comparison probes under stands/mxcsr-family.
+
+Windows Server 2022 and 2025 execute the same source and both modes. These are
+two operating system references, not two versions of the executable. Hardware
+MXCSR masks may differ; raw observations are retained without forcing equality.
