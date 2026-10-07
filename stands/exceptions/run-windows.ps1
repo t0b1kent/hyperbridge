@@ -33,6 +33,7 @@ function BuildC($name, $flags) {
 }
 $p5 = BuildC 'windows_process64-v5c' $probe
 $mx = BuildC 'mxcsr_restore64' $probe
+$om = BuildC 'object_family193' $common
 $sc = Build 'stack-context64' $probe @('-lntdll')
 $sr = Build 'stack-returns64' $probe @('-lntdll')
 $ts = Join-Path $bin 'thread_priority_starvation64.exe'
@@ -103,6 +104,10 @@ $d9 = NewDir 'mxcsr-restore'
 RunOne $mx $d9 'reserved' 'reserved' 30000
 RunOne $mx $d9 'request-bv' 'request-bv' 30000
 
+$d10 = NewDir 'object-family193'
+(Get-FileHash -Algorithm SHA256 (Join-Path $src 'object_family193.c')).Hash.ToLower() | Set-Content (Join-Path $d10 'source-sha256.txt')
+foreach ($rep in 1..2) { RunOne $om $d10 "all-rep$rep" $null 30000 }
+
 Get-Content $m
-foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
 exit 0

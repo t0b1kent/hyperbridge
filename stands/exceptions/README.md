@@ -64,3 +64,18 @@ the arithmetic comparison probes under stands/mxcsr-family.
 Windows Server 2022 and 2025 execute the same source and both modes. These are
 two operating system references, not two versions of the executable. Hardware
 MXCSR masks may differ; raw observations are retained without forcing equality.
+
+
+### Object metadata lifecycle (object_family193)
+
+Synthetic Event/Mutex/Semaphore objects, each named and unnamed, are queried
+in a fixed call sequence: creation, repeat query, inherit/protect transitions,
+duplicate, both live handles, duplicate close, flag removal, close, and an
+invalid-handle control. Basic information is queried before handle flags;
+this order is an explicit input because Windows reference bias can change
+on queries as well as lifecycle operations. All 56 bytes are retained.
+Each successful process produces exactly 60 snapshots and a completion line
+with failures=0. Named-object collisions fail the fixture. The Windows runner
+executes the same source twice; references are requested for Windows Server
+2022 and 2025. This probe does not set expected pointer counts or pool charges
+from one observed event and does not duplicate the arithmetic MXCSR probes.
