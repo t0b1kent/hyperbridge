@@ -32,6 +32,7 @@ function BuildC($name, $flags) {
   return $exe
 }
 $p5 = BuildC 'windows_process64-v5c' $probe
+$pi = Build 'windows_process64-pinned209' ($probe + @('-Wl,--no-insert-timestamp')) @()
 $mx = BuildC 'mxcsr_restore64' $probe
 $om = BuildC 'object_family193' $common
 $sc = Build 'stack-context64' $probe @('-lntdll')
@@ -108,6 +109,45 @@ $d10 = NewDir 'object-family193'
 (Get-FileHash -Algorithm SHA256 (Join-Path $src 'object_family193.c')).Hash.ToLower() | Set-Content (Join-Path $d10 'source-sha256.txt')
 foreach ($rep in 1..2) { RunOne $om $d10 "all-rep$rep" $null 30000 }
 
+
+$d11 = NewDir 'process-pinned209'
+foreach ($n in 'windows_process64-pinned209.c', 'windows_process64-pinned209.S') {
+  (Get-FileHash -Algorithm SHA256 (Join-Path $src $n)).Hash.ToLower() + '  ' + $n |
+    Add-Content (Join-Path $d11 'source-sha256.txt')
+}
+(Get-FileHash -Algorithm SHA256 $pi).Hash.ToLower() |
+  Set-Content (Join-Path $d11 'binary-sha256.txt')
+$pinnedQualification = @()
+foreach ($rep in 1..2) {
+  foreach ($k in 2, 3, 7, 77) {
+    $name = 'r{0}-cell{1:d3}' -f $rep, $k
+    RunOne $pi $d11 $name @('cell', [string]$k) 30000
+    $rawPath = Join-Path $d11 ($name + '.txt')
+    $raw = if (Test-Path -LiteralPath $rawPath) { Get-Content -Raw -LiteralPath $rawPath } else { '' }
+    $outcome = @(Get-Content -LiteralPath (Join-Path $d11 'outcomes.txt') |
+      Where-Object { $_ -match ('^' + [regex]::Escape($name) + ' ') })
+    $complete = $raw.Contains(('WINENV_PROBE COMPLETE cell={0:d3}' -f $k))
+    $version = $raw.Contains(('WINENV_PROBE version=pinned209 base=5c cell={0:d3}' -f $k))
+    $entry = $raw -match 'field=API\.ENTRY209 bytes=80 hex=[0-9a-fA-F]{160}'
+    $rc0 = $outcome.Count -eq 1 -and $outcome[0] -eq ($name + ' rc=0')
+    $pinnedQualification += [pscustomobject]@{
+      name=$name; cell=$k; repeat=$rep; rc0=$rc0; complete=$complete
+      version=$version; entry=$entry
+      stdout_sha256=if (Test-Path -LiteralPath $rawPath) {
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $rawPath).Hash.ToLower()
+      } else { $null }
+    }
+    $pinnedQualification | ConvertTo-Json -Depth 4 |
+      Set-Content (Join-Path $d11 'qualification.json')
+  }
+}
+$pinnedFailed = $pinnedQualification.Count -ne 8 -or
+  @($pinnedQualification | Where-Object { -not ($_.rc0 -and $_.complete -and $_.version -and $_.entry) }).Count -ne 0
+if (-not $pinnedFailed) {
+  'COMPLETE8; Windows API reference only; games0' | Set-Content (Join-Path $d11 'COMPLETE')
+}
+
 Get-Content $m
-foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10, $d11) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+if ($pinnedFailed) { exit 1 }
 exit 0

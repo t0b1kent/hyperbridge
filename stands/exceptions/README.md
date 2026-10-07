@@ -79,3 +79,31 @@ with failures=0. Named-object collisions fail the fixture. The Windows runner
 executes the same source twice; references are requested for Windows Server
 2022 and 2025. This probe does not set expected pointer counts or pool charges
 from one observed event and does not duplicate the arithmetic MXCSR probes.
+
+
+### Pinned Windows x64 API context (pinned209)
+
+This reuses the existing finite process probe and adds a Windows x64 ABI
+assembly caller. The caller records an 80-byte entry containing RBX, R11,
+R14, R15, EFLAGS, the first argument, RSP, the return address, and XMM1.
+RBX/R11/R14/R15, flags, and XMM1 are seeded before the call; input records
+and all handler context bytes are retained, without assuming an expected
+context from an earlier executable.
+
+Only four cells run in this variant: 2 (invalid CloseHandle with handle
+tracing), 3 (invalid NtClose with handle tracing), 7 (invalid NtClose with
+strict-handle policy enabled), and 77 (direct UnhandledExceptionFilter
+with a captured context). Each runs in a fresh process twice, using exactly
+`cell <number>`. The output directory is `process-pinned209`; it contains
+eight stdout/stderr pairs, outcomes, source and binary SHA-256, and a
+qualification JSON. The runner requires rc=0, the pinned209 version, the
+80-byte API.ENTRY209 record, and the matching COMPLETE line for all eight
+runs. Missing evidence or timeout makes this variant fail; raw evidence
+is preserved.
+
+References are requested for Windows Server 2022 and 2025 using identical
+source on both systems. They distinguish input-dependent context fields
+from implementation errors, and are not a game compatibility result.
+Built Windows executables from these references must not be executed in
+the translator environment. No game data, injection, debugger attachment,
+or external process handle is used by the requested cells.
