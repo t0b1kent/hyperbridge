@@ -27,14 +27,33 @@ counterexamples bit for bit, for example:
 
 ## Results so far
 
-| Processor | Environment | Result |
-|---|---|---|
-| AMD EPYC 9V74 (Zen 4) | Linux, KVM guest | 549,696 rows, two runs identical |
-| AMD Ryzen 9 9900X (Zen 5) | Linux 6.8, bare metal | byte-identical table (SHA-256 `e986ba25415c7def…`) |
-| Intel | GitHub-hosted runner | pending (workflow `stand-x87-reference-linux-x86`) |
+Two different tables exist — one per vendor (36 runs: 32 GitHub-hosted jobs, one cloud guest, one bare-metal machine,
+each run repeated twice with a byte-identical result):
 
-Transcendental instructions are the place where processors from different vendors are expected to differ in the last
-bits; the Intel column will show exactly where.
+| Table (SHA-256 of `raw.csv`) | Processors |
+|---|---|
+| `e986ba25415c7def…` | AMD EPYC 7763 (Zen 3), AMD EPYC 9V74 (Zen 4), AMD EPYC 9V45 (Zen 5), AMD Ryzen 9 9900X (Zen 5, bare metal) |
+| `96998229cca1db03…` | Intel Xeon Platinum 8370C (Ice Lake), Intel Xeon Platinum 8573C (Emerald Rapids) |
+
+Three AMD generations agree bit for bit, and the two Intel generations agree bit for bit. AMD and Intel differ in
+6,278 of 549,696 rows, and every one of them is a transcendental instruction:
+
+| Instruction | Rows that differ | Rows measured |
+|---|---:|---:|
+| `fyl2x` | 2,760 | 16,928 |
+| `fpatan` | 2,162 | 16,928 |
+| `fyl2xp1` | 1,200 | 16,928 |
+| `fsincos` | 62 | 184 |
+| `fsin` | 36 | 184 |
+| `fcos` | 34 | 184 |
+| `fptan` | 22 | 184 |
+| `f2xm1` | 2 | 184 |
+
+The status word differs in 6,276 of those rows, the value in `st0` in 1,152 and `st1` in 10. Arithmetic, loads, stores,
+`fprem`, `fscale`, `fxtract` and the stack-fault cases are identical on all six processors (0 differing rows).
+
+For a translator this means: x87 arithmetic has one right answer, and for transcendental instructions "matches real
+hardware" has to name the vendor.
 
 ## Run
 
