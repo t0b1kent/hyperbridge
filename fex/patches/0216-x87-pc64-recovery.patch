@@ -1,0 +1,39 @@
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -503,6 +503,13 @@ bool MaterializeHost(CpuStateFrame* Frame, const __uint128_t* HostQ) noexcept {
+ }
+ 
+ namespace FEXCore::Core::X87Region {
++// 0216: admission and interrupted-state materialization must agree. Only a
++// Guest64 counted region proven exact at every step may represent PC64 as P53.
++static bool ExactPC64Allowed(const CpuStateFrame* Frame, uint16_t CW) noexcept {
++  return CW == 0x033f && FEXCore::HBX87::Guest64Enabled() && Frame->Thread &&
++    static_cast<const FEXCore::Context::ContextImpl*>(Frame->Thread->CTX)->Config.Is64BitMode();
++}
++
+ bool Guard(const CpuStateFrame* Frame, const GuardRequest* Request, GuardValues* Values) noexcept {
+   if (Request && (uint8_t(Request->Op) & 0x80)) {
+     return FEXCore::HBX87::StaticRegsEnabled() &&
+@@ -524,8 +531,7 @@ bool Guard(const CpuStateFrame* Frame, const GuardRequest* Request, GuardValues*
+   // proves EVERY input and intermediate result exact. This is a subset of
+   // PC64 semantics, not reduced precision. All other PC64 values fall back.
+   // Keep the previous Guest32/INLINE_REGION domain byte-for-byte unchanged.
+-  const bool ExactPC64 = CW == 0x033f && FEXCore::HBX87::Guest64Enabled() && Frame->Thread &&
+-    static_cast<const FEXCore::Context::ContextImpl*>(Frame->Thread->CTX)->Config.Is64BitMode();
++  const bool ExactPC64 = ExactPC64Allowed(Frame, CW);
+   if ((CW != 0x023f && CW != 0x003f && !ExactPC64) || State.flags[X86State::X87FLAG_C1_LOC] ||
+       (State.flags[X86State::RFLAG_TF_RAW_LOC] & 1U) || State.flags[X86State::X87FLAG_TOP_LOC] >= 8) return false;
+   const unsigned P = CW == 0x003f ? 24 : 53;
+@@ -674,7 +680,10 @@ Recovery Materialize(CpuStateFrame* Frame, uint64_t HostPC, const uint64_t* Host
+   if (!Found) return {};
+   if (!HostQ) return Failed;
+   const uint16_t RequiredCW = (Selected.Precision == Format::Binary53 || Selected.Precision == Format::IEEE53) ? 0x023f : 0x003f;
+-  if ((Frame->State.FCW & 0x0f3f) != RequiredCW) return Failed;
++  const uint16_t CW = Frame->State.FCW & 0x0f3f;
++  // IEEE53 belongs to the independent static bank and retains its old domain.
++  const bool ExactPC64 = Selected.Precision == Format::Binary53 && ExactPC64Allowed(Frame, CW);
++  if (CW != RequiredCW && !ExactPC64) return Failed;
+   const unsigned Top = Frame->State.flags[X86State::X87FLAG_TOP_LOC];
+   if (Top >= 8) return Failed;
+   Raw80 Values[8] {};

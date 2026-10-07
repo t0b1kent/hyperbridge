@@ -55,7 +55,16 @@ if [ ! -d "$src/.git" ]; then
     test "$(git -C "$src/$sub" rev-parse HEAD)" = "$rev"
   done
 
-  patches=("$here"/patches/*.patch)
+  patches=()
+  if [ -f "$here/PATCH-ORDER.txt" ]; then
+    while IFS= read -r patch_name || [ -n "$patch_name" ]; do
+      case "$patch_name" in ""|\#*) continue ;; esac
+      test -f "$here/patches/$patch_name"
+      patches+=("$here/patches/$patch_name")
+    done < "$here/PATCH-ORDER.txt"
+  else
+    patches=("$here"/patches/*.patch)
+  fi
   if [ -n "$count" ]; then patches=("${patches[@]:0:$count}"); fi
   # Patches up to 0049 are mailbox files (git format-patch) and keep their author and date.
   # Later patches are published as plain diffs, byte-identical to the MacRunner release source

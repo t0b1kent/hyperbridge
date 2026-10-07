@@ -1,0 +1,74 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -4107,6 +4107,10 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+   // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): decided before the zero-divisor branch below ends the block.
+   const bool ProvenHigh = DivHighHalfProven(Op, true);
+   const bool L4 = OverflowDE && ProvenHigh && MacRunnerDivFastMode() && Op->Dest.IsGPR();
++  // A 2n-bit signed dividend fits SDIV64 when n <= 32. Check the full
++  // quotient after dividing; the wide host operation never raises a host #DE.
++  // Proven dividends retain the separately validated cold guards.
++  const bool QuotientFit = OverflowDE && !ProvenHigh && MacRunnerDivFastMode() && Size != OpSize::i64Bit;
+   Ref Divisor {};
+   Ref Fault {};
+   if (L4) {
+@@ -4114,5 +4118,10 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+     RaiseProvenDivideErrorBeforeWrite(Op, true);
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags, {.AllowUpperGarbage = true});
++  } else if (QuotientFit) {
++    // Pre-instruction flags are still needed on #DE. Successful DIV flags
++    // are undefined; this is the existing exception-state preservation.
++    CalculateDeferredFlags();
++    Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+   } else if (OverflowDE) {
+     CalculateDeferredFlags();
+     Divisor = LoadSourceGPR(Op, Op->Dest, Op->Flags);
+@@ -4131,5 +4140,22 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+   Ref Quotient = _AllocateGPR(true);
+   Ref Remainder = _AllocateGPR(true);
++  auto CheckSignedQuotient = [&](Ref SignedDivisor) {
++    const auto Bits = IR::OpSizeAsBits(Size);
++    Ref ZeroDivisor = _Lshr(OpSize::i64Bit, _CountLeadingZeroes(OpSize::i64Bit, SignedDivisor), Constant(6));
++    Ref NarrowQuotient = _Sbfe(OpSize::i64Bit, Bits, 0, Quotient);
++    Fault = _Or(OpSize::i64Bit, ZeroDivisor, _Xor(OpSize::i64Bit, Quotient, NarrowQuotient));
++    // INT64_MIN / -1 returns INT64_MIN on ARM; it cannot fit any of the
++    // 8/16/32-bit x86 destinations and therefore takes the same fault tail.
++    const uint64_t Used = MacRunnerDivFastUsed.fetch_add(1, std::memory_order_relaxed) + 1;
++    if ((Used & (Used - 1)) == 0) {
++      char Line[160];
++      const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
++        "macrunner-fex-div-fast: used={} rip={:x} op=idiv size={} quotient-fit=1 flags-preserved=1\n",
++        Used, Op->PC, unsigned {Bits});
++      Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
++      FEX::Windows::Logging::Raw(Line);
++    }
++  };
+ 
+   if (Size == OpSize::i8Bit) {
+     Ref Src1 = LoadGPRRegister(X86State::REG_RAX);
+@@ -4137,4 +4163,7 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+ 
+     _Div(OpSize::i64Bit, Src1, Invalid(), Divisor, Quotient, Remainder);
++    if (QuotientFit) {
++      CheckSignedQuotient(Divisor);
++    }
+ 
+     // AX[15:0] = concat<URem[7:0]:UDiv[7:0]>
+@@ -4148,4 +4177,16 @@ void OpDispatchBuilder::IDIVOp(OpcodeArgs) {
+-    _Div(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
++    if (QuotientFit) {
++      const auto Bits = IR::OpSizeAsBits(Size);
++      Ref Low = _Bfe(OpSize::i64Bit, Bits, 0, Src1);
++      Ref Dividend = _Orlshl(OpSize::i64Bit, Low, Src2, Bits);
++      if (Size == OpSize::i16Bit) {
++        Dividend = _Sbfe(OpSize::i64Bit, 32, 0, Dividend);
++      }
++      Divisor = _Sbfe(OpSize::i64Bit, Bits, 0, Divisor);
++      _Div(OpSize::i64Bit, Dividend, Invalid(), Divisor, Quotient, Remainder);
++      CheckSignedQuotient(Divisor);
++    } else {
++      _Div(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
++    }
+ 
+     if (Size == OpSize::i32Bit) {
+       // See DIV: proven i32 SDIV/MSUB also write W-register outputs.

@@ -1,0 +1,34 @@
+diff --git a/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl b/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87StoreEmit.inl
+@@ -1,7 +1,10 @@
+ // SPDX-License-Identifier: MIT
+ // Modifications (c) 2026 MacRunner contributors, MIT
+-// Exact-representable FST/FSTP m32/m64 only; no speculative FP, no NZCV writes.
+-if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STORE") && IROp->Op == IR::OP_F80CVT &&
++// FST/FSTP m32/m64: exact integer conversion, no speculative FP/NZCV writes.
++// The static Guest32 mode reuses this converter for real memory forms; it does
++// not require the DEC/JNZ arithmetic-loop qualifier or a double input value.
++const bool HBStaticStore = FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode();
++if (((FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STORE")) || HBStaticStore) && IROp->Op == IR::OP_F80CVT &&
+     (IROp->Size == IR::OpSize::i32Bit || IROp->Size == IR::OpSize::i64Bit)) {
+   const bool D = IROp->Size == IR::OpSize::i64Bit;
+   const auto Src = GetVReg(IROp->Args[0]);
+@@ -9,7 +12,7 @@ if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STO
+   const unsigned Fraction = D ? 52 : 23, Shift = D ? 11 : 40;
+   const unsigned MinExp = 16383 - (D ? 1022 : 126), MaxExp = 16383 + (D ? 1023 : 127);
+   const uint64_t LowMask = (UINT64_C(1) << Shift) - 1;
+-  const bool Round = FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STORE_ROUND");
++  const bool Round = HBStaticStore || FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STORE_ROUND");
+   const bool Stats = FEXCore::HBX87::Stats::Enabled();
+   ForwardLabel Slow, Input, Zero, Pack, Done;
+   ForwardLabel PC64Slow, RCSlow, UnmaskedSlow, PCSlow, DomainSlow, RangeSlow, RoundingSlow;
+@@ -28,7 +31,7 @@ if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Gate("MACRUNNER_HB_X87_FAST_STO
+   and_(Size::i64Bit, TMP1, TMP1, TMP4);
+   sub(Size::i64Bit, TMP1, TMP1, 0x23f);
+   (void)cbz(Size::i64Bit, TMP1, &Input);
+-  if (FEXCore::HBX87::PC24()) {
++  if (FEXCore::HBX87::PC24() || HBStaticStore) {
+     add(Size::i64Bit, TMP1, TMP1, 0x200);
+     (void)cbnz(Size::i64Bit, TMP1, Stats?&PCSlow:&Slow);
+   } else {

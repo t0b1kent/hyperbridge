@@ -1,0 +1,90 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
+@@ -8,6 +8,7 @@
+ 
+ #include "Interface/Core/OpcodeDispatcher.h"
+ #include "Interface/Core/HBX87StateGates.h"
++#include "Interface/Core/HBX87IR.h"
+ #include "Interface/Core/X86Tables/X86Tables.h"
+ #include "Interface/IR/IR.h"
+ #include "Interface/Core/Addressing.h"
+@@ -98,6 +99,16 @@
+   const auto ReadWidth = OpSizeFromSrc(Op);
+   // Read from memory
+   Ref Data = LoadSourceGPR_WithOpSize(Op, Op->Src[0], ReadWidth, Op->Flags);
++
++  // 0167: the existing exact integer converter has a compact inline Guest32
++  // implementation. Keep the normal push/tag path and the old IR byte-for-byte
++  // when STATIC is off. FILD m64 retains its existing exact integer IR: the
++  // common F80CVTToInt interpreter ABI only accepts 16/32-bit operands.
++  if (!ReducedPrecisionMode && GetGPROpSize() == OpSize::i32Bit &&
++      FEXCore::HBX87::StaticRegsEnabled() && ReadWidth != OpSize::i64Bit) {
++    _PushStack(_F80CVTToInt(Data, ReadWidth), Invalid(), OpSize::iInvalid);
++    return;
++  }
+ 
+   // Sign extend to 64bits
+   if (ReadWidth != OpSize::i64Bit) {
+diff --git a/FEXCore/Source/Interface/Core/HBX87Emit.inl b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87Emit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87Emit.inl
+@@ -74,6 +74,35 @@
+ };
+ #include "Interface/Core/HBX87FPSR.inl"
+ #include "Interface/Core/HBX87ScaleEmit.inl"
++// 0167: signed m16/m32 -> RAW80 is exact for every FCW. No host FP, NZCV,
++// FPSR, precision reduction or exception state is touched. The usual x87
++// push/stack fault handling remains in the frontend. FILD m64 uses its old
++// exact integer IR; FI arithmetic shares these same 16/32-bit converter forms.
++if (FEXCore::HBX87::StaticRegsEnabled() && !CTX->Config.Is64BitMode() &&
++    IROp->Op == IR::OP_F80CVTTOINT) {
++  const auto Cvt = IROp->C<IR::IROp_F80CVTToInt>();
++  if (Cvt->SrcSize == IR::OpSize::i16Bit || Cvt->SrcSize == IR::OpSize::i32Bit) {
++    ForwardLabel Pack;
++    sbfx(Size::i64Bit, TMP2, GetReg(Cvt->Src), 0, IR::OpSizeAsBits(Cvt->SrcSize));
++    asr(Size::i64Bit, TMP1, TMP2, 63);
++    eor(Size::i64Bit, TMP2, TMP2, TMP1);
++    sub(Size::i64Bit, TMP2, TMP2, TMP1); // abs, including signed minimum
++    and_(Size::i64Bit, TMP1, TMP1, 0x8000);
++    (void)cbz(Size::i64Bit, TMP2, &Pack);
++    clz(Size::i64Bit, TMP3, TMP2);
++    lslv(Size::i64Bit, TMP2, TMP2, TMP3);
++    LoadConstant(Size::i64Bit, TMP4, 16383 + 63);
++    sub(Size::i64Bit, TMP3, TMP4, TMP3);
++    orr(Size::i64Bit, TMP1, TMP1, TMP3);
++    (void)Bind(&Pack);
++    fmov(Size::i64Bit, VTMP1.D(), TMP2);
++    fmov(Size::i64Bit, VTMP1.D(), TMP1, true);
++    mov(GetVReg(Node).Q(), VTMP1.Q());
++    HBStats(Cvt->SrcSize == IR::OpSize::i16Bit ? FEXCore::HBX87::Stats::IntLoad16Hit :
++            FEXCore::HBX87::Stats::IntLoad32Hit);
++    return;
++  }
++}
+ // Exact binary32/64 -> F80 for normal or signed-zero inputs. Specials/subnormals
+ // retain the original converter. No additional guest memory read.
+ if (FEXCore::HBX87::Enabled() && IROp->Op==IR::OP_F80CVTTO) {
+diff --git a/FEXCore/Source/Interface/Core/HBX87Stats.h b/FEXCore/Source/Interface/Core/HBX87Stats.h
+--- a/FEXCore/Source/Interface/Core/HBX87Stats.h
++++ b/FEXCore/Source/Interface/Core/HBX87Stats.h
+@@ -18,7 +18,8 @@
+  StoreDomain, StoreRange, StoreRounding, Load32Subnormal, Load64Subnormal,
+  LoadCWChanged, LoadCWRemoved, ClearChanged, ClearRemoved,
+  RegionEntry53, RegionEntry24, RegionReject, RegionRetired53, RegionRetired24,
+- StaticPrepare53, StaticPrepare24, StaticRetired53, StaticRetired24, Count
++ StaticPrepare53, StaticPrepare24, StaticRetired53, StaticRetired24,
++ IntLoad16Hit, IntLoad32Hit, Count
+ };
+ inline constexpr const char* Names[Count] = {
+  "arith53", "arith24", "arith_pc64", "arith_rc", "arith_unmasked", "arith_reserved_pc",
+@@ -27,7 +28,8 @@
+  "store_domain", "store_range", "store_rounding", "load32_subnormal", "load64_subnormal",
+  "fldcw_changed", "fldcw_store_removed", "ie_sf_byte_changed", "ie_sf_byte_store_removed",
+  "region_entry53", "region_entry24", "region_reject", "region_retired53", "region_retired24",
+- "static_prepare53", "static_prepare24", "static_retired53", "static_retired24"
++ "static_prepare53", "static_prepare24", "static_retired53", "static_retired24",
++ "int_load16_hit", "int_load32_hit"
+ };
+ alignas(64) inline uint64_t LocalValues[Count] {};
+ inline uint64_t* Values = LocalValues;

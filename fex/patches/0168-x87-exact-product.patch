@@ -1,0 +1,83 @@
+diff --git a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+@@ -138,35 +138,59 @@
+        sub(Size::i64Bit,TMP3,TMP4,TMP1);
+        (void)tbnz(TMP3,63,&PreSlow);
+        // All shifts were bounded before LSLV; the magnitude sum cannot wrap.
+-     } else if(kind==FEXCore::HBX87::Mul||kind==FEXCore::HBX87::Div) {
++     } else if(kind==FEXCore::HBX87::Mul) {
++       // 0168: strip each significand's trailing zeros. The exact product is
++       // oddA*oddB * 2^(qA+qB); accept only a p-bit integer product and a
++       // normal, bounded result exponent. This covers real fractional Miles
++       // operands, unlike the old "one operand is a power of two" guard.
++       auto ProductCoefficient=[&](auto Src) {
++         umov<SubRegSize::i64Bit>(TMP2,Src,0);
++         (void)cbz(Size::i64Bit,TMP2,&ExactReady);
++         rbit(Size::i64Bit,TMP4,TMP2);
++         clz(Size::i64Bit,TMP4,TMP4);
++         lsrv(Size::i64Bit,TMP1,TMP2,TMP4);
++         umov<SubRegSize::i64Bit>(TMP3,Src,1);
++         and_(Size::i64Bit,TMP3,TMP3,0x7fff);
++         add(Size::i64Bit,TMP3,TMP3,TMP4);
++       };
++       ProductCoefficient(A);
++       fmov(Size::i64Bit,VTMP1.D(),TMP1);
++       fmov(Size::i64Bit,VTMP2.D(),TMP3);
++       ProductCoefficient(D);
++       fmov(Size::i64Bit,TMP2,VTMP1.D());
++       umulh(TMP4,TMP1,TMP2);
++       (void)cbnz(Size::i64Bit,TMP4,&PreSlow);
++       mul(Size::i64Bit,TMP1,TMP1,TMP2);
++       // Product is odd: >=2^p is never an exact p-bit significand. A shift
++       // also rejects the entire upper half, without signed-subtract wrap.
++       lsr(Size::i64Bit,TMP4,TMP1,isDouble?53:24);
++       (void)cbnz(Size::i64Bit,TMP4,&PreSlow);
++       fmov(Size::i64Bit,TMP2,VTMP2.D());
++       add(Size::i64Bit,TMP3,TMP3,TMP2);
++       clz(Size::i64Bit,TMP4,TMP1);
++       sub(Size::i64Bit,TMP3,TMP3,TMP4);
++       LoadConstant(Size::i64Bit,TMP4,16383+63);
++       sub(Size::i64Bit,TMP3,TMP3,TMP4);
++       LoadConstant(Size::i64Bit,TMP4,isDouble?15362:16258);
++       sub(Size::i64Bit,TMP2,TMP3,TMP4);
++       (void)tbnz(TMP2,63,&PreSlow);
++       LoadConstant(Size::i64Bit,TMP4,isDouble?17406:16510);
++       sub(Size::i64Bit,TMP2,TMP3,TMP4);
++       (void)tbz(TMP2,63,&PreSlow);
++     } else if(kind==FEXCore::HBX87::Div) {
+        umov<SubRegSize::i64Bit>(TMP2,A,0);
+        (void)cbz(Size::i64Bit,TMP2,&ExactReady);
+        umov<SubRegSize::i64Bit>(TMP3,D,0);
+-       if(kind==FEXCore::HBX87::Mul) (void)cbz(Size::i64Bit,TMP3,&ExactReady);
+        LoadConstant(Size::i64Bit,TMP4,UINT64_C(1)<<63);
+-       if(kind==FEXCore::HBX87::Mul) {
+-         ForwardLabel PowerOfTwo;
+-         eor(Size::i64Bit,TMP1,TMP2,TMP4);
+-         (void)cbz(Size::i64Bit,TMP1,&PowerOfTwo);
+-         eor(Size::i64Bit,TMP1,TMP3,TMP4);
+-         (void)cbnz(Size::i64Bit,TMP1,&PreSlow);
+-         (void)Bind(&PowerOfTwo);
+-       } else {
+-         eor(Size::i64Bit,TMP1,TMP3,TMP4);
+-         (void)cbnz(Size::i64Bit,TMP1,&PreSlow);
+-       }
++       eor(Size::i64Bit,TMP1,TMP3,TMP4);
++       (void)cbnz(Size::i64Bit,TMP1,&PreSlow);
+        umov<SubRegSize::i64Bit>(TMP2,A,1);
+        umov<SubRegSize::i64Bit>(TMP3,D,1);
+        and_(Size::i64Bit,TMP2,TMP2,0x7fff);
+        and_(Size::i64Bit,TMP3,TMP3,0x7fff);
+        LoadConstant(Size::i64Bit,TMP4,16383);
+-       if(kind==FEXCore::HBX87::Mul) {
+-         add(Size::i64Bit,TMP2,TMP2,TMP3);
+-         sub(Size::i64Bit,TMP2,TMP2,TMP4);
+-       } else {
+-         sub(Size::i64Bit,TMP2,TMP2,TMP3);
+-         add(Size::i64Bit,TMP2,TMP2,TMP4);
+-       }
++       sub(Size::i64Bit,TMP2,TMP2,TMP3);
++       add(Size::i64Bit,TMP2,TMP2,TMP4);
+        LoadConstant(Size::i64Bit,TMP4,isDouble?15362:16258);
+        sub(Size::i64Bit,TMP3,TMP2,TMP4);
+        (void)tbnz(TMP3,63,&PreSlow);

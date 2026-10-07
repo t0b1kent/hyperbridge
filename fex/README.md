@@ -8,11 +8,21 @@ Since 29 Sep 2026 the name HyperBridge refers to this FEX-based engine. The earl
 
 - Upstream: `https://github.com/FEX-Emu/FEX`, commit `fd141ed6d721d03062619e4702bca1a0c93b6dd9`
   (6 Aug 2026, right after the FEX-2608 release).
-- Series: 55 patches in `patches/`, applied in file-name order: 0001–0049, 0055, 0056, 0065, 0075,
-  0160 and 0161. MacRunner 1.0.8 ships this 64-bit chain and the separate [WOW64 chain](wow64/README.md).
+- Series: 87 ARM64EC patches in `patches/`, applied in the explicit dependency order in
+  `PATCH-ORDER.txt`: the published 1.0.8 base55 followed by the 1.0.9 additions32.
+  The separate [WOW64 chain](wow64/README.md) remains the 1.0.8 chain.
   An EXPERIMENT label describes a source switch; the shipped defaults are specified below.
 - Build: `fex/build.sh <work-dir> [patch-count]` (llvm-mingw for the Windows halves, Xcode
   clang for the unix libraries). `MANIFEST.json` lists the expected output hashes.
+
+
+## MacRunner 1.0.9 / engine-0227
+
+The 32 additions are integrated x87, arithmetic, division, short-sequence, atomic-memory and exception-state work. Filenames identify patches; numeric sorting is not their dependency order. Apply `PATCH-ORDER.txt` sequentially. The upstream wrap-guard addition is published as 0175; its original integration identifier was FEX-51. Mailbox transport headers were removed from the additions; diff payloads and new/deleted file modes are preserved.
+
+The packaged ENGINE.json enables `MACRUNNER_FEX_DIV_FAST=1`, `MACRUNNER_FEX_SPLIT_ATOMIC_EXACT=1`, `MACRUNNER_FEX_RMW_FLAGS_AFTER_STORE=1` and `MACRUNNER_FEX_HW_SCALAR_MERGE=1`. Other defaults and the shipped byte hashes are in MANIFEST.json. WOW64 and native libraries retain the r5 implementation; the updated ARM64EC PE was compiled locally. The owner accepted a local-build release for 1.0.9. This does not certify a successful clean-cloud rebuild or identical signed-byte reproduction. The inherited Wine source debt remains open.
+
+Candidate c9: local real corpus 500595 cases, no new classes; cloud flags 1624804 cases, no new classes; SIMD 919405 cases, PASS. Signed-runner release gates are reported with the final application package. No c9-versus-r5 speed measurement or FPS claim accompanies these source additions. Experimental Elden Ring/D3D12 additions outside c9 are excluded.
 
 ## What the patches do
 

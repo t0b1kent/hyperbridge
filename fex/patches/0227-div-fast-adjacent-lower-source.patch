@@ -1,0 +1,107 @@
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -1182,6 +1182,11 @@
+   if (MacRunnerDivProvenHighMode() && Size >= OpSize::i32Bit) {
+     MacRunnerSignExtEnd = Op->PC + Op->InstSize;
+     MacRunnerSignExtSize = Size;
++    // A full adjacent MOV is unchanged by CDQ/CQO unless its source is RDX.
++    // Only retain the register identity, never an SSA Ref across the guard.
++    if (MacRunnerDivFastMode() && MacRunnerDivLowerEnd == Op->PC && MacRunnerDivLowerSize == Size) {
++      MacRunnerDivLowerEnd = Op->PC + Op->InstSize;
++    }
+   }
+ }
+ 
+@@ -4041,6 +4046,9 @@
+   const bool ProvenHigh = DivHighHalfProven(Op, false);
+   const bool L4 = OverflowDE && MacRunnerDivFastMode() && Op->Dest.IsGPR() &&
+                   (ProvenHigh || Size == OpSize::i32Bit);
++  // Save the proven register identity before the cold guard clears block facts.
++  const uint32_t LowerSource = L4 && ProvenHigh && MacRunnerDivLowerEnd == Op->PC && MacRunnerDivLowerSize == Size ?
++                                 MacRunnerDivLowerSource : X86State::REG_RAX;
+   Ref Divisor {};
+   Ref Fault {};
+   if (L4) {
+@@ -4081,8 +4089,10 @@
+     Ref Src1 = LoadGPRRegister(X86State::REG_RAX);
+     Ref Src2 = LoadGPRRegister(X86State::REG_RDX);
+ 
++    // Read the unchanged MOV source again in this continuation, not a predecessor SSA value.
++    Ref Lower = LowerSource == X86State::REG_RAX ? Src1 : LoadGPRRegister(LowerSource);
+     // A proven zero high half needs no 2n-bit dividend: plain UDIV/MSUB of the operand size, no runtime check.
+-    _UDiv(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
++    _UDiv(Size, Lower, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
+ 
+     if (Size == OpSize::i32Bit) {
+       // FAST with invalid Upper emits W-register UDIV/MSUB. General unsigned
+@@ -4120,6 +4130,8 @@
+   // ★ MacRunner (MACRUNNER_FEX_DIV_PROVEN_HIGH=1): decided before the zero-divisor branch below ends the block.
+   const bool ProvenHigh = DivHighHalfProven(Op, true);
+   const bool L4 = OverflowDE && ProvenHigh && MacRunnerDivFastMode() && Op->Dest.IsGPR();
++  const uint32_t LowerSource = L4 && MacRunnerDivLowerEnd == Op->PC && MacRunnerDivLowerSize == Size ?
++                                 MacRunnerDivLowerSource : X86State::REG_RAX;
+   // A 2n-bit signed dividend fits SDIV64 when n <= 32. Check the full
+   // quotient after dividing; the wide host operation never raises a host #DE.
+   // Proven dividends retain the separately validated cold guards.
+@@ -4198,7 +4210,8 @@
+       _Div(OpSize::i64Bit, Dividend, Invalid(), Divisor, Quotient, Remainder);
+       CheckSignedQuotient(Divisor);
+     } else {
+-      _Div(Size, Src1, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
++      Ref Lower = LowerSource == X86State::REG_RAX ? Src1 : LoadGPRRegister(LowerSource);
++      _Div(Size, Lower, ProvenHigh ? Invalid() : Src2, Divisor, Quotient, Remainder);
+     }
+ 
+     if (Size == OpSize::i32Bit) {
+@@ -5087,6 +5100,17 @@
+   if (MacRunnerDivFastMode() && MacRunnerDivProvenHighMode() && Op->Dest.IsGPR() && !Op->Dest.Data.GPR.HighBits &&
+       OpSizeFromDst(Op) >= OpSize::i32Bit) {
+     const auto Dest = Op->Dest.Data.GPR.GPR;
++    const auto& Source = Op->Src[SrcIndex];
++    if (Dest == X86State::REG_RAX && Source.IsGPR() && !Source.Data.GPR.HighBits &&
++        Source.Data.GPR.GPR != X86State::REG_RAX && Source.Data.GPR.GPR != X86State::REG_RDX &&
++        OpSizeFromSrc(Op) == OpSizeFromDst(Op)) {
++      MacRunnerDivLowerEnd = Op->PC + Op->InstSize;
++      MacRunnerDivLowerSize = OpSizeFromDst(Op);
++      MacRunnerDivLowerSource = Source.Data.GPR.GPR;
++    }
+     if (Dest == X86State::REG_RDX && Op->Src[SrcIndex].IsLiteral() && Op->Src[SrcIndex].Literal() == 0) {
+       MacRunnerZeroRDXEnd = Op->PC + Op->InstSize;
++      if (MacRunnerDivLowerEnd == Op->PC) {
++        MacRunnerDivLowerEnd = Op->PC + Op->InstSize;
++      }
+     } else if (Dest == X86State::REG_RAX && MacRunnerZeroRDXEnd != 0 && MacRunnerZeroRDXEnd == Op->PC) {
+@@ -5127,6 +5151,9 @@
+     if (MacRunnerDivProvenHighMode() && Op->Dest.Data.GPR.GPR == X86State::REG_RDX && !Op->Dest.Data.GPR.HighBits &&
+         OpSizeFromDst(Op) >= OpSize::i32Bit) {
+       MacRunnerZeroRDXEnd = Op->PC + Op->InstSize;
++      if (MacRunnerDivFastMode() && MacRunnerDivLowerEnd == Op->PC) {
++        MacRunnerDivLowerEnd = Op->PC + Op->InstSize;
++      }
+     }
+     return;
+   }
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -1967,10 +1967,19 @@
+   uint64_t MacRunnerSignExtEnd {};
+   IR::OpSize MacRunnerSignExtSize {IR::OpSize::iInvalid};
+   uint64_t MacRunnerZeroRDXEnd {};
++  // MACRUNNER_FEX_DIV_FAST: full adjacent MOV into RAX; its non-RAX/RDX
++  // source survives adjacent CDQ/CQO, XOR-RDX, or MOV-RDX-zero. Exact PC adjacency proves
++  // no intervening writer. New blocks erase the token with all other facts.
++  uint64_t MacRunnerDivLowerEnd {};
++  IR::OpSize MacRunnerDivLowerSize {IR::OpSize::iInvalid};
++  uint32_t MacRunnerDivLowerSource {X86State::REG_RAX};
+   void ResetMacRunnerDivFacts() {
+     MacRunnerSignExtEnd = 0;
+     MacRunnerSignExtSize = IR::OpSize::iInvalid;
+     MacRunnerZeroRDXEnd = 0;
++    MacRunnerDivLowerEnd = 0;
++    MacRunnerDivLowerSize = IR::OpSize::iInvalid;
++    MacRunnerDivLowerSource = X86State::REG_RAX;
+   }
+ 
+   void InvalidateReg(uint8_t Index) {

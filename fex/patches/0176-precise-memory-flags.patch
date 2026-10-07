@@ -1,0 +1,105 @@
+diff --git a/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp b/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
+--- a/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
+@@ -18,6 +18,9 @@
+ #include <FEXCore/fextl/deque.h>
+ #include <FEXCore/fextl/vector.h>
+ 
++#include <cstdlib>
++#include <cstring>
++
+ // Flag bit flags
+ #define FLAG_V (1U << 0)
+ #define FLAG_C (1U << 1)
+@@ -150,9 +153,15 @@
+ 
+ class DeadFlagCalculationEliminination final : public FEXCore::IR::Pass {
+ public:
++  DeadFlagCalculationEliminination() {
++    const char* Enabled = std::getenv("MACRUNNER_FEX_PRECISE_MEM_FLAGS");
++    PreciseMemoryFlags = Enabled && std::strcmp(Enabled, "1") == 0;
++  }
+   void Run(IREmitter* IREmit) override;
+ 
+ private:
++  bool PreciseMemoryFlags {};
++  static bool MayFaultGuestMemory(IROps Op);
+   FlagInfo Classify(IROp_Header* Node);
+   unsigned FlagsForCondClassType(CondClass Cond);
+   bool EliminateDeadCode(IREmitter* IREmit, Ref CodeNode, IROp_Header* IROp);
+@@ -161,6 +170,55 @@
+   bool ProcessBlock(IREmitter* IREmit, IRListView& CurrentIR, Ref Block, ControlFlowGraph& CFG);
+   void OptimizeParity(IREmitter* IREmit, IRListView& CurrentIR, ControlFlowGraph& CFG);
+ };
++
++bool DeadFlagCalculationEliminination::MayFaultGuestMemory(IROps Op) {
++  // A guest-memory fault observes the architectural flags even when normal
++  // control flow overwrites them before its next explicit flag reader.
++  // Keep host context/spill/fill accesses and non-faulting prefetch separate.
++  switch (Op) {
++  case OP_LOADMEM:
++  case OP_LOADMEMPAIR:
++  case OP_STOREMEM:
++  case OP_STOREMEMPAIR:
++  case OP_STOREMEMX87SVEOPTPREDICATE:
++  case OP_LOADMEMX87SVEOPTPREDICATE:
++  case OP_LOADMEMTSO:
++  case OP_STOREMEMTSO:
++  case OP_VLOADVECTORMASKED:
++  case OP_VSTOREVECTORMASKED:
++  case OP_VLOADVECTORGATHERMASKED:
++  case OP_VLOADVECTORGATHERMASKEDQPS:
++  case OP_VLOADVECTORELEMENT:
++  case OP_VSTOREVECTORELEMENT:
++  case OP_VBROADCASTFROMMEM:
++  case OP_PUSH:
++  case OP_PUSHTWO:
++  case OP_RMWHANDLE:
++  case OP_POP:
++  case OP_POPTWO:
++  case OP_MEMSET:
++  case OP_MEMCPY:
++  case OP_CACHELINECLEAR:
++  case OP_CACHELINECLEAN:
++  case OP_CACHELINEZERO:
++  case OP_VSTORENONTEMPORAL:
++  case OP_VSTORENONTEMPORALPAIR:
++  case OP_VLOADNONTEMPORAL:
++  case OP_CAS:
++  case OP_CASPAIR:
++  case OP_ATOMICSWAP:
++  case OP_ATOMICFETCHADD:
++  case OP_ATOMICFETCHSUB:
++  case OP_ATOMICFETCHAND:
++  case OP_ATOMICFETCHCLR:
++  case OP_ATOMICFETCHOR:
++  case OP_ATOMICFETCHXOR:
++  case OP_ATOMICFETCHNEG:
++    return true;
++  default:
++    return false;
++  }
++}
+ 
+ unsigned DeadFlagCalculationEliminination::FlagsForCondClassType(CondClass Cond) {
+   switch (Cond) {
+@@ -345,6 +403,9 @@
+ 
+ FlagInfo DeadFlagCalculationEliminination::Classify(IROp_Header* IROp) {
+   FlagInfo Info = FlagInfos[IROp->Op];
++  if (PreciseMemoryFlags && MayFaultGuestMemory(IROp->Op)) {
++    Info.Raw |= FLAG_ALL;
++  }
+   if (!Info.Special()) {
+     return Info;
+   }
+@@ -447,7 +508,8 @@
+ // be skipped (because it was removed or could not possibly affect flags).
+ bool DeadFlagCalculationEliminination::EliminateDeadCode(IREmitter* IREmit, Ref CodeNode, IROp_Header* IROp) {
+   // Can't remove anything used or with side effects.
+-  if (CodeNode->GetUses() > 0 || IR::HasSideEffects(IROp->Op)) {
++  if (CodeNode->GetUses() > 0 || IR::HasSideEffects(IROp->Op) ||
++      (PreciseMemoryFlags && MayFaultGuestMemory(IROp->Op))) {
+     return false;
+   }
+ 
