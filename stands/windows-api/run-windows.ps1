@@ -18,7 +18,7 @@ Copy-Item -LiteralPath $source -Destination $compiledSource
 $utf8 = New-Object Text.UTF8Encoding($false)
 $sourceHash = (Get-FileHash -LiteralPath $compiledSource -Algorithm SHA256).Hash.ToLowerInvariant()
 $record = [ordered]@{
-    schema=1; probe='0064-ordinary-api-v1'; source_sha256=$sourceHash
+    schema=1; probe='0064-ordinary-api-v2'; source_sha256=$sourceHash
     requested_mode=$(if ($CompileOnly) { 'compile_only' } else { 'compile_and_run' })
     compiler_exit=$null; launched=$false; timeout=$false; kill_requested=$false
     kill_confirmed=$false; kill_error_type=$null; launcher_error_type=$null; exit_code=$null

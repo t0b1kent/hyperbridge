@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * Original bounded Windows API observation probe, task 0064, revision 1.
+ * Original bounded Windows API observation probe, task 0064, revision 2.
  * Sources only: native Windows results must be produced by the curator.
  */
 #define WIN32_LEAN_AND_MEAN
@@ -90,7 +90,7 @@ static void emit_meta(void)
     cpuid_leaf(cpu,0,0);memcpy(vendor,&cpu[1],4);memcpy(vendor+4,&cpu[3],4);memcpy(vendor+8,&cpu[2],4);vendor[12]=0;
     cpuid_leaf(cpu,1,0);tsc_available=((unsigned)cpu[3]>>4)&1u;GetSystemInfo(&si);
     /* Vendor is deliberately whitelisted; no host/account/path identifiers. */
-    printf("{\"kind\":\"meta\",\"schema\":1,\"probe\":\"0064-ordinary-api-v1\",\"architecture\":\"x64\",\"os_status\":\"0x%08lx\",\"os_major\":%lu,\"os_minor\":%lu,\"os_build\":%lu,\"cpu_vendor\":\"%s\",\"cpuid_signature\":\"0x%08lx\",\"hypervisor_bit\":%u,\"debugger_present\":%u,\"page_size\":%lu,\"allocation_granularity\":%lu}\n",
+    printf("{\"kind\":\"meta\",\"schema\":1,\"probe\":\"0064-ordinary-api-v2\",\"architecture\":\"x64\",\"os_status\":\"0x%08lx\",\"os_major\":%lu,\"os_minor\":%lu,\"os_build\":%lu,\"cpu_vendor\":\"%s\",\"cpuid_signature\":\"0x%08lx\",\"hypervisor_bit\":%u,\"debugger_present\":%u,\"page_size\":%lu,\"allocation_granularity\":%lu}\n",
       (unsigned long)(ULONG)status,(unsigned long)version.dwMajorVersion,(unsigned long)version.dwMinorVersion,(unsigned long)version.dwBuildNumber,
       !strcmp(vendor,"GenuineIntel")?"GenuineIntel":!strcmp(vendor,"AuthenticAMD")?"AuthenticAMD":"other",
       (unsigned long)(ULONG)cpu[0],((unsigned)cpu[2]>>31)&1u,IsDebuggerPresent()?1u:0u,(unsigned long)si.dwPageSize,(unsigned long)si.dwAllocationGranularity);
@@ -312,6 +312,29 @@ static clock_worker workers[THREADS];
 static interrupt_fn query_interrupt=NULL;
 static unbiased_fn query_unbiased=NULL;
 static int usd_readable;
+static const char *interrupt_provider="unavailable";
+static DWORD interrupt_k32_error,interrupt_kbase_error;
+static unsigned interrupt_k32_present,interrupt_kbase_present,interrupt_kbase_attempted;
+/* Read-only resolution in already-loaded Windows modules. No DLL search/load. */
+static int find_interrupt_in_loaded_module(const wchar_t *name,unsigned *present,DWORD *error)
+{
+    HMODULE module;FARPROC address;
+    SetLastError(0);module=GetModuleHandleW(name);*present=module!=NULL;
+    if(!module){*error=GetLastError();return 0;}
+    SetLastError(0);address=GetProcAddress(module,"QueryInterruptTime");
+    if(!address){*error=GetLastError();return 0;}
+    if(sizeof(query_interrupt)!=sizeof(address)){*error=ERROR_BAD_LENGTH;return 0;}
+    memcpy(&query_interrupt,&address,sizeof(query_interrupt));*error=0;return 1;
+}
+static void find_interrupt_api(void)
+{
+    if(find_interrupt_in_loaded_module(L"kernel32.dll",&interrupt_k32_present,&interrupt_k32_error)){
+        interrupt_provider="kernel32";return;
+    }
+    interrupt_kbase_attempted=1;
+    if(find_interrupt_in_loaded_module(L"kernelbase.dll",&interrupt_kbase_present,&interrupt_kbase_error))
+        interrupt_provider="kernelbase";
+}
 static ULONG read_usd32(size_t offset){return *(volatile const ULONG*)(USD_BASE+offset);}
 static uint64_t read_usd64(size_t offset){return *(volatile const uint64_t*)(USD_BASE+offset);}
 static unsigned read_ksystem(size_t offset,uint64_t *value)
@@ -349,10 +372,10 @@ static void clock_probe(void)
 {
     HANDLE threads[THREADS]={0},start=NULL;MEMORY_BASIC_INFORMATION mbi;LARGE_INTEGER frequency;unsigned i,j;DWORD joined;BOOL freq_ok;
     memset(&mbi,0,sizeof(mbi));usd_readable=VirtualQuery((const void*)USD_BASE,&mbi,sizeof(mbi))!=0 && mbi.State==MEM_COMMIT && !(mbi.Protect&(PAGE_NOACCESS|PAGE_GUARD)) && (uintptr_t)mbi.BaseAddress<=USD_BASE && mbi.RegionSize>=USD_BASE-(uintptr_t)mbi.BaseAddress+0x3c8;
-    resolve(GetModuleHandleW(L"kernel32.dll"),"QueryInterruptTime",&query_interrupt,sizeof(query_interrupt));
+    find_interrupt_api();
     resolve(GetModuleHandleW(L"kernel32.dll"),"QueryUnbiasedInterruptTime",&query_unbiased,sizeof(query_unbiased));
     frequency.QuadPart=0;freq_ok=QueryPerformanceFrequency(&frequency);
-    printf("{\"kind\":\"clock_setup\",\"rows\":\"T03/T04-partial\",\"threads\":%u,\"samples_per_thread\":%u,\"qpf_ok\":%u,\"qpf\":\"0x%016" PRIx64 "\",\"usd_readable\":%u,\"tick_multiplier\":%lu,\"interrupt_api\":%u,\"unbiased_api\":%u,\"tsc_advertised\":%u,\"tsc_sequence\":\"LFENCE_RDTSC_LFENCE\",\"affinity_changed\":false}\n",THREADS,SAMPLES,freq_ok?1u:0u,(uint64_t)frequency.QuadPart,usd_readable?1u:0u,(unsigned long)(usd_readable?read_usd32(4):0),query_interrupt?1u:0u,query_unbiased?1u:0u,tsc_available);
+    printf("{\"kind\":\"clock_setup\",\"rows\":\"T03/T04-partial\",\"threads\":%u,\"samples_per_thread\":%u,\"qpf_ok\":%u,\"qpf\":\"0x%016" PRIx64 "\",\"usd_readable\":%u,\"tick_multiplier\":%lu,\"interrupt_api\":%u,\"interrupt_provider\":\"%s\",\"interrupt_kernel32_module_present\":%u,\"interrupt_kernel32_error\":%lu,\"interrupt_kernelbase_attempted\":%u,\"interrupt_kernelbase_module_present\":%u,\"interrupt_kernelbase_error\":%lu,\"unbiased_api\":%u,\"tsc_advertised\":%u,\"tsc_sequence\":\"LFENCE_RDTSC_LFENCE\",\"affinity_changed\":false}\n",THREADS,SAMPLES,freq_ok?1u:0u,(uint64_t)frequency.QuadPart,usd_readable?1u:0u,(unsigned long)(usd_readable?read_usd32(4):0),query_interrupt?1u:0u,interrupt_provider,interrupt_k32_present,(unsigned long)interrupt_k32_error,interrupt_kbase_attempted,interrupt_kbase_present,(unsigned long)interrupt_kbase_error,query_unbiased?1u:0u,tsc_available);
     if(!usd_readable || !query_interrupt || !query_unbiased || !tsc_available || !freq_ok)dependent_checks_skipped++;
     start=CreateEventW(NULL,TRUE,FALSE,NULL);if(!start){error_row("clock_start_event",GetLastError());return;}
     for(i=0;i<THREADS;i++){
