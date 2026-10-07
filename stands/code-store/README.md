@@ -13,8 +13,12 @@ Each executable cell is repeated 1000 times; `summary.tsv` has one row per cell 
 
 | Processor | Environment | Result |
 |---|---|---|
-| AMD EPYC 9V74 (Zen 4) | Linux 6.18, KVM guest | 352 cells measured, two full runs identical |
-| AMD Ryzen 9 9900X (Zen 5) | Linux 6.8, bare metal | byte-identical `summary.tsv` and `layout.tsv` to the EPYC run |
+| Intel Xeon Platinum 8573C (Emerald Rapids) | Linux, GitHub-hosted runner (virtualized) | 352 cells measured, two runs identical |
+| AMD EPYC 7763 (Zen 3) | Linux, GitHub-hosted runner (virtualized) | byte-identical `summary.tsv` |
+| AMD EPYC 9V74 (Zen 4) | Linux 6.18, KVM guest | byte-identical `summary.tsv` |
+| AMD Ryzen 9 9900X (Zen 5) | Linux 6.8, bare metal | byte-identical `summary.tsv` and `layout.tsv` |
+
+The table is the same on all four processors (`summary.tsv` SHA-256 `e7e0765ef61a7efe…`).
 
 In all 266,000 executions of a *future* instruction the new bytes ran, serialized or not. In all 84,000 stores into
 the tail of the *current* instruction the instruction completed with its original decoding. In all 2,000 stores
@@ -30,6 +34,6 @@ sh run.sh out      # needs cc, gzip, sha256sum, timeout; no privileges, no netwo
 ```
 
 The workflow `stand-code-store-linux-x86.yml` runs the probe on GitHub's Linux runners and uploads the tables together
-with the processor identification, so results from Intel processors can be added when a runner has one.
+with the processor identification; the Intel and Zen 3 rows above come from it.
 
 The probe is MIT-licensed original code (see the SPDX header in `probe.c`).
