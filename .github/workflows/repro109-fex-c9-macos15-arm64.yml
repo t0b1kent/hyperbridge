@@ -51,6 +51,14 @@ jobs:
           [ "$selected" = 1 ] || { printf 'Pinned Xcode 16.4/16F6 missing\n'; exit 1; }
       - name: Check inputs without downloads
         run: python3 -I -B build/repro109fex/build.py --check-inputs
+      - name: Verify named PE path canonicalization guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          export REPRO109_TEST_TMP="$RUNNER_TEMP/repro109-pe-path-guard"
+          mkdir "$REPRO109_TEST_TMP"
+          python3 -I -B build/repro109fex/test_release_bytes.py
+          python3 -I -B -O build/repro109fex/test_release_bytes.py
       - name: Build unsigned source components
         shell: bash
         env:
@@ -69,6 +77,14 @@ jobs:
           printf '%s\n' "$build_rc" > "$RUNNER_TEMP/repro109-fex-c9-rc.txt"
           printf 'FEX build rc=%s; full logs are in the artifact; install skipped\n' "$build_rc"
           exit "$build_rc"
+      - name: Verify release DLL SHA256 after llvm-mingw path canonicalization
+        shell: bash
+        env:
+          REPRO109_ONLY: ${{ inputs.only }}
+        run: |
+          set -euo pipefail
+          python3 -I -B build/repro109fex/release_bytes.py \
+            --verify "$RUNNER_TEMP/repro109-fex-c9" --only "$REPRO109_ONLY"
       - name: Preserve complete bounded component reports and unsigned outputs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

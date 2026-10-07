@@ -17,6 +17,7 @@ sys.path.insert(0, str(HERE / 'support'))
 import build_fex64 as fex
 import native_stand
 import candidate_source as source
+import release_bytes
 
 
 def inputs():
@@ -79,10 +80,14 @@ def archive(out, variants):
                         continue
                     members[path.relative_to(out).as_posix()] = path
         for name in ['outputs.json', 'license-inputs.json', 'license-source-inputs.json',
-                     'product-postimages.json', 'source-verification.json', 'PATCH-ORDER.json']:
+                     'product-postimages.json', 'source-verification.json', 'PATCH-ORDER.json',
+                     'pe-path-canonicalization.json', 'outputs.before-pe-paths.json']:
             path = out / variant / name
             if path.is_file():
                 members[path.relative_to(out).as_posix()] = path
+        for path in (out / variant / 'pe-path-preimages').glob('*.before'):
+            source.require(path.is_file() and not path.is_symlink(), 'Foreign PE preimage')
+            members[path.relative_to(out).as_posix()] = path
     source.require(any(n.endswith('.dll') for n in members), 'No component DLL outputs')
     members['ENGINE-environment.json'] = out / 'ENGINE-environment.json'
     target = out / 'fex-c9-unsigned.tar'
@@ -157,13 +162,16 @@ def build(out, variants, stage='full', from_outputs=None):
             if stage != 'full':
                 result['variants'][variant] = stage_result
                 continue
+            canonical = release_bytes.canonicalize_outputs(target, variant)
             outputs = json.loads((target / 'outputs.json').read_bytes())
             source.require(outputs['ec_modules'] == (2 if variant == 'fex64' else 0) and
                            outputs['unique_ec_binaries'] == (1 if variant == 'fex64' else 0),
                            'ARM64EC output count differs')
             result['variants'][variant] = dict(status='BUILT_SOURCE_ONLY', files=len(outputs['files']),
-                                               ec_modules=outputs['ec_modules'],
-                                               unique_ec_binaries=outputs['unique_ec_binaries'])
+                                                ec_modules=outputs['ec_modules'],
+                                                unique_ec_binaries=outputs['unique_ec_binaries'],
+                                                release_dll_sha256=canonical['expected_sha256'],
+                                                release_bytes=canonical['status'])
         if stage == 'full':
             result['archive'] = archive(out, variants)
             result['status'] = 'BUILT_SOURCE_ONLY_NOT_ACCEPTED'
