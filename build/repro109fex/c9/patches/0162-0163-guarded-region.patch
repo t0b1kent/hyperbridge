@@ -1,0 +1,1395 @@
+diff --git a/FEXCore/Source/Interface/Core/CodeCache.cpp b/FEXCore/Source/Interface/Core/CodeCache.cpp
+--- a/FEXCore/Source/Interface/Core/CodeCache.cpp
++++ b/FEXCore/Source/Interface/Core/CodeCache.cpp
+@@ -13,6 +13,8 @@
+ #include <Interface/Core/JIT/Relocations.h>
+ #include <Interface/Core/LookupCache.h>
+ #include <Interface/Core/OpcodeDispatcher.h>
++#include <Interface/Core/HBX87IR.h>
++#include <Interface/Core/HBX87Stats.h>
+ #include <Interface/IR/PassManager.h>
+ 
+ #include <FEXCore/Core/Thunks.h>
+@@ -300,6 +302,21 @@ struct CodeCacheHeader {
+   static constexpr std::array<char, 4> ExpectedMagic = {'F', 'X', 'C', 'C'};
+ };
+ 
++static std::array<uint8_t,20> CurrentCacheVersion() {
++  std::array<uint8_t,20> Version;
++  static_assert(GIT_HASH.size()==Version.size());
++  std::ranges::copy(GIT_HASH,Version.begin());
++  if(FEXCore::HBX87::InlineRegionEnabled()) {
++    // Also rejects this cache in older readers sharing the release override hash.
++    constexpr uint8_t RegionRevision[8]={'X','8','7','R','0','0','0','3'};
++    for(unsigned i=0;i<8;++i) Version[12+i]^=RegionRevision[i];
++    if(FEXCore::HBX87::Stats::Enabled()) Version[11]^=0x53;
++    const char* Phase=std::getenv("MACRUNNER_HB_X87_REGION_FAULT_PHASE");
++    if(Phase && Phase[0]>='1' && Phase[0]<='7' && !Phase[1]) Version[10]^=Phase[0];
++  }
++  return Version;
++}
++
+ template<typename T>
+ concept OrderedContainer = requires { typename T::key_compare; };
+ 
+@@ -311,7 +328,7 @@ bool CodeCache::SaveData(Core::InternalThreadState& Thread, int fd, const Execut
+   // Write file header
+   CodeCacheHeader header {};
+   static_assert(GIT_HASH.size() == sizeof(header.FEXVersion));
+-  std::ranges::copy(GIT_HASH, header.FEXVersion);
++  std::ranges::copy(CurrentCacheVersion(), header.FEXVersion);
+   header.NumBlocks = LookupCache.BlockList.size();
+   header.NumCodePages = LookupCache.CodePages.size();
+   header.CodeBufferSize = FEXCore::AlignUp(CTX.LatestOffset, Utils::FEX_PAGE_SIZE);
+@@ -575,9 +592,10 @@ CodeCache::LoadCache(std::span<std::byte> CacheFile, const ExecutableFileInfo& F
+     return nullptr;
+   }
+ 
+-  if (!std::ranges::equal(header.FEXVersion, GIT_HASH)) {
++  const auto ExpectedVersion=CurrentCacheVersion();
++  if (!std::ranges::equal(header.FEXVersion, ExpectedVersion)) {
+     LogMan::Msg::IFmt("Cache generated from old FEX version {:02x}, current is {:02x}; skipping", fmt::join(header.FEXVersion, ""),
+-                      fmt::join(GIT_HASH, ""));
++                       fmt::join(ExpectedVersion, ""));
+     return nullptr;
+   }
+ 
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -20,6 +20,7 @@ $end_info$
+ #include "Interface/Core/OpcodeDispatcher.h"
+ #include "Interface/Core/HBX87CoverageIR.h"
+ #include "Interface/Core/HBX87IR.h"
++#include "Interface/Core/HBX87Stats.h"
+ #include "Interface/Core/JIT/JITClass.h"
+ #include "Interface/Core/Dispatcher/Dispatcher.h"
+ #include "Interface/Core/X86Tables/X86Tables.h"
+@@ -38,6 +39,7 @@ $end_info$
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Core/Context.h>
+ #include <FEXCore/Core/CoreState.h>
++#include <FEXCore/Core/X87Region.h>
+ #include <FEXCore/Core/SignalDelegator.h>
+ #include <FEXCore/Core/Thunks.h>
+ #include <FEXCore/Core/X86Enums.h>
+@@ -452,6 +454,215 @@ int MacRunnerWritableValidationMode() {
+   return MRWritableValidationMode();
+ }
+ 
++namespace FEXCore::Core::X87Region {
++bool Guard(const CpuStateFrame* Frame, const GuardRequest* Request, GuardValues* Values) noexcept {
++  struct EntryCounter {
++    bool Active {FEXCore::HBX87::Stats::Enabled()};
++    unsigned Outcome {FEXCore::HBX87::Stats::RegionReject};
++    ~EntryCounter() {
++      if(Active) std::atomic_ref<uint64_t>(FEXCore::HBX87::Stats::Values[Outcome]).fetch_add(1,std::memory_order_relaxed);
++    }
++  } Counter;
++  if (!Frame || !Request || !Values || !Request->Iterations || Request->SourceA >= 8 ||
++      Request->SourceB >= 8 || Request->Destination >= 8 || Request->Op > Arithmetic::Sqrt ||
++      (Request->FPCR & 0x03c09f03U)) return false;
++  const auto& State = Frame->State;
++  const uint16_t CW = State.FCW & 0x0f3f;
++  if ((CW != 0x023f && CW != 0x003f) || State.flags[X86State::X87FLAG_C1_LOC] ||
++      (State.flags[X86State::RFLAG_TF_RAW_LOC] & 1U) || State.flags[X86State::X87FLAG_TOP_LOC] >= 8) return false;
++  const unsigned P = CW == 0x023f ? 53 : 24;
++  const unsigned Bias = P == 53 ? 1023 : 127;
++  const int MinExponent = 1 - int(Bias), MaxExponent = int(Bias);
++  struct Input {uint64_t Bits, Magnitude; int Exponent; bool Zero, Power, Integer;};
++  auto Decode = [&](unsigned Slot, Input& Out) {
++    const unsigned Physical = (State.flags[X86State::X87FLAG_TOP_LOC] + Slot) & 7;
++    if (!(State.AbridgedFTW & (1U << Physical))) return false;
++    const auto Sig = State.mm[Physical][0], SE = State.mm[Physical][1];
++    if (SE > 0xffffU) return false;
++    const auto Exponent = unsigned(SE & 0x7fffU);
++    const uint64_t Sign = (SE >> 15) << (P == 53 ? 63 : 31);
++    if (!Exponent && !Sig) {Out = {Sign,0,0,true,false,true}; return true;}
++    if (!Exponent || Exponent == 0x7fff || !(Sig >> 63) || (Sig & ((uint64_t {1} << (64-P))-1))) return false;
++    const int E = int(Exponent) - 16383;
++    if (E < MinExponent || E > MaxExponent) return false;
++    Out = {Sign | (uint64_t(E+int(Bias)) << (P-1)) | ((Sig >> (64-P)) & ((uint64_t {1} << (P-1))-1)),
++           0,E,false,Sig == (uint64_t {1} << 63),false};
++    if (E >= 0 && E <= int(P) && !(Sig & ((uint64_t {1} << (63-E))-1))) {
++      Out.Integer = true; Out.Magnitude = Sig >> (63-E);
++    }
++    return true;
++  };
++  Input A {}, B {};
++  if (!Decode(Request->SourceA,A)) return false;
++  if (Request->Op == Arithmetic::Sqrt) B = A;
++  else if (!Decode(Request->SourceB,B)) return false;
++  const bool Alias = Request->SourceA == Request->SourceB;
++  const bool DestA = Request->Destination == Request->SourceA;
++  if (!DestA && Request->Destination != Request->SourceB) return false;
++  const auto& D = DestA ? A : B;
++  const auto& C = DestA ? B : A;
++  const uint64_t N = Request->Iterations, Limit = uint64_t {1} << P;
++  auto ScaleSafe = [&](int Start, int Step) {
++    const int64_t Last = int64_t(Start) + int64_t(Step) * int64_t(N);
++    return Last >= MinExponent && Last <= MaxExponent;
++  };
++  bool Safe {};
++  switch (Request->Op) {
++  case Arithmetic::Add:
++  case Arithmetic::Sub:
++    if (Alias && Request->Op == Arithmetic::Sub) Safe = true;
++    else if (Alias) Safe = D.Zero || ScaleSafe(D.Exponent,1);
++    else if (A.Integer && B.Integer) {
++      // Conservative absolute bound also covers C-D, which alternates two values.
++      Safe = D.Magnitude <= Limit && C.Magnitude <= Limit &&
++          __uint128_t(D.Magnitude) + __uint128_t(C.Magnitude) * N <= Limit;
++    }
++    break;
++  case Arithmetic::Mul:
++    if (Alias) {
++      // Squaring +/-1 or zero is stable; other power-of-two exponents double.
++      if (D.Zero || (D.Power && !D.Exponent)) Safe = true;
++      else if (D.Power && N < 32) {
++        const int64_t Last = int64_t(D.Exponent) * (int64_t {1} << N);
++        Safe = Last >= MinExponent && Last <= MaxExponent;
++      }
++    } else Safe = D.Zero || C.Zero || (C.Power && ScaleSafe(D.Exponent,C.Exponent));
++    break;
++  case Arithmetic::Div:
++    if (Alias) Safe = !D.Zero;
++    else if (DestA) Safe = !C.Zero && (D.Zero || (C.Power && ScaleSafe(D.Exponent,-C.Exponent)));
++    else if (!D.Zero && C.Power && D.Power) {
++      // C / D alternates E and EC-E. Both significands stay exactly one.
++      const int Other = C.Exponent-D.Exponent;
++      Safe = Other >= MinExponent && Other <= MaxExponent;
++    } else if (!DestA && N == 1 && C.Zero && !D.Zero) Safe = true;
++    break;
++  case Arithmetic::Sqrt:
++    if (!DestA) return false;
++    Safe = A.Zero || (!(A.Bits >> (P == 53 ? 63 : 31)) && A.Power &&
++        (!A.Exponent || (N < 32 && int64_t(A.Exponent) % (int64_t {1} << N) == 0)));
++    break;
++  }
++  if (!Safe) return false;
++  *Values = {A.Bits,B.Bits,P == 53 ? Format::Binary53 : Format::Binary24};
++  Counter.Outcome=P==53?FEXCore::HBX87::Stats::RegionEntry53:FEXCore::HBX87::Stats::RegionEntry24;
++  return true;
++}
++
++Recovery Materialize(CpuStateFrame* Frame, uint64_t HostPC, const uint64_t* HostGPRs,
++                     const __uint128_t* HostQ) noexcept {
++  const Recovery Failed {Status::Failed};
++  if (!Frame || !Frame->State.InlineJITBlockHeader) return {};
++  const uint64_t Begin = Frame->State.InlineJITBlockHeader;
++  const auto* BlockHeader = reinterpret_cast<const CPU::CPUBackend::JITCodeHeader*>(Begin);
++  const uint64_t TailOffset = BlockHeader->OffsetToBlockTail;
++  if (TailOffset < sizeof(*BlockHeader) || Begin + TailOffset < Begin) return Failed;
++  if (HostPC < Begin || HostPC >= Begin + TailOffset) return {};
++  const auto* Tail = reinterpret_cast<const CPU::CPUBackend::JITCodeTail*>(Begin + TailOffset);
++  if (!Tail->_Pad[0]) return {};
++  if (Tail->_Pad[0] != TailMarker || Tail->_Pad[1] != Version || Tail->_Pad[2]) return Failed;
++  if (Tail->Size < TailOffset + sizeof(*Tail) || Tail->Size > (uint64_t {1} << 32) || Begin + Tail->Size < Begin) return Failed;
++  if (!Tail->GuestSize || Tail->RIP + Tail->GuestSize < Tail->RIP) return Failed;
++  const uint64_t End = Begin + Tail->Size;
++  if (Tail->OffsetToRIPEntries < sizeof(*Tail) || Tail->OffsetToRIPEntries > End - (Begin + TailOffset)) return Failed;
++  uint64_t Cursor = Begin + TailOffset + Tail->OffsetToRIPEntries;
++  // Decode from a bounded local copy: the legacy decoder may read 17 bytes.
++  // There is no allocation or initialization on this recovery path.
++  if (Tail->NumberOfRIPEntries > End - Cursor) return Failed;
++  for (uint32_t i = 0; i < Tail->NumberOfRIPEntries; ++i) {
++    alignas(8) uint8_t Encoded[32] {};
++    const size_t Available = std::min<uint64_t>(sizeof(Encoded), End - Cursor);
++    memcpy(Encoded, reinterpret_cast<const void*>(Cursor), Available);
++    const auto Entry = FEXCore::Utils::vl64pair::Decode(Encoded);
++    if (!Entry.Size || Entry.Size > Available) return Failed;
++    Cursor += Entry.Size;
++  }
++  if (Cursor > UINT64_MAX - (alignof(Recipe) - 1)) return Failed;
++  Cursor = (Cursor + alignof(Recipe) - 1) & ~(uint64_t(alignof(Recipe)) - 1);
++  if (Cursor > End || sizeof(Header) > End - Cursor) return Failed;
++  Header Extension;
++  memcpy(&Extension, reinterpret_cast<const void*>(Cursor), sizeof(Extension));
++  if (Extension.MagicValue != Magic || Extension.VersionValue != Version || Extension.RecordBytes != sizeof(Recipe) ||
++      !Extension.Count || Extension.Count > MaxRecipes ||
++      Extension.Bytes != sizeof(Header) + Extension.Count * sizeof(Recipe) || Extension.Bytes > End - Cursor) return Failed;
++  Cursor += sizeof(Header);
++  Recipe Selected {};
++  bool Found {};
++  uint32_t PreviousEnd {};
++  const uint64_t Offset = HostPC - Begin;
++  for (uint32_t i = 0; i < Extension.Count; ++i, Cursor += sizeof(Recipe)) {
++    Recipe Entry;
++    memcpy(&Entry, reinterpret_cast<const void*>(Cursor), sizeof(Entry));
++    if (Entry.HostBegin < sizeof(*BlockHeader) || Entry.HostBegin < PreviousEnd || Entry.HostEnd <= Entry.HostBegin ||
++        Entry.HostEnd > TailOffset || Entry.GuestRIP < Tail->RIP || Entry.GuestRIP >= Tail->RIP + Tail->GuestSize ||
++        Entry.Reserved || !Entry.LogicalSlotMask ||
++        (Entry.Precision != Format::Binary53 && Entry.Precision != Format::Binary24) ||
++        (Entry.Controls & ~(CompleteDec32 | CounterCommitted | KeepEntryFlagsIfInitial)) ||
++        ((Entry.Controls & CounterCommitted) && !(Entry.Controls & CompleteDec32)) ||
++        ((Entry.Controls & KeepEntryFlagsIfInitial) &&
++          ((Entry.Controls & (CompleteDec32|CounterCommitted))!=(CompleteDec32|CounterCommitted) || Entry.InitialCounterHost>=31))) return Failed;
++    PreviousEnd = Entry.HostEnd;
++    for (unsigned Slot = 0; Slot < 8; ++Slot) {
++      if ((Entry.LogicalSlotMask & (1U << Slot)) && Entry.HostQForSlot[Slot] >= 32) return Failed;
++    }
++    if ((Entry.Controls & CompleteDec32) &&
++        (Entry.CounterGuest >= 16 || Entry.CounterHost >= 31 || Entry.CarryHost >= 31)) return Failed;
++    if (Offset >= Entry.HostBegin && Offset < Entry.HostEnd) {
++      Selected = Entry;
++      Found = true;
++    }
++  }
++  if (!Found) return {};
++  if (!HostQ) return Failed;
++  const uint16_t RequiredCW = Selected.Precision == Format::Binary53 ? 0x023f : 0x003f;
++  if ((Frame->State.FCW & 0x0f3f) != RequiredCW) return Failed;
++  const unsigned Top = Frame->State.flags[X86State::X87FLAG_TOP_LOC];
++  if (Top >= 8) return Failed;
++  Raw80 Values[8] {};
++  for (unsigned Slot = 0; Slot < 8; ++Slot) {
++    if (!(Selected.LogicalSlotMask & (1U << Slot))) continue;
++    if (!(Frame->State.AbridgedFTW & (1U << ((Top + Slot) & 7)))) return Failed;
++    if (!Widen(static_cast<uint64_t>(HostQ[Selected.HostQForSlot[Slot]]), Selected.Precision, Values[Slot])) return Failed;
++  }
++  uint32_t Before {}, After {}, CF {}, Flags {};
++  bool RepairDec=Selected.Controls & CompleteDec32;
++  if(Selected.Controls & KeepEntryFlagsIfInitial) {
++    if(!HostGPRs || HostGPRs[Selected.InitialCounterHost]>UINT32_MAX || !HostGPRs[Selected.InitialCounterHost] ||
++        uint32_t(HostGPRs[Selected.CounterHost])>HostGPRs[Selected.InitialCounterHost]) return Failed;
++    RepairDec=uint32_t(HostGPRs[Selected.CounterHost])!=HostGPRs[Selected.InitialCounterHost];
++  }
++  if (RepairDec) {
++    if (!HostGPRs || HostGPRs[Selected.CarryHost] > 1) return Failed;
++    const uint32_t Counter = HostGPRs[Selected.CounterHost];
++    Before = (Selected.Controls & CounterCommitted) ? Counter + 1 : Counter;
++    After = Before - 1;
++    CF = HostGPRs[Selected.CarryHost] ^ 1U;
++    Flags = CF | ((std::popcount(After & 0xffU) % 2 == 0) << 2) |
++            (((Before ^ After) & 0x10U) ? 0x10U : 0U) | ((After == 0) << 6) |
++            ((After >> 31) << 7) | ((Before == 0x80000000U) << 11);
++  }
++  // Commit only after every extent, slot, value, and counter has been checked.
++  for (unsigned Slot = 0; Slot < 8; ++Slot) {
++    if (!(Selected.LogicalSlotMask & (1U << Slot))) continue;
++    Frame->State.mm[(Top + Slot) & 7][0] = Values[Slot].Significand;
++    Frame->State.mm[(Top + Slot) & 7][1] = Values[Slot].SignExponent;
++  }
++  if (RepairDec) {
++    Frame->State.gregs[Selected.CounterGuest] = After;
++    Frame->State.pf_raw = After;
++    Frame->State.af_raw = Before;
++    using Builder = FEXCore::IR::OpDispatchBuilder;
++    const uint32_t NZCV = ((After >> 31) << Builder::IndexNZCV(X86State::RFLAG_SF_RAW_LOC)) |
++                          (uint32_t(After == 0) << Builder::IndexNZCV(X86State::RFLAG_ZF_RAW_LOC)) |
++                          ((CF ^ 1U) << Builder::IndexNZCV(X86State::RFLAG_CF_RAW_LOC)) |
++                          (uint32_t(Before == 0x80000000U) << Builder::IndexNZCV(X86State::RFLAG_OF_RAW_LOC));
++    memcpy(&Frame->State.flags[X86State::RFLAG_NZCV_LOC], &NZCV, sizeof(NZCV));
++  }
++  Frame->State.rip = Selected.GuestRIP;
++  return {Status::Present, Selected.GuestRIP, RepairDec ? 0x8d5U : 0U, Flags, true};
++}
++}
++
+ namespace FEXCore::Context {
+ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
+   : HostFeatures {Features}
+@@ -985,6 +1196,14 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+       Thread->OpDispatcher->StartNewBlock();
+ 
+       const uint64_t InstsInBlock = Block.NumInstructions;
++      bool X87RecoveryBoundaries {};
++      if (FEXCore::HBX87::InlineRegionEnabled()) {
++        const auto FirstX87 = reinterpret_cast<uintptr_t>(X86Tables::X87F80Ops.data());
++        for (size_t i = 0; i < InstsInBlock; ++i) {
++          const auto Table = reinterpret_cast<uintptr_t>(Block.DecodedInstructions[i].TableInfo);
++          X87RecoveryBoundaries |= Table >= FirstX87 && Table < FirstX87 + sizeof(X86Tables::X87F80Ops);
++        }
++      }
+       if (InstsInBlock == 0) {
+         // Special case for an empty instruction block.
+         Thread->OpDispatcher->ExitFunction(Thread->OpDispatcher->_InlineEntrypointOffset(GPRSize, Block.Entry - GuestRIP));
+@@ -1028,7 +1247,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+         const bool FaultBoundary = Thread->OpDispatcher->CanHaveSideEffects(TableInfo, DecodedInfo);
+         Thread->OpDispatcher->FlushRegisterCache(true, false, FaultBoundary);
+ 
+-        if (ExtendedDebugInfo || FaultBoundary) {
++        if (ExtendedDebugInfo || FaultBoundary || X87RecoveryBoundaries) {
+           Thread->OpDispatcher->_GuestOpcode(InstAddress - GuestRIP);
+         }
+ 
+diff --git a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+--- a/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
++++ b/FEXCore/Source/Interface/Core/HBX87EarlyEmit.inl
+@@ -1,15 +1,22 @@
+ // SPDX-License-Identifier: MIT
+ // Modifications (c) 2026 MacRunner contributors, MIT
+ // Included AFTER the existing HBCount lambda, before old HBX87Fast dispatch.
+-// FEX integration NOT BUILT. Same numeric acceptance as the accepted guard.
++// Legacy FAST uses the accepted guard; 0162 admits only pre-certified exact FP.
+ if(IROp->Op==IR::OP_HBX87FASTCW) {
+  const auto Op=IROp->C<IR::IROp_HBX87FastCW>();
+  const auto A=GetVReg(Op->X80Src1),D=GetVReg(Op->X80Src2),Dst=GetVReg(Node);
+  const auto CW=GetReg(Op->ControlWord);
+- const auto kind=static_cast<FEXCore::HBX87::Kind>(Op->Kind);
++ const bool InlineExact=(Op->Kind&FEXCore::HBX87::InlineExactKindBit)!=0;
++ const auto kind=static_cast<FEXCore::HBX87::Kind>(Op->Kind&~FEXCore::HBX87::InlineExactKindBit);
+  LOGMAN_THROW_A_FMT(kind<=FEXCore::HBX87::Sqrt,"Invalid HB x87 opcode");
+  ForwardLabel PreSlow,FPCRSlow,RangeSlow,Path53,Path24,Done;
+  ForwardLabel PC64Slow,RCSlow,UnmaskedSlow,ReservedSlow,Disabled24Slow;
++ // Exact operations preserve sticky FSW, and C1 must already be clear.
++ // This precursor never speculates a rounding/exception-producing FP op.
++ if(InlineExact) {
++   ldrb(TMP1,STATE,offsetof(FEXCore::Core::CPUState,flags)+FEXCore::X86State::X87FLAG_C1_LOC);
++   (void)cbnz(Size::i64Bit,TMP1,&PreSlow);
++ }
+  // PC64 is rejected before ANY operand extraction/classification.
+  and_(Size::i64Bit,TMP1,CW,0x300);
+  eor(Size::i64Bit,TMP1,TMP1,0x300);
+@@ -24,13 +31,13 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+    and_(Size::i64Bit,TMP1,CW,0x300);
+    sub(Size::i64Bit,TMP2,TMP1,0x100);
+    (void)cbz(Size::i64Bit,TMP2,&ReservedSlow);
+-   if(!FEXCore::HBX87::PC24()) (void)cbz(Size::i64Bit,TMP1,&Disabled24Slow);
++   if(!InlineExact&&!FEXCore::HBX87::PC24()) (void)cbz(Size::i64Bit,TMP1,&Disabled24Slow);
+  }
+  LoadConstant(Size::i64Bit,TMP2,0x0f3f);
+  and_(Size::i64Bit,TMP1,CW,TMP2);
+  sub(Size::i64Bit,TMP2,TMP1,0x023f);
+  (void)cbz(Size::i64Bit,TMP2,&Path53);
+- if(FEXCore::HBX87::PC24()) {
++ if(InlineExact||FEXCore::HBX87::PC24()) {
+    sub(Size::i64Bit,TMP2,TMP1,0x003f);
+    (void)cbz(Size::i64Bit,TMP2,&Path24);
+  }
+@@ -72,9 +79,93 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+      (void)Bind(&DomainOK);
+    }
+    mrs(TMP1,SystemRegister::FPCR);
+-   LoadConstant(Size::i64Bit,TMP2,UINT64_C(0x00c09f03));
++   LoadConstant(Size::i64Bit,TMP2,InlineExact?UINT64_C(0x03c09f03):UINT64_C(0x00c09f03));
+    and_(Size::i64Bit,TMP1,TMP1,TMP2);
+    (void)cbnz(Size::i64Bit,TMP1,&FPCRSlow);
++   if(InlineExact) {
++     // Certify before floating-point execution: accepted instructions are
++     // exact, normal (or signed zero), and cannot alter any FPSR bit.
++     // All tests avoid NZCV: DEC/branch guest flags remain authoritative.
++     ForwardLabel ExactReady;
++     if(kind==FEXCore::HBX87::Add||kind==FEXCore::HBX87::Sub) {
++       auto IntegerMagnitude=[&](auto Src) {
++         ForwardLabel Zero,Finish;
++         umov<SubRegSize::i64Bit>(TMP2,Src,0);
++         umov<SubRegSize::i64Bit>(TMP3,Src,1);
++         and_(Size::i64Bit,TMP3,TMP3,0x7fff);
++         (void)cbz(Size::i64Bit,TMP3,&Zero);
++         LoadConstant(Size::i64Bit,TMP4,16383);
++         sub(Size::i64Bit,TMP3,TMP3,TMP4);
++         (void)tbnz(TMP3,63,&PreSlow);
++         sub(Size::i64Bit,TMP4,TMP3,isDouble?53:24);
++         (void)tbz(TMP4,63,&PreSlow);
++         LoadConstant(Size::i64Bit,TMP4,63);
++         sub(Size::i64Bit,TMP4,TMP4,TMP3);
++         lsrv(Size::i64Bit,TMP1,TMP2,TMP4);
++         lslv(Size::i64Bit,TMP3,TMP1,TMP4);
++         eor(Size::i64Bit,TMP3,TMP3,TMP2);
++         (void)cbnz(Size::i64Bit,TMP3,&PreSlow);
++         (void)b(&Finish);
++         (void)Bind(&Zero);
++         LoadConstant(Size::i64Bit,TMP1,0);
++         (void)Bind(&Finish);
++       };
++       IntegerMagnitude(A);
++       fmov(Size::i64Bit,VTMP1.D(),TMP1);
++       IntegerMagnitude(D);
++       fmov(Size::i64Bit,TMP2,VTMP1.D());
++       add(Size::i64Bit,TMP1,TMP1,TMP2);
++       LoadConstant(Size::i64Bit,TMP4,UINT64_C(1)<<(isDouble?53:24));
++       sub(Size::i64Bit,TMP3,TMP4,TMP1);
++       (void)tbnz(TMP3,63,&PreSlow);
++       // |a|+|b|<=2^p bounds either sum or difference independently of signs.
++     } else if(kind==FEXCore::HBX87::Mul||kind==FEXCore::HBX87::Div) {
++       umov<SubRegSize::i64Bit>(TMP2,A,0);
++       (void)cbz(Size::i64Bit,TMP2,&ExactReady);
++       umov<SubRegSize::i64Bit>(TMP3,D,0);
++       if(kind==FEXCore::HBX87::Mul) (void)cbz(Size::i64Bit,TMP3,&ExactReady);
++       LoadConstant(Size::i64Bit,TMP4,UINT64_C(1)<<63);
++       if(kind==FEXCore::HBX87::Mul) {
++         ForwardLabel PowerOfTwo;
++         eor(Size::i64Bit,TMP1,TMP2,TMP4);
++         (void)cbz(Size::i64Bit,TMP1,&PowerOfTwo);
++         eor(Size::i64Bit,TMP1,TMP3,TMP4);
++         (void)cbnz(Size::i64Bit,TMP1,&PreSlow);
++         (void)Bind(&PowerOfTwo);
++       } else {
++         eor(Size::i64Bit,TMP1,TMP3,TMP4);
++         (void)cbnz(Size::i64Bit,TMP1,&PreSlow);
++       }
++       umov<SubRegSize::i64Bit>(TMP2,A,1);
++       umov<SubRegSize::i64Bit>(TMP3,D,1);
++       and_(Size::i64Bit,TMP2,TMP2,0x7fff);
++       and_(Size::i64Bit,TMP3,TMP3,0x7fff);
++       LoadConstant(Size::i64Bit,TMP4,16383);
++       if(kind==FEXCore::HBX87::Mul) {
++         add(Size::i64Bit,TMP2,TMP2,TMP3);
++         sub(Size::i64Bit,TMP2,TMP2,TMP4);
++       } else {
++         sub(Size::i64Bit,TMP2,TMP2,TMP3);
++         add(Size::i64Bit,TMP2,TMP2,TMP4);
++       }
++       LoadConstant(Size::i64Bit,TMP4,isDouble?15362:16258);
++       sub(Size::i64Bit,TMP3,TMP2,TMP4);
++       (void)tbnz(TMP3,63,&PreSlow);
++       LoadConstant(Size::i64Bit,TMP4,isDouble?17406:16510);
++       sub(Size::i64Bit,TMP3,TMP2,TMP4);
++       (void)tbz(TMP3,63,&PreSlow);
++     } else {
++       // sqrt(2^(2k)) and sqrt(+/-0) are exact in either admitted format.
++       umov<SubRegSize::i64Bit>(TMP2,A,0);
++       (void)cbz(Size::i64Bit,TMP2,&ExactReady);
++       LoadConstant(Size::i64Bit,TMP4,UINT64_C(1)<<63);
++       eor(Size::i64Bit,TMP1,TMP2,TMP4);
++       (void)cbnz(Size::i64Bit,TMP1,&PreSlow);
++       umov<SubRegSize::i64Bit>(TMP3,A,1);
++       (void)tbz(TMP3,0,&PreSlow); // bias16383 is odd, actual exponent must be even
++     }
++     (void)Bind(&ExactReady);
++   }
+    auto PackInput=[&](auto Src,auto VDst) {
+      ForwardLabel Zero,Finish;
+      umov<SubRegSize::i64Bit>(TMP3,Src,1);
+@@ -98,7 +189,7 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+    };
+    PackInput(A,VTMP1);
+    if(kind!=FEXCore::HBX87::Sqrt)PackInput(D,VTMP2);
+-   mrs(TMP1,SystemRegister::FPSR);
++   if(!InlineExact) mrs(TMP1,SystemRegister::FPSR);
+    if(isDouble) {
+      switch(kind){
+       case FEXCore::HBX87::Add:fadd(VTMP1.D(),VTMP1.D(),VTMP2.D());break;
+@@ -116,7 +207,7 @@ if(IROp->Op==IR::OP_HBX87FASTCW) {
+       case FEXCore::HBX87::Sqrt:fsqrt(VTMP1.S(),VTMP1.S());break;
+      }
+    }
+-   HBRestoreFPSR(); // restores the ORIGINAL value if changed; NEVER clears blindly
++   if(!InlineExact) HBRestoreFPSR(); // exact-only operations never change FPSR
+    umov<SubRegSize::i64Bit>(TMP2,VTMP1,0);
+    if(!isDouble)uxtw(Size::i64Bit,TMP2,TMP2);
+    ForwardLabel ZeroResult,PackResult;
+diff --git a/FEXCore/Source/Interface/Core/HBX87IR.h b/FEXCore/Source/Interface/Core/HBX87IR.h
+--- a/FEXCore/Source/Interface/Core/HBX87IR.h
++++ b/FEXCore/Source/Interface/Core/HBX87IR.h
+@@ -16,6 +16,17 @@ inline bool Enabled() {
+ #endif
+ }
+ inline bool PC24() { static const bool v=Gate("MACRUNNER_HB_X87_FAST_PC24");return v; }
++// 0162: an exact-only precursor to the register region. It does not enable
++// reduced precision or carry an authoritative cache through a backedge.
++inline bool InlineRegionEnabled() {
++#ifdef VIXL_SIMULATOR
++ return false;
++#else
++ static const bool v=Gate("MACRUNNER_HB_X87_INLINE_REGION");return v;
++#endif
++}
++inline bool ArithmeticEnabled() { return Enabled() || InlineRegionEnabled(); }
++inline constexpr uint8_t InlineExactKindBit = 0x80;
+ inline bool Supports(IR::IROps op) {
+   return op==IR::OP_F80ADD||op==IR::OP_F80SUB||op==IR::OP_F80MUL||op==IR::OP_F80DIV||op==IR::OP_F80SQRT;
+ }
+@@ -33,6 +44,7 @@ IR::Ref Emit(Builder& B,IR::IROps op,IR::Ref a,IR::Ref d) {
+   const auto Q=IR::OpSize::i128Bit, D=IR::OpSize::i64Bit;
+   GuardIR<Builder> g{B};
+   IR::Ref cw=B._LoadContextGPR(IR::OpSize::i16Bit,offsetof(FEXCore::Core::CPUState,FCW));
++  if(InlineRegionEnabled()) return B._HBX87FastCW(a,d,cw,uint8_t(k)|InlineExactKindBit);
+   static const bool early=Gate("MACRUNNER_HB_X87_EARLY_FCW");
+   if(early) return B._HBX87FastCW(a,d,cw,uint8_t(k));
+   IR::Ref as=B._VExtractToGPR(Q,D,a,0),ae=B._VExtractToGPR(Q,D,a,1);
+diff --git a/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+new file mode 100644
+--- /dev/null
++++ b/FEXCore/Source/Interface/Core/HBX87RegionEmit.inl
+@@ -0,0 +1,269 @@
++// SPDX-License-Identifier: MIT
++// One x87 register operation and DEC32/JNZ: qualify semantic IR, never a title.
++// The entry proof certifies every remaining iteration before any native FP.
++auto EmitX87Region = [&](IR::Ref BlockNode, const IR::IROp_CodeBlock* Block) {
++  using namespace FEXCore::Core::X87Region;
++  using Size = ARMEmitter::Size;
++  if (!FEXCore::HBX87::InlineRegionEnabled() || SingleInst || X87Recipes.size()+10>MaxRecipes) return false;
++  const char* FaultSetting=std::getenv("MACRUNNER_HB_X87_REGION_FAULT_PHASE");
++  const unsigned FaultPhase=FaultSetting && FaultSetting[0]>='1' && FaultSetting[0]<='7' && !FaultSetting[1] ? FaultSetting[0]-'0' : 0;
++  struct Expr {enum Type {Unknown,Top,Index,Address,Constant,CS,CW} T {}; uint64_t Value {};};
++  Expr G[32] {};
++  struct FP {bool Known {}; bool Result {}; unsigned Slot {};};
++  FP V[32] {};
++  std::vector<std::pair<IR::Ref,const IR::IROp_Header*>> Ops;
++  size_t MathIndex {};
++  unsigned ASlot {}, BSlot {}, DSlot {}, CounterGuest {};
++  ARMEmitter::Register Counter = ARMEmitter::Reg::r0, DecResult = ARMEmitter::Reg::r0, Carry = ARMEmitter::Reg::r0;
++  const IR::IROp_HBX87FastCW* Math {};
++  const IR::IROp_CondJump* Branch {};
++  uint64_t MathPC {}, DecPC {}, BranchPC {}, CurrentPC=Entry+Block->GuestEntryOffset, FalsePC {};
++  bool HaveMarker {}, HaveDec {}, HaveCarry {}, HaveRMIF {}, HaveAF {}, HavePF {}, HaveCounter {}, HaveStore {};
++  auto Inline = [&](IR::OrderedNodeWrapper W,uint64_t N) {uint64_t C;return IsInlineConstant(W,&C)&&C==N;};
++  auto ExprFor = [&](IR::OrderedNodeWrapper W) {return G[GetReg(W).Idx()];};
++  for (auto [Node,Op] : IR->GetCode(BlockNode)) {
++    Ops.emplace_back(Node,Op);
++    switch(Op->Op) {
++    case IR::OP_BEGINBLOCK:
++    case IR::OP_ENDBLOCK: break;
++    case IR::OP_GUESTOPCODE:
++      CurrentPC=Entry+Op->C<IR::IROp_GuestOpcode>()->GuestEntryOffset; HaveMarker=true; break;
++    case IR::OP_INLINECONSTANT: break;
++    case IR::OP_CONSTANT:
++      if(Math) return false;
++      G[GetReg(Node).Idx()]={Expr::Constant,uint64_t(Op->C<IR::IROp_Constant>()->Constant)}; break;
++    case IR::OP_LOADCONTEXT: {
++      if(Math) return false;
++      const auto L=Op->C<IR::IROp_LoadContext>();
++      if(L->Class!=IR::RegClass::GPR) return false;
++      Expr E;
++      if(L->Offset==offsetof(FEXCore::Core::CPUState,flags)+X86State::X87FLAG_TOP_LOC && Op->Size==IR::OpSize::i8Bit) E.T=Expr::Top;
++      else if(L->Offset==offsetof(FEXCore::Core::CPUState,FCW) && Op->Size==IR::OpSize::i16Bit) E.T=Expr::CW;
++      else if(L->Offset==offsetof(FEXCore::Core::CPUState,cs_idx) && Op->Size==IR::OpSize::i16Bit) E.T=Expr::CS;
++      else return false;
++      G[GetReg(Node).Idx()]=E; break;
++    }
++    case IR::OP_STORECONTEXT: {
++      if(Math) return false;
++      const auto S=Op->C<IR::IROp_StoreContext>(); const auto E=ExprFor(S->Value);
++      if(S->Class!=IR::RegClass::GPR ||
++          !((S->Offset==offsetof(FEXCore::Core::CPUState,X87LastInstruction32.IP) && Op->Size==IR::OpSize::i32Bit && E.T==Expr::Constant && E.Value==CurrentPC) ||
++            (S->Offset==offsetof(FEXCore::Core::CPUState,X87LastInstruction32.CS) && Op->Size==IR::OpSize::i16Bit && E.T==Expr::CS))) return false;
++      break;
++    }
++    case IR::OP_ADD: {
++      if(Math) return false;
++      const auto O=Op->C<IR::IROp_Add>(); const auto E=ExprFor(O->Src1); uint64_t C;
++      if((E.T!=Expr::Top && E.T!=Expr::Index) || !IsInlineConstant(O->Src2,&C) || C>=8) return false;
++      G[GetReg(Node).Idx()]={Expr::Index,(E.Value+C)&7}; break;
++    }
++    case IR::OP_AND: {
++      if(Math) return false;
++      const auto O=Op->C<IR::IROp_And>(); const auto E=ExprFor(O->Src1);
++      if((E.T!=Expr::Top && E.T!=Expr::Index) || !Inline(O->Src2,7)) return false;
++      G[GetReg(Node).Idx()]={Expr::Index,E.Value}; break;
++    }
++    case IR::OP_FORMCONTEXTADDRESS: {
++      if(Math) return false;
++      const auto O=Op->C<IR::IROp_FormContextAddress>(); const auto E=ExprFor(O->Index);
++      if((E.T!=Expr::Top && E.T!=Expr::Index) || O->Stride!=16) return false;
++      G[GetReg(Node).Idx()]={Expr::Address,E.Value}; break;
++    }
++    case IR::OP_LOADMEM: {
++      if(Math) return false;
++      const auto O=Op->C<IR::IROp_LoadMem>(); const auto E=ExprFor(O->Addr);
++      if(E.T!=Expr::Address || O->Class!=IR::RegClass::FPR || Op->Size!=IR::OpSize::i128Bit ||
++          O->OffsetScale!=1 || !Inline(O->Offset,offsetof(FEXCore::Core::CPUState,mm))) return false;
++      V[GetVReg(Node).Idx()]={true,false,unsigned(E.Value)}; break;
++    }
++    case IR::OP_HBX87FASTCW: {
++      if(Math || !HaveMarker) return false;
++      Math=Op->C<IR::IROp_HBX87FastCW>();
++      if(!(Math->Kind&FEXCore::HBX87::InlineExactKindBit) ||
++          (Math->Kind&~FEXCore::HBX87::InlineExactKindBit)>unsigned(Arithmetic::Sqrt) || ExprFor(Math->ControlWord).T!=Expr::CW) return false;
++      const auto A=V[GetVReg(Math->X80Src1).Idx()];
++      const auto B=(Math->Kind&~FEXCore::HBX87::InlineExactKindBit)==unsigned(Arithmetic::Sqrt)?A:V[GetVReg(Math->X80Src2).Idx()];
++      if(!A.Known || A.Result || !B.Known || B.Result) return false;
++      ASlot=A.Slot; BSlot=B.Slot; MathPC=CurrentPC; MathIndex=Ops.size()-1;
++      V[GetVReg(Node).Idx()]={true,true,0}; break;
++    }
++    case IR::OP_NZCVSELECT: {
++      const auto O=Op->C<IR::IROp_NZCVSelect>();
++      if(!Math || HaveCarry || HaveDec || O->Cond!=IR::CondClass::UGE || !Inline(O->TrueVal,1) || !Inline(O->FalseVal,0)) return false;
++      Carry=GetReg(Node);HaveCarry=true;break;
++    }
++    case IR::OP_SUBWITHFLAGS: {
++      const auto O=Op->C<IR::IROp_SubWithFlags>(); const IR::PhysicalRegister R(O->Src1);
++      if(!Math || !HaveCarry || HaveDec || Op->Size!=IR::OpSize::i32Bit || !Inline(O->Src2,1) ||
++          R.AsRegClass()!=IR::RegClass::GPRFixed || R.Reg>=(CTX->Config.Is64BitMode()?16:8) || CurrentPC<=MathPC) return false;
++      Counter=GetReg(O->Src1);CounterGuest=R.Reg;DecResult=GetReg(Node);DecPC=CurrentPC;HaveDec=true;break;
++    }
++    case IR::OP_RMIFNZCV: {
++      const auto O=Op->C<IR::IROp_RmifNZCV>();
++      if(!HaveDec || HaveRMIF || GetReg(O->Src)!=Carry || O->Rotate!=63 || O->Mask!=2) return false;
++      HaveRMIF=true;break;
++    }
++    case IR::OP_STOREAF:
++      if(!HaveDec || HaveAF || HaveCounter || GetReg(Op->C<IR::IROp_StoreAF>()->Value)!=Counter) return false;
++      HaveAF=true;break;
++    case IR::OP_STOREPF:
++      if(!HaveDec || HavePF || GetReg(Op->C<IR::IROp_StorePF>()->Value)!=DecResult) return false;
++      HavePF=true;break;
++    case IR::OP_STOREREGISTER:
++      if(!HaveAF || !HavePF || HaveCounter || GetReg(Op->C<IR::IROp_StoreRegister>()->Value)!=DecResult || GetReg(Node)!=Counter) return false;
++      HaveCounter=true;break;
++    case IR::OP_STOREMEM: {
++      const auto O=Op->C<IR::IROp_StoreMem>();const auto E=ExprFor(O->Addr);const auto F=V[GetVReg(O->Value).Idx()];
++      if(!HaveCounter || HaveStore || E.T!=Expr::Address || !F.Known || !F.Result ||
++          O->Class!=IR::RegClass::FPR || Op->Size!=IR::OpSize::i128Bit || O->OffsetScale!=1 ||
++          !Inline(O->Offset,offsetof(FEXCore::Core::CPUState,mm))) return false;
++      DSlot=E.Value;HaveStore=true;break;
++    }
++    case IR::OP_CONDJUMP:
++      if(!HaveStore || !HaveRMIF || Branch || CurrentPC<=DecPC) return false;
++      Branch=Op->C<IR::IROp_CondJump>();BranchPC=CurrentPC;
++      if(!Branch->FromNZCV || Branch->Cond!=IR::CondClass::NEQ || IR->GetOp<IR::IROp_CodeBlock>(Branch->TrueBlock)->ID!=Block->ID) return false;
++      break;
++    default: return false;
++    }
++  }
++  if(!Branch || (ASlot==BSlot && (Math->Kind&~FEXCore::HBX87::InlineExactKindBit)!=unsigned(Arithmetic::Sqrt)) ||
++      (DSlot!=ASlot && DSlot!=BSlot)) return false;
++  const auto FalseID=IR->GetOp<IR::IROp_CodeBlock>(Branch->FalseBlock)->ID;
++  for(auto [OtherNode,OtherHeader]:IR->GetBlocks()) {
++    const auto Other=OtherHeader->C<IR::IROp_CodeBlock>();
++    if(Other->ID!=FalseID) continue;
++    if(Other->EntryPoint) FalsePC=Entry+Other->GuestEntryOffset;
++    for(auto [Node,Op]:IR->GetCode(OtherNode)) if(Op->Op==IR::OP_GUESTOPCODE) {FalsePC=Entry+Op->C<IR::IROp_GuestOpcode>()->GuestEntryOffset;break;}
++  }
++  if(FalsePC<=BranchPC) return false;
++  // Original bookkeeping (FIP/CS) is emitted once before the entry-only call.
++  for(size_t i=0;i<MathIndex;++i) EmitIR(Ops[i].second,Ops[i].first);
++  ARMEmitter::BiDirectionalLabel Cold;
++  ARMEmitter::ForwardLabel Reject,PC24;
++  sub(Size::i64Bit,ARMEmitter::Reg::rsp,ARMEmitter::Reg::rsp,64);
++  mrs(TMP4,ARMEmitter::SystemRegister::NZCV);
++  str(TMP4,ARMEmitter::Reg::rsp,40);
++  str(Counter.W(),ARMEmitter::Reg::rsp,0);
++  mrs(TMP1,ARMEmitter::SystemRegister::FPCR);str(TMP1.W(),ARMEmitter::Reg::rsp,4);
++  LoadConstant(Size::i32Bit,TMP1,uint32_t(Math->Kind&~FEXCore::HBX87::InlineExactKindBit)|(ASlot<<8)|(BSlot<<16)|(DSlot<<24));
++  str(TMP1.W(),ARMEmitter::Reg::rsp,8);
++  const auto Pushed=PushDynamicRegs(TMP1);
++  SpillStaticRegs(TMP1);
++  mov(Size::i64Bit,ARMEmitter::Reg::r0,STATE);
++  add(Size::i64Bit,ARMEmitter::Reg::r1,ARMEmitter::Reg::rsp,Pushed);
++  add(Size::i64Bit,ARMEmitter::Reg::r2,ARMEmitter::Reg::rsp,Pushed+16);
++  ARMEmitter::BiDirectionalLabel GuardLiteral;
++  ARMEmitter::ForwardLabel CallGuard;
++  ldr(TMP4,&GuardLiteral);(void)b(&CallGuard);
++  Align(8);BindOrRestart(&GuardLiteral);
++  PlaceNamedSymbolLiteral(InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_X87_REGION_GUARD));
++  (void)Bind(&CallGuard);
++  if(!CTX->Config.DisableVixlIndirectCalls) GenerateIndirectRuntimeCall<bool,const FEXCore::Core::CpuStateFrame*,const GuardRequest*,GuardValues*>(TMP4);
++  else blr(TMP4);
++  str(ARMEmitter::XReg::x0,ARMEmitter::Reg::rsp,Pushed+48);
++  FillStaticRegs();PopDynamicRegs();
++  ldr(TMP1,ARMEmitter::Reg::rsp,48);
++  ldr(TMP2,ARMEmitter::Reg::rsp,40);msr(ARMEmitter::SystemRegister::NZCV,TMP2);
++  (void)cbz(Size::i64Bit,TMP1,&Reject);
++  ldr(VTMP1.D(),ARMEmitter::Reg::rsp,16);ldr(VTMP2.D(),ARMEmitter::Reg::rsp,24);
++  ldrb(TMP1,ARMEmitter::Reg::rsp,32);
++  add(Size::i64Bit,ARMEmitter::Reg::rsp,ARMEmitter::Reg::rsp,64);
++  mov(Size::i32Bit,TMP3,Counter); // Initial count survives every hot iteration.
++  cset(Size::i64Bit,TMP4,MapCC(IR::CondClass::UGE));
++  sub(Size::i64Bit,TMP1,TMP1,unsigned(Format::Binary24));
++  (void)cbz(Size::i64Bit,TMP1,&PC24);
++  auto EmitBody=[&](Format Precision) {
++    ARMEmitter::BiDirectionalLabel Hot;
++    BindOrRestart(&Hot);
++    const uint32_t Start=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    auto Fault=[&](unsigned Phase) {if(FaultPhase==Phase) brk(0xcafd);};
++    auto LaterFault=[&](unsigned Phase) {
++      if(FaultPhase!=Phase) return;
++      ARMEmitter::ForwardLabel First;
++      sub(Size::i32Bit,TMP1,TMP3,Counter);
++      (void)cbz(Size::i32Bit,TMP1,&First);brk(0xcafd);(void)Bind(&First);
++    };
++    Fault(1);LaterFault(7);
++    const auto D=DSlot==ASlot?VTMP1:VTMP2;
++    const auto Op=Arithmetic(Math->Kind&~FEXCore::HBX87::InlineExactKindBit);
++    if(Precision==Format::Binary53) {
++      switch(Op) {
++      case Arithmetic::Add: fadd(D.D(),VTMP1.D(),VTMP2.D());break;
++      case Arithmetic::Sub: fsub(D.D(),VTMP1.D(),VTMP2.D());break;
++      case Arithmetic::Mul: fmul(D.D(),VTMP1.D(),VTMP2.D());break;
++      case Arithmetic::Div: fdiv(D.D(),VTMP1.D(),VTMP2.D());break;
++      case Arithmetic::Sqrt: fsqrt(D.D(),VTMP1.D());break;
++      }
++    } else {
++      switch(Op) {
++      case Arithmetic::Add: fadd(D.S(),VTMP1.S(),VTMP2.S());break;
++      case Arithmetic::Sub: fsub(D.S(),VTMP1.S(),VTMP2.S());break;
++      case Arithmetic::Mul: fmul(D.S(),VTMP1.S(),VTMP2.S());break;
++      case Arithmetic::Div: fdiv(D.S(),VTMP1.S(),VTMP2.S());break;
++      case Arithmetic::Sqrt: fsqrt(D.S(),VTMP1.S());break;
++      }
++    }
++    const uint32_t AfterFP=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    Fault(2);LaterFault(6);
++    subs(Size::i32Bit,Counter,Counter,1);
++    const uint32_t AfterDEC=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    Fault(3);
++    EmitSuspendInterruptCheck();
++    b_OrRestart(MapCC(IR::CondClass::NEQ),&Hot);
++    const uint32_t Flush=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    auto AddRecipe=[&](uint32_t Begin,uint32_t End,uint64_t RIP,uint8_t Controls) {
++      Recipe R {};R.HostBegin=Begin;R.HostEnd=End;R.GuestRIP=RIP;R.LogicalSlotMask=1U<<DSlot;R.Precision=Precision;
++      R.HostQForSlot[DSlot]=D.Idx();R.CounterGuest=CounterGuest;R.CounterHost=Counter.Idx();R.CarryHost=TMP4.Idx();R.Controls=Controls;
++      R.InitialCounterHost=TMP3.Idx();
++      X87Recipes.push_back(R);
++    };
++    AddRecipe(Start,AfterFP,MathPC,CompleteDec32|CounterCommitted|KeepEntryFlagsIfInitial);
++    AddRecipe(AfterFP,AfterDEC,DecPC,CompleteDec32|CounterCommitted|KeepEntryFlagsIfInitial);
++    AddRecipe(AfterDEC,Flush,BranchPC,CompleteDec32|CounterCommitted);
++    Fault(4);
++    if(FEXCore::HBX87::Stats::Enabled()) {
++      // Retired only after a completed region, never certified iterations on entry.
++      LOGMAN_THROW_A_FMT(CTX->HostFeatures.SupportsAtomics,"x87 region statistics require LSE");
++      ARMEmitter::BiDirectionalLabel StatsLiteral;
++      ARMEmitter::ForwardLabel HaveStats;
++      ldr(TMP1,&StatsLiteral);(void)b(&HaveStats);Align(8);BindOrRestart(&StatsLiteral);
++      PlaceNamedSymbolLiteral(InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_X87_REGION_STATS));
++      (void)Bind(&HaveStats);ldr(TMP1,TMP1,0);
++      add(Size::i64Bit,TMP1,TMP1,sizeof(uint64_t)*(Precision==Format::Binary53?FEXCore::HBX87::Stats::RegionRetired53:FEXCore::HBX87::Stats::RegionRetired24));
++      ldaddal(ARMEmitter::SubRegSize::i64Bit,TMP3,TMP2,TMP1);
++    }
++    mov(Size::i32Bit,REG_PF,Counter);add(Size::i32Bit,REG_AF,Counter,1);
++    mrs(TMP1,ARMEmitter::SystemRegister::NZCV);bfi(Size::i64Bit,TMP1,TMP4,29,1);msr(ARMEmitter::SystemRegister::NZCV,TMP1);
++    const uint32_t FlagsDone=GetCursorAddress<uint8_t*>()-CodeData.BlockBegin;
++    AddRecipe(Flush,FlagsDone,FalsePC,CompleteDec32|CounterCommitted);
++    Fault(5);
++    const unsigned Fraction=Precision==Format::Binary53?52:23,ExpBits=Precision==Format::Binary53?11:8;
++    fmov(Size::i64Bit,TMP1,D,false);
++    ubfx(Size::i64Bit,TMP2,TMP1,Fraction,ExpBits);
++    lsr(Size::i64Bit,TMP3,TMP1,Fraction+ExpBits);lsl(Size::i64Bit,TMP3,TMP3,15);
++    ARMEmitter::ForwardLabel Zero,Packed;
++    (void)cbz(Size::i64Bit,TMP2,&Zero);
++    LoadConstant(Size::i64Bit,TMP4,Precision==Format::Binary53?15360:16256);
++    add(Size::i64Bit,TMP2,TMP2,TMP4);orr(Size::i64Bit,TMP2,TMP2,TMP3);
++    ubfx(Size::i64Bit,TMP1,TMP1,0,Fraction);orr(Size::i64Bit,TMP1,TMP1,uint64_t{1}<<Fraction);
++    lsl(Size::i64Bit,TMP1,TMP1,63-Fraction);(void)b(&Packed);
++    (void)Bind(&Zero);mov(Size::i64Bit,TMP1,ARMEmitter::Reg::zr);mov(Size::i64Bit,TMP2,TMP3);
++    (void)Bind(&Packed);
++    ldrb(TMP3,STATE,offsetof(FEXCore::Core::CPUState,flags)+X86State::X87FLAG_TOP_LOC);
++    add(Size::i64Bit,TMP3,TMP3,DSlot);and_(Size::i64Bit,TMP3,TMP3,7);lsl(Size::i64Bit,TMP3,TMP3,4);
++    add(Size::i64Bit,TMP4,STATE,offsetof(FEXCore::Core::CPUState,mm));add(Size::i64Bit,TMP4,TMP4,TMP3);
++    stp<ARMEmitter::IndexType::OFFSET>(TMP1,TMP2,TMP4,0);
++    AddRecipe(FlagsDone,GetCursorAddress<uint8_t*>()-CodeData.BlockBegin,FalsePC,0);
++    b_OrRestart(JumpTarget(Branch->FalseBlock));
++  };
++  // Binary alias forms remain on the original path; unary sqrt owns one bank.
++  EmitBody(Format::Binary53);(void)Bind(&PC24);EmitBody(Format::Binary24);
++  (void)Bind(&Reject);add(Size::i64Bit,ARMEmitter::Reg::rsp,ARMEmitter::Reg::rsp,64);
++  BindOrRestart(&Cold);
++  for(const auto& [Node,Op]:Ops) {
++    if(Op->Op==IR::OP_CONDJUMP) {b_OrRestart(MapCC(IR::CondClass::NEQ),&Cold);PendingTargetLabel=JumpTarget(Branch->FalseBlock);}
++    else EmitIR(Op,Node);
++  }
++  return true;
++};
+diff --git a/FEXCore/Source/Interface/Core/HBX87Stats.h b/FEXCore/Source/Interface/Core/HBX87Stats.h
+--- a/FEXCore/Source/Interface/Core/HBX87Stats.h
++++ b/FEXCore/Source/Interface/Core/HBX87Stats.h
+@@ -16,14 +16,16 @@ enum Outcome : unsigned {
+  RejectDisabledPC24, RejectInputDomain, RejectFPCR, RejectRange, LoadHit, LoadReject,
+  Store32Hit, Store64Hit, StorePC64, StoreRC, StoreUnmasked, StorePC,
+  StoreDomain, StoreRange, StoreRounding, Load32Subnormal, Load64Subnormal,
+- LoadCWChanged, LoadCWRemoved, ClearChanged, ClearRemoved, Count
++ LoadCWChanged, LoadCWRemoved, ClearChanged, ClearRemoved,
++ RegionEntry53, RegionEntry24, RegionReject, RegionRetired53, RegionRetired24, Count
+ };
+ inline constexpr const char* Names[Count] = {
+  "arith53", "arith24", "arith_pc64", "arith_rc", "arith_unmasked", "arith_reserved_pc",
+  "arith_pc24_disabled", "arith_domain", "arith_fpcr", "arith_range", "load_hit", "load_reject",
+  "store32_hit", "store64_hit", "store_pc64", "store_rc", "store_unmasked", "store_pc",
+  "store_domain", "store_range", "store_rounding", "load32_subnormal", "load64_subnormal",
+- "fldcw_changed", "fldcw_store_removed", "ie_sf_byte_changed", "ie_sf_byte_store_removed"
++ "fldcw_changed", "fldcw_store_removed", "ie_sf_byte_changed", "ie_sf_byte_store_removed",
++ "region_entry53", "region_entry24", "region_reject", "region_retired53", "region_retired24"
+ };
+ alignas(64) inline uint64_t LocalValues[Count] {};
+ inline uint64_t* Values = LocalValues;
+diff --git a/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp b/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/Arm64Relocations.cpp
+@@ -9,12 +9,18 @@ $end_info$
+ #include "Interface/Core/JIT/JITClass.h"
+ 
+ #include <FEXCore/Core/Thunks.h>
++#include <FEXCore/Core/X87Region.h>
++#include "Interface/Core/HBX87Stats.h"
+ 
+ namespace FEXCore::CPU {
+ uint64_t GetNamedSymbolLiteral(FEXCore::Context::ContextImpl& CTX, FEXCore::CPU::RelocNamedSymbolLiteral::NamedSymbol Op) {
+   switch (Op) {
+   case FEXCore::CPU::RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER:
+     return CTX.Dispatcher->GetExitFunctionLinkerAddress();
++  case FEXCore::CPU::RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_X87_REGION_GUARD:
++    return reinterpret_cast<uintptr_t>(&FEXCore::Core::X87Region::Guard);
++  case FEXCore::CPU::RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_X87_REGION_STATS:
++    return reinterpret_cast<uintptr_t>(&FEXCore::HBX87::Stats::Values);
+ 
+   default: ERROR_AND_DIE_FMT("Unknown named symbol literal: {}", static_cast<uint32_t>(Op));
+   }
+diff --git a/FEXCore/Source/Interface/Core/JIT/Relocations.h b/FEXCore/Source/Interface/Core/JIT/Relocations.h
+--- a/FEXCore/Source/Interface/Core/JIT/Relocations.h
++++ b/FEXCore/Source/Interface/Core/JIT/Relocations.h
+@@ -39,6 +39,8 @@ struct RelocNamedSymbolLiteral final {
+     ///< Thread specific relocations
+     // JIT Literal pointers
+     SYMBOL_LITERAL_EXITFUNCTION_LINKER,
++    SYMBOL_LITERAL_X87_REGION_GUARD,
++    SYMBOL_LITERAL_X87_REGION_STATS,
+   };
+ 
+   RelocationHeader Header {};
+diff --git a/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp b/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
+--- a/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
+@@ -636,7 +636,7 @@ void X87StackOptimization::HandleUnop(IROps Op64, bool VFOp64, IROps Op80) {
+       DeriveOp(Value, Op64, IREmit->_F64SIN(St0));
+     }
+   } else {
+-    if (FEXCore::HBX87::Enabled() && Op80 == IR::OP_F80SQRT) {
++    if (FEXCore::HBX87::ArithmeticEnabled() && Op80 == IR::OP_F80SQRT) {
+       Value = FEXCore::HBX87::Emit(*IREmit, Op80, St0, St0);
+     } else {
+       DeriveOp(Value, Op80, IREmit->_F80SQRT(St0));
+@@ -664,7 +664,7 @@ void X87StackOptimization::HandleBinopValue(IROps Op64, bool VFOp64, IROps Op80,
+       }
+     }
+   } else {
+-    if (FEXCore::HBX87::Enabled() && FEXCore::HBX87::Supports(Op80)) {
++    if (FEXCore::HBX87::ArithmeticEnabled() && FEXCore::HBX87::Supports(Op80)) {
+       Node = FEXCore::HBX87::Emit(*IREmit, Op80,
+         Reverse ? ValueNode : StackNode, Reverse ? StackNode : ValueNode);
+     } else {
+diff --git a/FEXCore/include/FEXCore/Core/X87Region.h b/FEXCore/include/FEXCore/Core/X87Region.h
+new file mode 100644
+--- /dev/null
++++ b/FEXCore/include/FEXCore/Core/X87Region.h
+@@ -0,0 +1,94 @@
++// SPDX-License-Identifier: MIT
++// Modifications (c) 2026 MacRunner contributors, MIT
++#pragma once
++#include <bit>
++#include <cstdint>
++#include <FEXCore/Utils/CompilerDefs.h>
++
++namespace FEXCore::Core {
++struct CpuStateFrame;
++namespace X87Region {
++enum class Format : uint8_t { Binary53 = 1, Binary24 = 2 };
++enum class Status : uint8_t { Empty, Present, Failed };
++inline constexpr uint32_t Magic = 0x52373858; // X87R, immutable JIT-tail extension.
++inline constexpr uint16_t Version = 2;
++inline constexpr uint8_t TailMarker = 0x87;
++inline constexpr uint32_t MaxRecipes = 256;
++enum Control : uint8_t { CompleteDec32 = 1, CounterCommitted = 2, KeepEntryFlagsIfInitial = 4 };
++struct Header {
++  uint32_t MagicValue;
++  uint16_t VersionValue;
++  uint16_t RecordBytes;
++  uint32_t Count;
++  uint32_t Bytes;
++};
++struct Recipe {
++  uint32_t HostBegin;
++  uint32_t HostEnd;
++  uint64_t GuestRIP;
++  uint8_t LogicalSlotMask;
++  Format Precision;
++  uint8_t HostQForSlot[8];
++  uint8_t CounterGuest;
++  uint8_t CounterHost;
++  uint8_t CarryHost; // NZCVSelect(UGE), the inverted guest CF, before DEC.
++  uint8_t Controls;
++  uint8_t InitialCounterHost;
++  uint8_t Reserved;
++};
++static_assert(sizeof(Header) == 16 && sizeof(Recipe) == 32);
++struct Raw80 { uint64_t Significand, SignExponent; };
++enum class Arithmetic : uint8_t { Add, Sub, Mul, Div, Sqrt };
++struct GuardRequest {
++  uint32_t Iterations;
++  uint32_t FPCR;
++  Arithmetic Op;
++  uint8_t SourceA, SourceB, Destination;
++};
++struct GuardValues {
++  uint64_t BitsA, BitsB;
++  Format Precision;
++};
++// Entry-only integer proof for every remaining iteration of a register loop.
++// Failure leaves both canonical state and output unchanged.
++FEX_DEFAULT_VISIBILITY bool Guard(const CpuStateFrame* Frame, const GuardRequest* Request,
++    GuardValues* Values) noexcept;
++struct Recovery {
++  Status State {Status::Empty};
++  uint64_t GuestRIP {};
++  uint32_t EFlagsMask {};
++  uint32_t EFlagsValue {};
++  bool CanonicalResume {};
++};
++
++// Integer-only exact widening, including signed zero and every finite subnormal.
++// No host FP operation, allocation, rounding, logger, or lazy initialization.
++inline bool Widen(uint64_t Bits, Format Precision, Raw80& Out) noexcept {
++  if (Precision != Format::Binary53 && Precision != Format::Binary24) return false;
++  const bool Wide = Precision == Format::Binary53;
++  const unsigned FractionBits = Wide ? 52 : 23;
++  const unsigned ExponentBits = Wide ? 11 : 8;
++  const unsigned Bias = Wide ? 1023 : 127;
++  if (!Wide) Bits &= 0xffffffffULL;
++  const uint64_t Fraction = Bits & ((uint64_t {1} << FractionBits) - 1);
++  const uint64_t Exponent = (Bits >> FractionBits) & ((uint64_t {1} << ExponentBits) - 1);
++  const uint64_t Sign = ((Bits >> (FractionBits + ExponentBits)) & 1) << 15;
++  if (Exponent == ((uint64_t {1} << ExponentBits) - 1)) return false;
++  if (Exponent) {
++    Out = {((uint64_t {1} << FractionBits) | Fraction) << (63 - FractionBits),
++           Sign | (Exponent + 16383 - Bias)};
++  } else if (Fraction) {
++    const unsigned TopBit = 63 - std::countl_zero(Fraction);
++    Out = {Fraction << (63 - TopBit), Sign | uint64_t(16383 + 1 - int(Bias) - int(FractionBits) + int(TopBit))};
++  } else {
++    Out = {0, Sign};
++  }
++  return true;
++}
++
++// Called after ordinary SRA/EFLAGS reconstruction and before exporting context.
++// PRESENT requires resumption through canonical dispatcher state, never HostPC.
++FEX_DEFAULT_VISIBILITY Recovery Materialize(CpuStateFrame* Frame, uint64_t HostPC,
++    const uint64_t* HostGPRs, const __uint128_t* HostQ) noexcept;
++}
++}
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -17,6 +17,7 @@ extern std::atomic<uint64_t> MacRunnerJitSMC; // ★ MacRunner Opus 19.09: оп
+ #include <FEXCore/Core/SignalDelegator.h>
+ #include <FEXCore/Core/Context.h>
+ #include <FEXCore/Core/CoreState.h>
++#include <FEXCore/Core/X87Region.h>
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include <FEXCore/HLE/SyscallHandler.h>
+ #include <FEXCore/Config/Config.h>
+@@ -491,6 +492,16 @@ static void ReconstructThreadState(FEXCore::Core::InternalThreadState* Thread, A
+   // Spill EFlags
+   uint32_t EFlags = CTX->ReconstructCompactedEFLAGS(Thread, true, Context.X, Context.Cpsr);
+   CTX->SetFlagsFromCompactedEFLAGS(Thread, EFlags);
++  static_assert(sizeof(Context.V[0]) == sizeof(__uint128_t));
++  const auto Cached = FEXCore::Core::X87Region::Materialize(Thread->CurrentFrame, Context.Pc, Context.X,
++      reinterpret_cast<const __uint128_t*>(Context.V));
++  if (Cached.State == FEXCore::Core::X87Region::Status::Failed) __fastfail(7); // FAST_FAIL_FATAL_APP_EXIT
++  if (Cached.State == FEXCore::Core::X87Region::Status::Present) {
++    EFlags = (EFlags & ~Cached.EFlagsMask) | Cached.EFlagsValue;
++    CTX->SetFlagsFromCompactedEFLAGS(Thread, EFlags);
++    Context.Pc = Config.AbsoluteLoopTopAddressFillSRA;
++    Context.X11 = 0; // ENTRY_FILL_SRA_SINGLE_INST_REG == TMP2 on ARM64EC.
++  }
+ }
+ 
+ // Reconstructs an x64 context from the input thread's state, packed into a regular ARM64 context following the ARM64EC register mapping
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -25,6 +25,7 @@
+ #include "Utils/variable_length_integer.h"
+ 
+ #include <FEXCore/Core/X86Enums.h>
++#include <FEXCore/Core/X87Region.h>
+ #include <FEXCore/Debug/InternalThreadState.h>
+ #include <FEXCore/Utils/Allocator.h>
+ #include <FEXCore/Utils/CompilerDefs.h>
+@@ -931,6 +932,17 @@
+   PendingTargetLabel = nullptr;
+   PendingCallReturnTargetLabel = nullptr;
+ 
++  std::vector<FEXCore::Core::X87Region::Recipe> X87Recipes;
++  auto EmitIR = [&](const IR::IROp_Header* IROp, IR::Ref CodeNode) {
++    switch (IROp->Op) {
++#define REGISTER_OP(op, x) case FEXCore::IR::IROps::OP_##op: Op_##x(IROp, CodeNode); break
++#define IROP_DISPATCH_DISPATCH
++#include <FEXCore/IR/IRDefines_Dispatch.inc>
++#undef REGISTER_OP
++    default: Op_Unhandled(IROp, CodeNode); break;
++    }
++  };
++#include "Interface/Core/HBX87RegionEmit.inl"
+   for (auto [BlockNode, BlockHeader] : IR->GetBlocks()) {
+     auto BlockIROp = BlockHeader->CW<FEXCore::IR::IROp_CodeBlock>();
+ #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
+@@ -984,14 +996,5 @@
+-    for (auto [CodeNode, IROp] : IR->GetCode(BlockNode)) {
+-      switch (IROp->Op) {
+-#define REGISTER_OP(op, x) \
+-  case FEXCore::IR::IROps::OP_##op: Op_##x(IROp, CodeNode); break
+-
+-#define IROP_DISPATCH_DISPATCH
+-#include <FEXCore/IR/IRDefines_Dispatch.inc>
+-#undef REGISTER_OP
+-
+-      default: Op_Unhandled(IROp, CodeNode); break;
+-      }
++    if (!EmitX87Region(BlockNode, BlockIROp)) {
++      for (auto [CodeNode, IROp] : IR->GetCode(BlockNode)) EmitIR(IROp, CodeNode);
+     }
+ 
+     DebugData->Subblocks.push_back({static_cast<uint32_t>(BlockStartHostCode - CodeData.BlockBegin),
+@@ -1085,6 +1088,28 @@
+   }
+ 
+   SetCursorOffset(JITRIPEntriesLocation - CodeData.BlockBegin);
++  if (!X87Recipes.empty()) {
++    using namespace FEXCore::Core::X87Region;
++    Align(alignof(Recipe));
++    const Header Extension {Magic,Version,sizeof(Recipe),uint32_t(X87Recipes.size()),
++      uint32_t(sizeof(Header)+X87Recipes.size()*sizeof(Recipe))};
++    for (size_t i=0;i<sizeof(Extension);i+=8) {
++      uint64_t Word;
++      memcpy(&Word,reinterpret_cast<const uint8_t*>(&Extension)+i,8);
++      dc64(Word);
++    }
++    for (const auto& Recipe : X87Recipes) for (size_t i=0;i<sizeof(Recipe);i+=8) {
++      if(i==offsetof(FEXCore::Core::X87Region::Recipe,GuestRIP)) {
++        PlaceNamedSymbolLiteral(InsertGuestRIPLiteral(Recipe.GuestRIP));
++        continue;
++      }
++      uint64_t Word;
++      memcpy(&Word,reinterpret_cast<const uint8_t*>(&Recipe)+i,8);
++      dc64(Word);
++    }
++    JITBlockTail._Pad[0]=TailMarker;
++    JITBlockTail._Pad[1]=Version;
++  }
+   Align();
+ 
+   CodeData.Size = GetCursorAddress<uint8_t*>() - CodeData.BlockBegin;
+diff --git a/unittests/Native/X87Region.cpp b/unittests/Native/X87Region.cpp
+new file mode 100644
+--- /dev/null
++++ b/unittests/Native/X87Region.cpp
+@@ -0,0 +1,313 @@
++// SPDX-License-Identifier: MIT
++// Recovery tests use SoftFloat widening and explicit DEC flag edge witnesses.
++#include <FEXCore/Core/CoreState.h>
++#include <FEXCore/Core/X86Enums.h>
++#include <FEXCore/Core/X87Region.h>
++#include <FEXCore/Core/X87Static.h>
++#include "Interface/Core/CPUBackend.h"
++#include "Interface/Core/LookupCache.h"
++#include "Interface/Core/Frontend.h"
++#include "Interface/Core/OpcodeDispatcher.h"
++#include "Interface/IR/PassManager.h"
++#include "Interface/GDBJIT/GDBJIT.h"
++extern "C" {
++#include <SoftFloat-3e/platform.h>
++#include <SoftFloat-3e/softfloat.h>
++}
++#include <array>
++#include <cstdio>
++#include <cstring>
++#include <span>
++static_assert(offsetof(extFloat80_t, signif) == 0 && offsetof(extFloat80_t, signExp) == 8);
++
++using namespace FEXCore::Core;
++using namespace FEXCore::Core::X87Region;
++using Backend = FEXCore::CPU::CPUBackend;
++unsigned Failures {}, WidenCases {}, RecoveryCases {}, NegativeCases {};
++unsigned GuardCases {}, GuardAccepted {}, GuardOperations {}, GuardRejected {};
++void Check(bool Equal, const char* Name) {
++  if (!Equal) { if (Failures < 8) std::fprintf(stderr,"FAILED %s\n",Name); ++Failures; }
++}
++uint64_t Random(uint64_t& State) {
++  State ^= State << 13; State ^= State >> 7; State ^= State << 17; return State;
++}
++void WidenTest(uint64_t Bits, Format Precision) {
++  const bool Wide = Precision == Format::Binary53;
++  const unsigned F = Wide ? 52 : 23, E = Wide ? 11 : 8;
++  const bool Finite = ((Bits >> F) & ((uint64_t {1} << E)-1)) != ((uint64_t {1} << E)-1);
++  Raw80 Out {0x1234,0x5678};
++  const bool Accepted = Widen(Bits,Precision,Out);
++  Check(Accepted == Finite,"finite admission");
++  if (Finite) {
++    softfloat_state State {};
++    const auto Ref = Wide ? f64_to_extF80(&State,float64_t{Bits}) : f32_to_extF80(&State,float32_t{uint32_t(Bits)});
++    Check(Out.Significand == Ref.signif && Out.SignExponent == Ref.signExp,"SoftFloat exact widening");
++  } else {
++    Check(Out.Significand == 0x1234 && Out.SignExponent == 0x5678,"rejected widening unchanged");
++  }
++  ++WidenCases;
++}
++struct Fixture {
++  alignas(64) std::array<uint8_t,4096> Block {};
++  CpuStateFrame Frame {};
++  uint64_t GPR[32] {};
++  __uint128_t Q[32] {};
++  Backend::JITCodeTail* Tail {};
++  Header* Extension {};
++  Recipe* Recipes {};
++  Fixture() {
++    const auto Begin = reinterpret_cast<uintptr_t>(Block.data());
++    auto* H = reinterpret_cast<Backend::JITCodeHeader*>(Block.data());
++    H->OffsetToBlockTail = 512;
++    Tail = reinterpret_cast<Backend::JITCodeTail*>(Block.data()+512);
++    Tail->Size = 1024;
++    Tail->RIP = 0x1000;
++    Tail->GuestSize = 16;
++    Tail->OffsetToRIPEntries = sizeof(*Tail);
++    Tail->_Pad[0] = TailMarker; Tail->_Pad[1] = Version;
++    const auto At = (Begin+512+sizeof(*Tail)+7)&~uintptr_t(7);
++    Extension = reinterpret_cast<Header*>(At);
++    *Extension = {Magic,Version,sizeof(Recipe),3,sizeof(Header)+3*sizeof(Recipe)};
++    Recipes = reinterpret_cast<Recipe*>(Extension+1);
++    for (unsigned i=0;i<3;++i) {
++      auto& R = Recipes[i]; R.HostBegin=16+i*16; R.HostEnd=32+i*16;
++      R.GuestRIP=i?0x1008:0x1000; R.LogicalSlotMask=0xff; R.Precision=Format::Binary53;
++      for(unsigned s=0;s<8;++s) R.HostQForSlot[s]=16+s;
++      R.CounterGuest=1; R.CounterHost=6; R.CarryHost=5;
++      R.Controls=i==1?CompleteDec32:i==2?(CompleteDec32|CounterCommitted):0;
++    }
++    Frame.State.InlineJITBlockHeader=Begin;
++    Frame.State.FCW=0x027f; Frame.State.AbridgedFTW=0xff;
++  }
++  Recovery Recover(unsigned Offset) { return Materialize(&Frame,reinterpret_cast<uintptr_t>(Block.data())+Offset,GPR,Q); }
++  template<class Mutation> void Negative(Mutation Mutate) {
++    Mutate(*this);
++    std::array<uint8_t,sizeof(Frame)> Before;
++    std::memcpy(Before.data(),&Frame,sizeof(Frame));
++    Check(Recover(20).State==Status::Failed,"invalid recipe/value rejected");
++    Check(std::memcmp(Before.data(),&Frame,sizeof(Frame))==0,"failed recovery transactional");
++    ++NegativeCases;
++  }
++};
++template<class T> uint64_t HostArithmetic(Arithmetic Op, uint64_t A, uint64_t B) {
++  T X, Y, Z;
++  if constexpr (sizeof(T)==8) {X=std::bit_cast<double>(A); Y=std::bit_cast<double>(B);}
++  else {X=std::bit_cast<float>(uint32_t(A)); Y=std::bit_cast<float>(uint32_t(B));}
++  if constexpr (sizeof(T)==8) {
++    switch(Op) {
++    case Arithmetic::Add: asm("fadd %d0,%d1,%d2" : "=w"(Z) : "w"(X),"w"(Y)); break;
++    case Arithmetic::Sub: asm("fsub %d0,%d1,%d2" : "=w"(Z) : "w"(X),"w"(Y)); break;
++    case Arithmetic::Mul: asm("fmul %d0,%d1,%d2" : "=w"(Z) : "w"(X),"w"(Y)); break;
++    case Arithmetic::Div: asm("fdiv %d0,%d1,%d2" : "=w"(Z) : "w"(X),"w"(Y)); break;
++    case Arithmetic::Sqrt: asm("fsqrt %d0,%d1" : "=w"(Z) : "w"(X)); break;
++    }
++    return std::bit_cast<uint64_t>(Z);
++  } else {
++    switch(Op) {
++    case Arithmetic::Add: asm("fadd %s0,%s1,%s2" : "=w"(Z) : "w"(X),"w"(Y)); break;
++    case Arithmetic::Sub: asm("fsub %s0,%s1,%s2" : "=w"(Z) : "w"(X),"w"(Y)); break;
++    case Arithmetic::Mul: asm("fmul %s0,%s1,%s2" : "=w"(Z) : "w"(X),"w"(Y)); break;
++    case Arithmetic::Div: asm("fdiv %s0,%s1,%s2" : "=w"(Z) : "w"(X),"w"(Y)); break;
++    case Arithmetic::Sqrt: asm("fsqrt %s0,%s1" : "=w"(Z) : "w"(X)); break;
++    }
++    return std::bit_cast<uint32_t>(Z);
++  }
++}
++void GuardTest(Format P, Arithmetic Op, unsigned Top, uint64_t A, uint64_t B,
++               unsigned N, unsigned Layout, unsigned Invalid) {
++  CpuStateFrame Frame {};
++  Frame.State.FCW=P==Format::Binary53?0x027f:0x007f;
++  Frame.State.flags[FEXCore::X86State::X87FLAG_TOP_LOC]=Top;
++  Frame.State.flags[FEXCore::X86State::RFLAG_TF_RAW_LOC]=2; // TF clear, FEX block bit set.
++  Frame.State.AbridgedFTW=(1U<<Top)|(1U<<((Top+1)&7));
++  const unsigned SourceB=Layout==2?0:1, Destination=Layout==1?1:0;
++  Raw80 RA {}, RB {}; Widen(A,P,RA); Widen(B,P,RB);
++  Frame.State.mm[Top][0]=RA.Significand;Frame.State.mm[Top][1]=RA.SignExponent;
++  Frame.State.mm[(Top+1)&7][0]=RB.Significand;Frame.State.mm[(Top+1)&7][1]=RB.SignExponent;
++  GuardRequest Request {N,0,Op,0,uint8_t(SourceB),uint8_t(Destination)};
++  switch(Invalid) {
++  case 1: Frame.State.FCW=0x037f; break;
++  case 2: Frame.State.FCW|=0x400; break;
++  case 3: Frame.State.FCW&=~1U; break;
++  case 4: Request.FPCR=1U<<24; break;
++  case 5: Frame.State.flags[FEXCore::X86State::X87FLAG_C1_LOC]=1; break;
++  case 6: Frame.State.AbridgedFTW=0; break;
++  case 7: Frame.State.flags[FEXCore::X86State::RFLAG_TF_RAW_LOC]=3; break;
++  }
++  GuardValues Out, Before;
++  std::memset(&Out,0xa5,sizeof(Out));std::memcpy(&Before,&Out,sizeof(Out));
++  std::array<uint8_t,sizeof(Frame)> FrameBefore;
++  std::memcpy(FrameBefore.data(),&Frame,sizeof(Frame));
++  const bool Accepted=Guard(&Frame,&Request,&Out);
++  ++GuardCases;
++  Check(std::memcmp(FrameBefore.data(),&Frame,sizeof(Frame))==0,"guard canonical state unchanged");
++  if(!Accepted) {++GuardRejected; Check(std::memcmp(&Before,&Out,sizeof(Out))==0,"failed guard output unchanged"); return;}
++  Check(!Invalid,"invalid controls rejected");
++  Check(Out.Precision==P && Out.BitsA==A && Out.BitsB==((Op==Arithmetic::Sqrt || !SourceB)?A:B),"guard decoded exact binary inputs");
++  ++GuardAccepted;
++  uint64_t Bits[2]={A,B};
++  extFloat80_t Exact[2] {};
++  Exact[0].signif=RA.Significand;Exact[0].signExp=RA.SignExponent;
++  Exact[1].signif=RB.Significand;Exact[1].signExp=RB.SignExponent;
++  for(unsigned i=0;i<N;++i) {
++    softfloat_state State {}; State.roundingPrecision=P==Format::Binary53?64:32;
++    extFloat80_t Result {};
++    switch(Op) {
++    case Arithmetic::Add: Result=extF80_add(&State,Exact[0],Exact[SourceB]); break;
++    case Arithmetic::Sub: Result=extF80_sub(&State,Exact[0],Exact[SourceB]); break;
++    case Arithmetic::Mul: Result=extF80_mul(&State,Exact[0],Exact[SourceB]); break;
++    case Arithmetic::Div: Result=extF80_div(&State,Exact[0],Exact[SourceB]); break;
++    case Arithmetic::Sqrt: Result=extF80_sqrt(&State,Exact[0]); break;
++    }
++    uint64_t FPSRBefore,FPSRAfter;
++    asm volatile("mrs %0,fpsr" : "=r"(FPSRBefore));
++    const auto Value=P==Format::Binary53?HostArithmetic<double>(Op,Bits[0],Bits[SourceB]):HostArithmetic<float>(Op,Bits[0],Bits[SourceB]);
++    asm volatile("mrs %0,fpsr" : "=r"(FPSRAfter));
++    Raw80 Host {}; Check(Widen(Value,P,Host),"guard result finite");
++    Check(Host.Significand==Result.signif && Host.SignExponent==Result.signExp,"whole-loop exact SoftFloat result");
++    Check(State.exceptionFlags==0 && FPSRBefore==FPSRAfter,"no software/host exception side effect");
++    Exact[Destination]=Result; Bits[Destination]=Value;
++    ++GuardOperations;
++  }
++}
++int main() {
++  uint64_t Seed=0xd86f792423519b01ULL;
++  for(unsigned i=0;i<100000;++i) { WidenTest(Random(Seed),Format::Binary53); WidenTest(uint32_t(Random(Seed)),Format::Binary24); }
++  for(uint64_t v : {0ULL,0x8000000000000000ULL,1ULL,0x000fffffffffffffULL,0x0010000000000000ULL,
++      0x3ff0000000000000ULL,0x7fefffffffffffffULL,0x7ff0000000000000ULL,0x7ff8000000000001ULL}) WidenTest(v,Format::Binary53);
++  for(uint64_t v : {0ULL,0x80000000ULL,1ULL,0x007fffffULL,0x00800000ULL,
++      0x3f800000ULL,0x7f7fffffULL,0x7f800000ULL,0x7fc00001ULL}) WidenTest(v,Format::Binary24);
++  struct DecEdge {uint32_t Before,Flags;};
++  constexpr DecEdge Edges[]={{0,0x94},{1,0x44},{2,0},{0x10,0x14},{0x100,0x14},{0x80000000,0x814},{0xffffffff,0x80}};
++  for(auto P : {Format::Binary53,Format::Binary24}) for(unsigned Top=0;Top<8;++Top) {
++    for(auto Edge : Edges) for(unsigned CF=0;CF<2;++CF) for(unsigned Committed=0;Committed<2;++Committed) {
++      Fixture F; F.Frame.State.FCW=P==Format::Binary53?0x027f:0x007f;
++      F.Frame.State.flags[FEXCore::X86State::X87FLAG_TOP_LOC]=Top;
++      for(auto& R : std::span(F.Recipes,3)) R.Precision=P;
++      F.GPR[5]=CF^1; F.GPR[6]=Committed?Edge.Before-1:Edge.Before;
++      for(unsigned s=0;s<8;++s) F.Q[16+s]=P==Format::Binary53?(0x3ff0000000000000ULL+s):(0x3f800000ULL+s);
++      const auto FTW=F.Frame.State.AbridgedFTW;
++      const auto R=F.Recover(Committed?52:36);
++      Check(R.State==Status::Present && R.CanonicalResume && R.GuestRIP==0x1008,"phase recovery");
++      Check(F.Frame.State.gregs[1]==uint32_t(Edge.Before-1),"DEC partial commit completed once");
++      Check(R.EFlagsMask==0x8d5 && R.EFlagsValue==(Edge.Flags|CF),"explicit DEC flags");
++      Check(F.Frame.State.AbridgedFTW==FTW && F.Frame.State.flags[FEXCore::X86State::X87FLAG_TOP_LOC]==Top,"TOP/tags stable");
++      for(unsigned s=0;s<8;++s) {
++        softfloat_state State{};
++        const auto Ref=P==Format::Binary53?f64_to_extF80(&State,float64_t{uint64_t(F.Q[16+s])}):
++            f32_to_extF80(&State,float32_t{uint32_t(F.Q[16+s])});
++        Check(F.Frame.State.mm[(Top+s)&7][0]==Ref.signif && F.Frame.State.mm[(Top+s)&7][1]==Ref.signExp,"slot rotation/materialization");
++      }
++      ++RecoveryCases;
++    }
++  }
++  { Fixture F; F.Negative([](auto& f){f.Extension->Count=MaxRecipes+1;}); }
++  { Fixture F; F.Negative([](auto& f){f.Extension->VersionValue=Version+1;}); }
++  { Fixture F; F.Negative([](auto& f){f.Recipes[1].HostBegin=20;}); }
++  { Fixture F; F.Negative([](auto& f){f.Recipes[0].HostQForSlot[0]=32;}); }
++  { Fixture F; F.Negative([](auto& f){f.Recipes[0].Controls=0x80;}); }
++  { Fixture F; F.Negative([](auto& f){f.Q[16]=0x7ff0000000000000ULL;}); }
++  { Fixture F; F.Negative([](auto& f){f.Frame.State.FCW=0x037f;}); }
++  { Fixture F; F.Negative([](auto& f){f.Frame.State.AbridgedFTW=0xfe;}); }
++  { Fixture F; F.Negative([](auto& f){f.Tail->Size=513;}); }
++  { Fixture F; F.Negative([](auto& f){f.Recipes[0].GuestRIP=0xfff;}); }
++  { Fixture F; F.Negative([](auto& f){f.Recipes[0].GuestRIP=0x1010;}); }
++  { Fixture F; F.Negative([](auto& f){f.Tail->GuestSize=0;}); }
++  { Fixture F; F.Negative([](auto& f){f.Tail->RIP=UINT64_MAX-1; f.Tail->GuestSize=16;}); }
++  { Fixture F; F.Negative([](auto& f){f.Recipes[0].Controls=CompleteDec32;f.Recipes[0].CounterHost=31;}); }
++  { Fixture F; F.Negative([](auto& f){f.Recipes[0].Controls=CompleteDec32;f.Recipes[0].CarryHost=31;}); }
++  { Fixture F; F.Negative([](auto& f){f.Recipes[0].Controls=CompleteDec32|CounterCommitted|KeepEntryFlagsIfInitial;f.Recipes[0].InitialCounterHost=31;}); }
++  for(auto P : {Format::Binary53,Format::Binary24}) for(unsigned Top=0;Top<8;++Top)
++      for(unsigned CF=0;CF<2;++CF) for(unsigned First=0;First<2;++First) {
++    Fixture F;
++    F.Frame.State.FCW=P==Format::Binary53?0x027f:0x007f;
++    F.Frame.State.flags[FEXCore::X86State::X87FLAG_TOP_LOC]=Top;
++    auto& R=F.Recipes[0];R.Precision=P;R.Controls=CompleteDec32|CounterCommitted|KeepEntryFlagsIfInitial;
++    R.InitialCounterHost=4;
++    F.GPR[4]=17;F.GPR[5]=CF^1;F.GPR[6]=First?((uint64_t{1}<<40)|17):15;
++    F.Frame.State.gregs[1]=F.GPR[6];F.Frame.State.pf_raw=0x71;F.Frame.State.af_raw=0x42;
++    for(unsigned s=0;s<8;++s)F.Q[16+s]=P==Format::Binary53?0x3ff0000000000000ULL:0x3f800000ULL;
++    const auto BeforePF=F.Frame.State.pf_raw,BeforeAF=F.Frame.State.af_raw;
++    const auto Got=F.Recover(20);
++    Check(Got.State==Status::Present && Got.GuestRIP==0x1000,"previous DEC/first phase recovery");
++    if(First) {
++      Check(Got.EFlagsMask==0 && F.Frame.State.gregs[1]==F.GPR[6] &&
++          F.Frame.State.pf_raw==BeforePF && F.Frame.State.af_raw==BeforeAF,"first iteration retains original flags/high counter");
++    } else {
++      Check(Got.EFlagsMask==0x8d5 && Got.EFlagsValue==(0x14|CF) && F.Frame.State.gregs[1]==15 &&
++          F.Frame.State.pf_raw==15 && F.Frame.State.af_raw==16,"previous iteration DEC flags/counter");
++    }
++    ++RecoveryCases;
++  }
++  { Fixture F; F.Tail->_Pad[0]=0; Check(F.Recover(20).State==Status::Empty,"legacy tail empty"); }
++  { Fixture F; Check(F.Recover(80).State==Status::Empty,"outside live interval empty"); }
++  for(auto P : {Format::Binary53,Format::Binary24}) for(unsigned i=0;i<2500;++i) {
++    const unsigned Fraction=P==Format::Binary53?52:23, Bias=P==Format::Binary53?1023:127;
++    const uint64_t Sign=Random(Seed)&1U, MantissaMask=(uint64_t{1}<<Fraction)-1;
++    const int E=int(Random(Seed)%41)-20;
++    uint64_t A=(Sign<<(Fraction+(P==Format::Binary53?11:8)))|(uint64_t(int(Bias)+E)<<Fraction);
++    uint64_t B=(uint64_t(Bias)<<Fraction);
++    if(i%4==0) A|=Random(Seed)&MantissaMask;
++    if(i%4==1) {
++      const int32_t V=int32_t(Random(Seed)%1000)-500;
++      const uint32_t Magnitude=V<0?-V:V;
++      A=uint64_t(V<0)<<(Fraction+(P==Format::Binary53?11:8));
++      if(Magnitude) {
++        const unsigned Leading=31-std::countl_zero(Magnitude);
++        A|=(uint64_t(Bias+Leading)<<Fraction)|((uint64_t(Magnitude)<<(Fraction-Leading))&MantissaMask);
++      }
++    }
++    if(i%4==2) B=uint64_t(int(Bias)+int(Random(Seed)%9)-4)<<Fraction;
++    if(i%4==3) A=Sign<<(Fraction+(P==Format::Binary53?11:8));
++    const unsigned Counts[]={1,2,3,17,64};
++    for(unsigned Op=0;Op<5;++Op) for(unsigned Layout=0;Layout<3;++Layout)
++      GuardTest(P,Arithmetic(Op),i%8,A,B,Counts[i%5],Layout,i%13<7?i%13+1:0);
++  }
++  unsigned StaticRoundtrip {}, StaticRecovery {}, StaticReject {};
++  for (auto P : {Format::Binary53,Format::Binary24}) for(unsigned i=0;i<100000;++i) {
++    const uint64_t Bits = P==Format::Binary53 ? Random(Seed) : uint32_t(Random(Seed));
++    Raw80 R {}; Check(X87Static::WidenIEEE(Bits,P,R),"IEEE export always valid");
++    const unsigned F=P==Format::Binary53?52:23,E=P==Format::Binary53?11:8;
++    if(((Bits>>F)&((1U<<E)-1))!=((1U<<E)-1)) {
++      uint64_t Back=~Bits;Check(X87Static::Narrow(R,P,Back)&&Back==Bits,"exact binary roundtrip incl subnormal");
++    }
++    ++StaticRoundtrip;
++  }
++  for(auto P : {Format::Binary53,Format::Binary24}) for(unsigned Top=0;Top<8;++Top) {
++    InternalThreadState T{};auto& F=T.BaseFrameState;F.Thread=&T;
++    F.State.FCW=P==Format::Binary53?0x027f:0x007f;F.State.AbridgedFTW=255;
++    F.State.flags[FEXCore::X86State::X87FLAG_TOP_LOC]=Top;
++    for(unsigned Slot=0;Slot<8;++Slot) {Raw80 R{};X87Static::WidenIEEE(P==Format::Binary53?0x3ff0000000000000ULL:0x3f800000ULL,P,R);
++      F.State.mm[Slot][0]=R.Significand;F.State.mm[Slot][1]=R.SignExponent;}
++    GuardRequest Req{17,0,Arithmetic(0x80),0,1,0};GuardValues V{};
++    Check(X87Static::Prepare(&F,&Req,&V),"static entry finite full bank");
++    Check(T.X87Cache.FormatMask==255&&T.X87Cache.Live==0&&T.X87Cache.DirtyMask==0,"bank not published before scalar fill");
++    __uint128_t Q[32]{};
++    const uint64_t Edges[]={0,1,P==Format::Binary53?0x7ff0000000000000ULL:0x7f800000ULL,
++      P==Format::Binary53?0x7ff8000000001234ULL:0x7fc00123ULL};
++    for(auto Bits:Edges) {
++      for(unsigned Slot=0;Slot<8;++Slot)Q[24+Slot]=Bits;
++      T.X87Cache.Live=1;T.X87Cache.DirtyMask=255;
++      Check(X87Static::MaterializeHost(&F,Q),"bank snapshot export incl zero subnormal inf nan");
++      Raw80 R{};X87Static::WidenIEEE(Bits,P,R);
++      for(unsigned Slot=0;Slot<8;++Slot)Check(F.State.mm[Slot][0]==R.Significand&&F.State.mm[Slot][1]==R.SignExponent,"all physical slots widened");
++      ++StaticRecovery;
++    }
++    std::array<uint8_t,sizeof(CPUState)> Before{};memcpy(Before.data(),&F.State,sizeof(CPUState));T.X87Cache.Live=1;T.X87Cache.DirtyMask=255;T.X87Cache.FormatMask=254;
++    Check(!X87Static::MaterializeHost(&F,Q)&&!memcmp(Before.data(),&F.State,sizeof(CPUState)),"corrupt format mask fails transactionally");++StaticReject;
++    T.X87Cache.Live=0;F.State.FCW=0x037f;
++    const auto CacheBefore=T.X87Cache;
++    Check(!X87Static::Prepare(&F,&Req,&V)&&!memcmp(&CacheBefore,&T.X87Cache,sizeof(CacheBefore)),"PC64 admission leaves cache unchanged");++StaticReject;
++  }
++  Raw80 WideInteger{0x8000000000000001ULL,0x403e};uint64_t Bits{};
++  Check(!X87Static::Narrow(WideInteger,Format::Binary53,Bits),"FILD int64 beyond 53 bits rejects");++StaticReject;
++  std::printf("x87-static-unit roundtrip=%u recovery=%u negative=%u failures=%u\n",StaticRoundtrip,StaticRecovery,StaticReject,Failures);
++  std::printf("x87-region-unit widening=%u recovery=%u negative=%u guard_cases=%u guard_accepted=%u guard_rejected=%u guard_operations=%u failures=%u\n",
++      WidenCases,RecoveryCases,NegativeCases,GuardCases,GuardAccepted,GuardRejected,GuardOperations,Failures);
++  std::printf("x87-layout-baseline cpu=%zu frame=%zu thread=%zu frame_start=%zu interrupt=%zu frame_tail_padding=%zu mm=%zu pointers=%zu\n",
++      sizeof(FEXCore::Core::CPUState),sizeof(FEXCore::Core::CpuStateFrame),sizeof(FEXCore::Core::InternalThreadState),
++      offsetof(FEXCore::Core::InternalThreadState,BaseFrameState),offsetof(FEXCore::Core::InternalThreadState,InterruptFaultPage),
++      offsetof(FEXCore::Core::InternalThreadState,InterruptFaultPage)-offsetof(FEXCore::Core::InternalThreadState,BaseFrameState)-sizeof(FEXCore::Core::CpuStateFrame),
++      offsetof(FEXCore::Core::CPUState,mm),offsetof(FEXCore::Core::CpuStateFrame,Pointers));
++  return Failures?1:0;
++}
+diff --git a/unittests/Native/X87Region.md b/unittests/Native/X87Region.md
+new file mode 100644
+--- /dev/null
++++ b/unittests/Native/X87Region.md
+@@ -0,0 +1,18 @@
++# Guarded x87 region API regression
++
++`X87Region.cpp` is the byte-identical source tested by the private native32
++runner build in `OWN/native-0163-region10/SOURCE.json`. It calls the real
++integer widening, entry guard and transactional recovery APIs; accepted
++arithmetic sequences are checked against SoftFloat and ARM64 FP instructions.
++
++Validated: 200018 widening inputs, 512 recovery states, 16 negative recovery
++conditions, 75000 guard inputs, 335220 arithmetic operations, zero failures.
++The test requires AArch64 and the normal FEXCore/SoftFloat include and link
++configuration. The lane's existing `build-native-0163-region.py` target
++`x87_region_unit` builds and runs it; the source SHA is checked against this
++copy. No Windows guest, application launch, or timing is involved.
++
++Actual JIT execution is checked separately by the existing stand32 runner:
++198 loops; asynchronous and seven deterministic fault sites; immutable
++hardware and recorded-game corpora. These API tests do not prove Windows
++suspend/resume or runtime code-cache save/load.

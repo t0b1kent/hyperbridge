@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "repo": "https://github.com/t0b1kent/hyperbridge.git",
+  "revision": "4d489f182db3b05bb7465d9705483c490f718114",
+  "files": [
+    {"path":"stands/synthetic/CMakeLists.txt","bytes":4486,"sha256":"60f80700b3dc863baf0c9c071ce6b6886715c963c532b9577dc4702fe34ea8a7"},
+    {"path":"stands/synthetic/LICENSE","bytes":1081,"sha256":"c8d31b493eb83ed65af7e30fc8ca3f63591aa092a74e1e09f52efad50ba1d95b"},
+    {"path":"stands/synthetic/MacAllocatorHooks.cpp","bytes":1005,"sha256":"58dfe43c44a575c829174756f1d72fc6a30fe2bf8aacaaa6d563ee2d83b96f92"},
+    {"path":"stands/synthetic/MacFrontendStubs.cpp","bytes":194,"sha256":"31b0a80a400d8d37c4dc0dfe40918aa2974e5315d1b7b84f812a2423686c7d0c"},
+    {"path":"stands/synthetic/MacHostFeatures.cpp","bytes":5493,"sha256":"c9b2e7036817b4b01b7dc93a5f107377384b6ad4706a8fb6253b1f86a884bc90"},
+    {"path":"stands/synthetic/MacHostFeatures.h","bytes":252,"sha256":"3f46a1125d37fb776fcd7ecad090848f8ecc98fe25877a08d84b388d62bb33cb"},
+    {"path":"stands/synthetic/README.md","bytes":2436,"sha256":"b08e143f7995e6cd3a428a9f2521702b8ecd9fcbdde322094cdbd1c93f1a63e7"},
+    {"path":"stands/synthetic/ReplaySpansStub.cpp","bytes":696,"sha256":"3a1baa1c707a1f13baba0e607ec43eec665dd4ddc1de2710b7bf1dda335c57be"},
+    {"path":"stands/synthetic/build.py","bytes":3460,"sha256":"370ff1de95788a4ce5185326c00579cc7d86b4c25cf390852c2a5f22f5053190"},
+    {"path":"stands/synthetic/compare.py","bytes":6195,"sha256":"edff1ac46a7a514faa6225cf8ae7d2ee5c21a74e20414b62561c1057f406f20b"},
+    {"path":"stands/synthetic/download_toolchain.py","bytes":703,"sha256":"32939bd69d0d5dd14acba957122900eb5dcacefa0e93c298dd6af7b61c39daf4"},
+    {"path":"stands/synthetic/generate.py","bytes":4819,"sha256":"7109f4a563108385dbd7d9a4621e88f7102a71d46905c646fc1a13ec75b6f698"},
+    {"path":"stands/synthetic/native-portability.patch","bytes":16769,"sha256":"4092a81aeca4dce0575434ec797a205fc1d6da2f56c217f203e5932bcc885e0a"},
+    {"path":"stands/synthetic/requirements.txt","bytes":124,"sha256":"bb55873c3b798ef0c15caae221c491207e65275fcfcdf88e08c3f6324f28b2ca"},
+    {"path":"stands/synthetic/runner.cpp","bytes":32507,"sha256":"e38c8c855cb252257496a0ceb7b8e1fe3a81eec131decc6ff588a9558d22c921"},
+    {"path":"stands/synthetic/verify.py","bytes":1725,"sha256":"9729b9e1e87da49eccec085365353cc9f9ee1daa8da916fec8cf4ad3f2d40020"}
+  ]
+}

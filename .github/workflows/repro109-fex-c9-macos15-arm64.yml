@@ -1,0 +1,82 @@
+name: REPRO-109 FEX c9 from pinned sources
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Empty builds FEX64 c9 and FEX32 r5; select one for diagnostics"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - fex64
+          - fex32
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repro109-fex-c9-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fex:
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - name: Checkout component recipe
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Select pinned driver Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+          architecture: arm64
+      - name: Select Xcode 16.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          selected=0
+          for xcode_app in /Applications/Xcode*.app; do
+            [ -d "$xcode_app/Contents/Developer" ] || continue
+            actual=$(DEVELOPER_DIR="$xcode_app/Contents/Developer" xcodebuild -version)
+            if [ "$actual" = $'Xcode 16.4\nBuild version 16F6' ]; then
+              printf 'DEVELOPER_DIR=%s/Contents/Developer\n' "$xcode_app" >> "$GITHUB_ENV"
+              selected=1
+              break
+            fi
+          done
+          [ "$selected" = 1 ] || { printf 'Pinned Xcode 16.4/16F6 missing\n'; exit 1; }
+      - name: Check inputs without downloads
+        run: python3 -I -B build/repro109fex/build.py --check-inputs
+      - name: Build unsigned source components
+        shell: bash
+        env:
+          REPRO109_ONLY: ${{ inputs.only }}
+        run: |
+          set -uo pipefail
+          set --
+          case "$REPRO109_ONLY" in
+            '') ;;
+            fex64|fex32) set -- --only "$REPRO109_ONLY" ;;
+            *) printf 'Invalid architecture selector\n'; exit 2 ;;
+          esac
+          python3 -I -B build/repro109fex/build.py --out "$RUNNER_TEMP/repro109-fex-c9" "$@" \
+            > "$RUNNER_TEMP/repro109-fex-c9-driver.log" 2>&1
+          build_rc=$?
+          printf '%s\n' "$build_rc" > "$RUNNER_TEMP/repro109-fex-c9-rc.txt"
+          printf 'FEX build rc=%s; full logs are in the artifact; install skipped\n' "$build_rc"
+          exit "$build_rc"
+      - name: Preserve complete bounded component reports and unsigned outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repro109-fex-c9-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/repro109-fex-c9/
+            ${{ runner.temp }}/repro109-fex-c9-driver.log
+            ${{ runner.temp }}/repro109-fex-c9-rc.txt
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "metadata_only_checked_utc": "2026-10-04",
+  "metadata_sources": [
+    "https://pypi.org/pypi/cmake/4.3.2/json",
+    "https://pypi.org/pypi/ninja/json",
+    "https://api.github.com/repos/ccache/ccache/releases/tags/v4.13.6"
+  ],
+  "driver_python_github": "3.13.7",
+  "driver_python_xcode_cloud": "record actual version; >=3.12 required, equivalence not claimed",
+  "tools": [
+    {
+      "name": "cmake",
+      "version": "4.3.2",
+      "format": "wheel",
+      "binary_suffix": "cmake/data/bin/cmake",
+      "url": "https://files.pythonhosted.org/packages/82/15/4c8980d5ceef53f0c490425f5b8e47f3ff863348400b0ea5ba4e349119f1/cmake-4.3.2-py3-none-macosx_10_10_universal2.whl",
+      "sha256": "f8f570813753ed4564928cf45c4c13c31e46b3e66b1a07fe695cb9f7b7af185e",
+      "size": 52883814
+    },
+    {
+      "name": "ninja",
+      "version": "1.13.2",
+      "format": "wheel",
+      "binary_suffix": "ninja/data/bin/ninja",
+      "url": "https://files.pythonhosted.org/packages/b5/b8/90a9518f2264637084d6199bc20c2f3fb97fefc4c474d277720150c3bd6d/ninja-1.13.2-py3-none-macosx_10_9_universal2.whl",
+      "sha256": "fd82e26c0706ad4ab88e5fdd26f3fab0a987a90f810160f6c322e752c6af298b",
+      "size": 306611
+    },
+    {
+      "name": "ccache",
+      "version": "4.13.6",
+      "format": "tar.gz",
+      "binary_suffix": "/ccache",
+      "url": "https://github.com/ccache/ccache/releases/download/v4.13.6/ccache-4.13.6-darwin.tar.gz",
+      "sha256": "0274210ec9c9936ed5711d59b0de3167a51216a588ddde35f6bc828f366fe6d9",
+      "size": 2123909
+    }
+  ],
+  "limits": [
+    "Only official release metadata was read on the owner Mac. Archives are downloaded and executed by the cloud job only.",
+    "These are build tools; the runtime FEX component is compiled from pinned source and patches.",
+    "Python and runner image differences still require separate cloud acceptance; binary reproducibility is not claimed."
+  ]
+}
