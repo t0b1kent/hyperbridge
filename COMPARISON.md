@@ -1,5 +1,58 @@
 # HyperBridge compared
 
+## October 7, 2026: MacRunner 1.0.9
+
+MacRunner 1.0.9 ships engine 0227: the 64-bit translator of 1.0.8 with 32 more patches (integer division,
+read-modify-write instructions, scalar SSE arithmetic, exact unaligned `lock` operations). Wine, graphics and the 32-bit
+translator are unchanged. Games were not measured for this release.
+
+**Instruction loops, October 7, one session on the two released packages.** Same Mac (Apple M1 Pro, macOS 27); the same
+`xbench.exe` (SHA-256 `cc743db6…`). Each engine is the one inside its published MacRunner package (`xtajit64.dll`
+`eb13ea53…` for 1.0.8, `ed14b28a…` for 1.0.9), started with the package's own settings under its own Wine; the Wine
+build is byte-identical in the two packages. One alternating series, 12:30–12:40 local time, five runs per package
+(order `8 9 9 8 8 9 9 8 8 9`).
+
+The Mac was in use during the series (load average 5–12; before each run 62–73 % of the processor was idle). As on
+October 5, the table gives **the fastest of the five runs** for each package — within a run, the fastest sample `xbench`
+reports — and, next to it, the median of the five per-run minima. Values are ns per iteration; the last two rows are ns
+per 4 KB copy and per `fadd`. Bold marks a value more than 2 % below the other package's.
+
+| Loop | HyperBridge 1.0.8 | runs | HyperBridge 1.0.9 | runs | change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| empty loop (`dec`/`jnz`) | 0.671 | 5 (median of run minima 0.675) | 0.672 | 5 (median of run minima 0.684) | +0.1 % |
+| `add` | 0.672 | 5 (median of run minima 0.673) | 0.670 | 5 (median of run minima 0.681) | -0.3 % |
+| `imul` | 0.961 | 5 (median of run minima 0.964) | 0.964 | 5 (median of run minima 0.979) | +0.3 % |
+| `cvttss2si` | 0.653 | 5 (median of run minima 0.665) | 0.652 | 5 (median of run minima 0.662) | -0.2 % |
+| `cvtss2si` | 0.743 | 5 (median of run minima 0.743) | 0.744 | 5 (median of run minima 0.761) | +0.1 % |
+| `cvttsd2si` (64-bit) | 0.654 | 5 (median of run minima 0.657) | 0.656 | 5 (median of run minima 0.664) | +0.3 % |
+| `cvttps2dq` | 0.674 | 5 (median of run minima 0.679) | 0.673 | 5 (median of run minima 0.691) | -0.1 % |
+| `cvtdq2ps` | 0.944 | 5 (median of run minima 0.947) | 0.943 | 5 (median of run minima 0.952) | -0.1 % |
+| `addsubps` | 0.943 | 5 (median of run minima 0.956) | 0.943 | 5 (median of run minima 0.959) | +0.0 % |
+| `addss` (dependent chain) | 1.569 | 5 (median of run minima 1.604) | **0.942** | 5 (median of run minima 0.949) | -40.0 % |
+| `mulps` | 1.257 | 5 (median of run minima 1.274) | 1.258 | 5 (median of run minima 1.287) | +0.1 % |
+| `pshufb` | 0.672 | 5 (median of run minima 0.687) | 0.677 | 5 (median of run minima 0.685) | +0.7 % |
+| `xor edx,edx` + `div ecx` | 2.088 | 5 (median of run minima 2.092) | **0.918** | 5 (median of run minima 0.923) | -56.0 % |
+| `cqo` + `idiv rcx` | 1.959 | 5 (median of run minima 1.962) | **0.806** | 5 (median of run minima 0.815) | -58.9 % |
+| `crc32` | 0.943 | 5 (median of run minima 0.945) | 0.940 | 5 (median of run minima 0.953) | -0.3 % |
+| `popcnt` | 0.785 | 5 (median of run minima 0.787) | 0.781 | 5 (median of run minima 0.798) | -0.5 % |
+| `lock xadd` | 7.085 | 5 (median of run minima 7.181) | 7.051 | 5 (median of run minima 7.082) | -0.5 % |
+| `call` / `ret` | 1.891 | 5 (median of run minima 1.912) | 1.887 | 5 (median of run minima 1.919) | -0.2 % |
+| `call r11` (indirect) | 2.211 | 5 (median of run minima 2.235) | 2.216 | 5 (median of run minima 2.240) | +0.2 % |
+| `rep movsb`, 4 KB copy | 52.4 | 5 (median of run minima 52.7) | **50.8** | 5 (median of run minima 51.8) | -3.1 % |
+| x87 `fadd` | 18.5 | 5 (median of run minima 18.7) | 18.4 | 5 (median of run minima 18.7) | -0.7 % |
+
+Three loops changed. `xor edx,edx` + `div ecx` went from 2.09 to 0.92 ns and `cqo` + `idiv rcx` from
+1.96 to 0.81 ns: the common cases of a division now use the processor's own division directly, and the
+cases that must raise a divide error are handled on a separate cold path (`MACRUNNER_FEX_DIV_FAST=1`). A dependent chain
+of `addss` went from 1.57 to 0.94 ns: in the processor's x86-compatible mode the scalar operation keeps the
+upper part of the register itself, so the separate merge step is gone (`MACRUNNER_FEX_HW_SCALAR_MERGE=1`). Of the other 18
+loops, 17 are within 1 % of 1.0.8; `rep movsb` came out 3.1 % faster, which is inside the run-to-run spread.
+
+The 1.0.8 package measured here agrees with its October 5 values within 4 % (largest difference: `div`,
+2.09 against 2.16 ns), so the Prism and CrossOver columns of October 5 can be read next to the 1.0.9 column:
+`div r32` 0.92 ns against 1.03 in Prism and 0.88 in CrossOver's FEX; `idiv r64` 0.81 against 1.95 and 0.70;
+`addss` chain 0.94 against 1.60 and 1.56. Prism and CrossOver were not re-measured on October 7.
+
 ## October 5, 2026: MacRunner 1.0.8
 
 MacRunner 1.0.8 ships engine 0161. This note records what was measured for it. The sections below are earlier
