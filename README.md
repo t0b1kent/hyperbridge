@@ -18,14 +18,57 @@ Since 28 September 2026, HyperBridge has two parts:
 
 ## How HyperBridge compares
 
-The same programs on one Mac (Apple M1 Pro, macOS 27). **HyperBridge column: 7 October 2026**, the engine inside the
-published [MacRunner 1.0.9](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.9) package — the fastest of five
-runs of [`xbench`](bench/xbench/), alternating with the 1.0.8 package. **Microsoft Prism** (Windows 11 on Arm in a
-Parallels Desktop virtual machine) and the **FEX build in CrossOver Preview** were measured with the same binary on
-5 October (fastest of eight alternating runs) and were not re-measured; the 1.0.8 package, measured in both sessions,
-agrees within 4 %. Loop times are nanoseconds per iteration; lower is better, the best value is in bold (values within
-2 % of the best share it). The Mac was in use during both sessions: other load can only slow a loop down, which is why
-the fastest run is taken.
+**In short.** Of 21 instruction loops, HyperBridge is the fastest in 4, shares first place in 11 and is behind in 6.
+It leads where memory is copied and where games do scalar float math, is level with CrossOver's FEX on plain integer
+and SSE code, and trails Prism on function calls and x87 arithmetic.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/compare-1.0.9-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/compare-1.0.9-light.svg">
+  <img alt="Bar chart: speed of HyperBridge, Microsoft Prism and the FEX build in CrossOver Preview on ten kinds of x86 code, relative to the fastest of the three" src="docs/compare-1.0.9-light.svg" width="880">
+</picture>
+
+One Mac (Apple M1 Pro, macOS 27), one benchmark binary ([`xbench`](bench/xbench/)) in all three environments.
+HyperBridge is the engine inside the published [MacRunner 1.0.9](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.0.9)
+package, measured on 7 October 2026; Microsoft Prism (Windows 11 on Arm in a Parallels Desktop virtual machine) and the
+FEX build in CrossOver Preview were measured on 5 October and not re-measured. These are micro-loops, not game frame
+rates.
+
+### Who is faster, and why
+
+| What the code does | Fastest | HyperBridge | Why | Where you meet it |
+| --- | --- | --- | --- | --- |
+| **Copies memory**<br>`rep movsb`, 4 KB | **HyperBridge** | 51 ns — 14× faster than CrossOver's FEX, 32× faster than Prism | A fast path copies the block in large steps instead of byte by byte | Loading, streaming, every `memcpy`-style copy |
+| **Scalar float math in a chain**<br>`addss` | **HyperBridge** | 0.94 ns — 1.7× faster than both | The processor's x86-compatible mode keeps the upper register bits itself, so no extra merge instruction is needed (new in 1.0.9) | Positions, physics and animation math compiled for SSE |
+| **Float → integer**<br>`cvttss2si`, `cvttsd2si` | **HyperBridge** | 0.65 ns — 8 % ahead of CrossOver's FEX, 1.6× faster than Prism | Measured; the cause is not analysed yet | Turning coordinates and timers into integers |
+| **Integer division**<br>`div`, `idiv` | CrossOver's FEX | 0.92 / 0.81 ns — 4 % and 13 % behind it; ahead of Prism by 11 % and 2.4× | Since 1.0.9 the common case is the processor's own division and the divide-error cases live on a cold path: 2.3–2.4× faster than 1.0.8. The remaining gap is not analysed yet | Game logic, hashing, random numbers |
+| **Plain integer and SSE code**<br>11 loops | tie with CrossOver's FEX | within 5 % of it; Prism is from 1 % faster to 38 % slower | Both are builds of FEX and emit the same code here | Most of a game's code |
+| **Calls a function and returns**<br>`call` + `ret`, indirect `call` | Prism | 1.89 / 2.22 ns — Prism needs 22 % and 33 % less | Every call and return also checks whether the thread has been asked to pause; a cheaper check is in development | The most frequent thing game code does |
+| **x87 floating point**<br>`fadd` | Prism | 18.4 ns — 19× slower than Prism, 6× faster than CrossOver's FEX | x87 operations still take a slow general path; a faster guarded path is in the source and off by default until it matches hardware in every tested case | 32-bit and older games, audio mixers |
+
+### Against a native x86 processor
+
+For six loops we also have times from a native x86-64 machine (AMD EPYC 9V74, a cloud server, measured on 4 October).
+It is a different computer, so this compares an M1 Pro running translated code with a server core running the same
+code natively — it says as much about the two processors as about the translator. Below 1× the translated loop is the
+faster one.
+
+| Loop | HyperBridge 1.0.9 on M1 Pro, ns | Native x86 on EPYC 9V74, ns | HyperBridge ÷ native |
+| --- | ---: | ---: | ---: |
+| `div`, 32-bit | 0.92 | 1.70 | **0.54×** |
+| `idiv`, 64-bit | 0.81 | 1.98 | **0.41×** |
+| `rep movsb`, 4 KB copy | 51 | 43 | 1.18× |
+| `call` + `ret` | 1.89 | 1.40 | 1.35× |
+| indirect `call` | 2.22 | 1.41 | 1.57× |
+| x87 `fadd` | 18.4 | 1.94 | 9.46× |
+
+<details>
+<summary><b>All numbers, footnotes and measurement conditions</b></summary>
+
+Loop times are nanoseconds per iteration; lower is better, the best value is in bold (values within 2 % of the best
+share it). HyperBridge: the fastest of five runs alternating with the 1.0.8 package on 7 October. Prism and CrossOver:
+the fastest of eight alternating runs on 5 October; the 1.0.8 package, measured in both sessions, agrees within 4 %.
+The Mac was in use during both sessions: other load can only slow a loop down, which is why the fastest run is taken.
 
 | | HyperBridge (MacRunner 1.0.9) | Microsoft Prism | CrossOver Preview (FEX) | Native macOS |
 | --- | ---: | ---: | ---: | ---: |
@@ -55,17 +98,7 @@ default because it costs about 3 ns per SSE instruction.
 values are from September 29.
 ⁵ The September 29 measurement, on engine 0015 with software memory ordering, was 113–117 FPS and 14.9–15.0 ms.
 
-**Where HyperBridge is ahead.** `rep movsb` copies about 14 times faster than in CrossOver's FEX and 32 times faster
-than in Prism. x87 arithmetic runs 6 times faster than in CrossOver's FEX. A dependent chain of `addss` is 1.7 times
-faster than in both. Float → integer conversions are 8 % faster than in CrossOver's FEX and 1.6 times faster than in
-Prism; `addsubps` is 2.4 times faster than in Prism. `div r32` now takes 11 % less time than in Prism, and `idiv r64`
-is 2.4 times faster than in Prism. On the 11 other simple loops HyperBridge matches CrossOver's FEX within 5 % and is
-faster than Prism on 6 of them, by up to 38 %; the other 5 are within 2 %.
-
-**Where it is behind.** Prism needs 19 times less time per x87 `fadd`, 22 % less per call and return and 33 % less per
-indirect call, and matches x86 floating-point results more often. `div r32` and `idiv r64` still take 4 % and 13 % less
-time in CrossOver's FEX. Hollow Knight's assembly loading, last measured on 1.0.8, is in the range CrossOver's FEX
-showed on September 29 (0.41 s), still behind Prism (0.26 s) and the native build (0.17 s).
+</details>
 
 **What changed since 1.0.8.** `div r32` is 2.3 times faster (0.92 ns against 2.09 ns in the same session) and
 `idiv r64` 2.4 times (0.81 against 1.96); a dependent chain of `addss` is 1.7 times faster (0.94 against 1.57).
