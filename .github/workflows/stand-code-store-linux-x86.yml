@@ -1,0 +1,41 @@
+name: Code-store stand (Linux x86-64 hardware reference)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.os }} attempt ${{ matrix.attempt }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        attempt: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Processor
+        run: |
+          grep -m1 'vendor_id' /proc/cpuinfo
+          grep -m1 'model name' /proc/cpuinfo
+          grep -m1 -E '^flags' /proc/cpuinfo | tr ' ' '\n' | grep -c -x hypervisor || true
+      - name: Run the probe twice
+        working-directory: stands/code-store
+        run: |
+          sh run.sh out1
+          sh run.sh out2
+          cmp out1/summary.tsv out2/summary.tsv && echo "second run identical" > out1/REPEAT.txt || echo "second run differs" > out1/REPEAT.txt
+          cat out1/cpu-os.txt out1/REPEAT.txt
+          rm -f out1/probe out2/probe out1/observations.tsv out2/observations.tsv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: code-store-${{ matrix.os }}-${{ matrix.attempt }}
+          path: |
+            stands/code-store/out1
+            stands/code-store/out2/summary.tsv
+            stands/code-store/out2/result-sha256.txt
+          if-no-files-found: error
