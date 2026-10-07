@@ -1,0 +1,40 @@
+name: MXCSR family stand (native x86-64)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.os }} attempt ${{ matrix.attempt }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, ubuntu-24.04]
+        attempt: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run
+        working-directory: stands/mxcsr-family
+        shell: bash
+        run: |
+          mkdir -p out
+          (sysctl -n machdep.cpu.brand_string 2>/dev/null || grep -m1 'model name' /proc/cpuinfo) > out/cpu.txt
+          uname -sm >> out/cpu.txt
+          (shasum -a 256 probe.c 2>/dev/null || sha256sum probe.c) > out/source.sha256
+          clang --version | head -1 > out/compiler.txt
+          clang -O2 -Wall -Wextra -Werror -msse2 -mno-red-zone probe.c -o probe-bin
+          set +e
+          perl -e 'alarm 30; exec @ARGV' ./probe-bin > out/stdout.txt 2> out/stderr.txt
+          echo $? > out/rc.txt
+          set -e
+          cat out/cpu.txt out/rc.txt out/stdout.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mxcsr-family-${{ matrix.os }}-${{ matrix.attempt }}
+          path: stands/mxcsr-family/out
+          if-no-files-found: error
