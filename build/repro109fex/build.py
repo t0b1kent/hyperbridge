@@ -93,7 +93,12 @@ def archive(out, variants):
     return dict(path=target.name, bytes=target.stat().st_size, sha256=source.sha(target), files=len(members))
 
 
-def build(out, variants):
+def build(out, variants, stage='full', from_outputs=None):
+    source.require(stage in ['full', 'inventory', 'patches', 'configure', 'compile', 'native-stand', 'admission'],
+                   'Unknown source recipe stage')
+    source.require(stage == 'full' or variants == ['fex64'], 'Stage matrix requires exactly FEX64')
+    source.require((from_outputs is not None) == (stage == 'admission'),
+                   'Admission requires compiled outputs; other stages must not receive them')
     fex.cloud_only()
     pin, product, engine, sealed, tools = inputs()
     source.require(not out.exists(), 'Preserve previous component result')
@@ -103,7 +108,7 @@ def build(out, variants):
                   signing='NOT_PERFORMED', comparison='NOT_ENABLED', stands='NOT_RUN',
                   base_revision=pin['base_revision'], candidate_revision=pin['candidate_revision'],
                   product_manifest_sha256=pin['product_manifest_sha256'],
-                  platform=pin['platform'], selected_variants=variants)
+                  platform=pin['platform'], selected_variants=variants, selected_stage=stage)
     fex.HERE = HERE / 'base/repro109'
     fex.DEADLINE = time.monotonic() + pin['platform']['minutes'] * 60
     (out / 'ENGINE-environment.json').write_text(json.dumps(engine, indent=2) + '\n')
@@ -111,6 +116,15 @@ def build(out, variants):
         for variant in variants:
             target = out / variant
             target.mkdir()
+            if stage == 'inventory':
+                result['variants'][variant] = dict(status='INVENTORY_ONLY_NOT_ACCEPTED',
+                    postimages=len(product['product_source_postimages']), actual_source='NOT_ENABLED',
+                    patches=len(sealed[variant]['patches']), compiler='NOT_ENABLED')
+                continue
+            if stage == 'admission':
+                admitted = fex.admit_outputs(Path(from_outputs) / variant, target, variant)
+                result['variants'][variant] = admitted
+                continue
             lock = copy.deepcopy(sealed[variant])
             lock['repo_source_revision'] = pin['base_revision']
             for field in ['xcode', 'xcode_build', 'sdk', 'deployment_target', 'apple_clang_build', 'linker_lc']:
@@ -138,7 +152,11 @@ def build(out, variants):
                 verified = source.verify_product(src, product)
                 (output / 'product-postimages.json').write_text(json.dumps(verified, indent=2) + '\n')
                 return verified
-            fex.build(target, lock, tools, source_overlay=overlay if variant == 'fex64' else None)
+            stage_result = fex.build(target, lock, tools,
+                source_overlay=overlay if variant == 'fex64' else None, stage=stage)
+            if stage != 'full':
+                result['variants'][variant] = stage_result
+                continue
             outputs = json.loads((target / 'outputs.json').read_bytes())
             source.require(outputs['ec_modules'] == (2 if variant == 'fex64' else 0) and
                            outputs['unique_ec_binaries'] == (1 if variant == 'fex64' else 0),
@@ -146,8 +164,11 @@ def build(out, variants):
             result['variants'][variant] = dict(status='BUILT_SOURCE_ONLY', files=len(outputs['files']),
                                                ec_modules=outputs['ec_modules'],
                                                unique_ec_binaries=outputs['unique_ec_binaries'])
-        result['archive'] = archive(out, variants)
-        result['status'] = 'BUILT_SOURCE_ONLY_NOT_ACCEPTED'
+        if stage == 'full':
+            result['archive'] = archive(out, variants)
+            result['status'] = 'BUILT_SOURCE_ONLY_NOT_ACCEPTED'
+        else:
+            result['status'] = 'STAGE_ONLY_NOT_ACCEPTED'
     except Exception as error:
         result.update(status='FAILED', first_failure=str(error)[:700])
         raise
@@ -160,6 +181,9 @@ def main():
     parser.add_argument('--check-inputs', action='store_true')
     parser.add_argument('--out', type=Path)
     parser.add_argument('--only', choices=['fex64', 'fex32'])
+    parser.add_argument('--stage', default='full',
+                        choices=['full', 'inventory', 'patches', 'configure', 'compile', 'native-stand', 'admission'])
+    parser.add_argument('--from-outputs', type=Path)
     args = parser.parse_args()
     if args.check_inputs:
         pin, product, engine, locks, _ = inputs()
@@ -171,7 +195,8 @@ def main():
     if args.out is None:
         parser.error('--out is required for a cloud build')
     try:
-        build(args.out.resolve(), [args.only] if args.only else ['fex64', 'fex32'])
+        build(args.out.resolve(), [args.only] if args.only else ['fex64', 'fex32'],
+              stage=args.stage, from_outputs=args.from_outputs)
         return 0
     except Exception as error:
         print('FEX source build failed: ' + str(error)[:700], file=sys.stderr)

@@ -315,8 +315,70 @@ def prepare_build_tools(root, out, lock, tools, env):
     return tc
 
 
-def build(out, lock, tools, source_overlay=None):
+def configured_sources(build_dir, source):
+    own_cmake_cache(build_dir, source)
+    rows = json.loads((build_dir / 'compile_commands.json').read_text())
+    if type(rows) is not list or not rows:
+        raise ValueError('Compile database is missing or empty')
+    sources = [(Path(row['directory']) / row['file']).resolve() for row in rows]
+    foreign = [str(path) for path in sources if not path.is_relative_to(source.resolve())
+               and not path.is_relative_to(build_dir.resolve())]
+    if foreign:
+        raise ValueError('Foreign compile sources: ' + repr(foreign[:5]))
+    return dict(sources=len(sources), foreign=0)
+
+
+def admit_outputs(component, out, variant):
+    """Validate already compiled bytes; never configure or build a predecessor."""
+    component = Path(component).resolve()
+    if variant not in ('fex64', 'fex32'):
+        raise ValueError('Unknown output architecture')
+    wow64 = variant == 'fex32'
+    names = ({'fex/aarch64-windows/xtajit.dll', 'fex/aarch64-unix/libwow64fex.so',
+              'fex/aarch64-unix/xtajit.so', 'fex/aarch64-unix/libmacrunner-hwtso.dylib'}
+             if wow64 else
+             {'fex/aarch64-windows/xtajit64.dll', 'wine/lib/wine/aarch64-windows/libarm64ecfex.dll',
+              'fex/aarch64-unix/libarm64ecfex.so', 'fex/aarch64-unix/xtajit64.so',
+              'fex/aarch64-unix/libmacrunner-hwtso.dylib'})
+    manifest = json.loads((component / 'outputs.json').read_bytes())
+    rows = manifest.get('files')
+    if type(rows) is not dict or set(rows) != names:
+        raise ValueError('Compiled output inventory differs')
+    receipt, ec_hashes = {}, set()
+    engine = component / 'engine'
+    if engine.is_symlink() or not engine.is_dir():
+        raise ValueError('Compiled engine directory is missing or foreign')
+    actual = {str(p.relative_to(engine)) for p in engine.rglob('*') if p.is_file() or p.is_symlink()}
+    if actual != names:
+        raise ValueError('Compiled engine has missing or extra files')
+    for name in sorted(names):
+        selected = engine / name
+        if (selected.is_symlink() or not selected.resolve().is_relative_to(engine.resolve())
+                or type(rows[name]) is not dict or type(rows[name].get('bytes')) is not int
+                or selected.stat().st_size != rows[name]['bytes'] or sha(selected) != rows[name].get('sha256')):
+            raise ValueError('Compiled output bytes differ: ' + name)
+        row = dict(bytes=selected.stat().st_size, sha256=sha(selected))
+        if name.endswith('.dll'):
+            row.update(pe_header(selected, ec=not wow64))
+            if not wow64:
+                ec_hashes.add(row['sha256'])
+        elif not macho_arm64(selected):
+            raise ValueError('Compiled native output is not ARM64: ' + name)
+        receipt[name] = row
+    ec_modules = 0 if wow64 else sum(name.endswith('.dll') for name in receipt)
+    if (ec_modules, len(ec_hashes)) != ((0, 0) if wow64 else (2, 1)):
+        raise ValueError('ARM64EC output alias count differs')
+    result = dict(schema=1, status='BYTE_ADMISSION_ONLY_NOT_ACCEPTED', files=receipt,
+                  ec_modules=ec_modules, unique_ec_binaries=len(ec_hashes), install='skipped',
+                  comparison='NOT_ENABLED', stands='NOT_RUN')
+    (Path(out) / 'byte-admission.json').write_text(json.dumps(result, indent=2) + '\n')
+    return result
+
+
+def build(out, lock, tools, source_overlay=None, stage='full'):
     cloud_only()
+    if stage not in ('full', 'patches', 'configure', 'compile', 'native-stand'):
+        raise ValueError('Unknown source build stage')
     out.mkdir(parents=True, exist_ok=True)
     if not (not (_repro_check_32_0 := (out / 'commands.jsonl').exists())):
         raise AssertionError(_check_message('not (out / "commands.jsonl").exists()', {"(out / 'commands.jsonl').exists()": locals().get('_repro_check_32_0', 'NOT_EVALUATED')}, "preserve prior result before a new run"))
@@ -445,6 +507,14 @@ def build(out, lock, tools, source_overlay=None):
             raise AssertionError(_check_message('subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=target, text=True).strip() == row["revision"]', {"subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=target, text=True).strip()": locals().get('_repro_check_42_0', 'NOT_EVALUATED'), "row['revision']": locals().get('_repro_check_42_1', 'NOT_EVALUATED')}, 'validation failed'))
     if source_overlay is not None:
         source_overlay('submodules', src, lock, out, env)
+    if stage == 'patches':
+        return dict(status='STAGE_ONLY_NOT_ACCEPTED', stage=stage, install='skipped')
+    if stage == 'native-stand':
+        if wow64 or not lock.get('build_native_stand'):
+            raise ValueError('Native stage requires FEX64')
+        native_stand.build(fork, src, lock, root / 'native-stand', out, env,
+                           sys.modules[__name__], clang, clangxx)
+        return dict(status='STAGE_ONLY_NOT_ACCEPTED', stage=stage, install='skipped')
     mapped = " ".join("-f" + tag + "-prefix-map=" + str(src) + "=/hyperbridge/fex/src" for tag in ["file", "debug", "macro"])
     pe = root / ("wow64" if wow64 else "arm64ec")
     triple = "aarch64-w64-mingw32" if wow64 else "arm64ec-w64-mingw32"
@@ -456,23 +526,20 @@ def build(out, lock, tools, source_overlay=None):
              "-DCMAKE_SHARED_LINKER_FLAGS=-static -static-libgcc -static-libstdc++ -Wl,--file-alignment=4096,/mllvm:-align-loops=1 -Wl,--Xlink=/timestamp:" + str(lock["pe_link_timestamp"])]
     run(["cmake", "-S", str(src), "-B", str(pe), "-G", "Ninja",
          "-DCMAKE_TOOLCHAIN_FILE=" + str(src / "Data/CMake/toolchain_mingw.cmake"), *flags], root, out, "pe-configure", env)
-    own_cmake_cache(pe, src)
-    sources = [(Path(row["directory"]) / row["file"]).resolve()
-               for row in json.loads((pe / "compile_commands.json").read_text())]
-    foreign = [str(path) for path in sources if not path.is_relative_to(src.resolve())
-               and not path.is_relative_to(pe.resolve())]
-    if not (not (_repro_check_43_0 := foreign)):
-        raise AssertionError(_check_message('not foreign', {'foreign': locals().get('_repro_check_43_0', 'NOT_EVALUATED')}, "foreign compile sources: " + repr(foreign[:5])))
+    pe_sources = configured_sources(pe, src)
     jobs = str(min(os.cpu_count() or 2, profile['jobs'] if profile else lock.get('build_jobs', 8)))
-    run(["cmake", "--build", str(pe), "--parallel", jobs, "--target", "wow64fex" if wow64 else "arm64ecfex"], root, out, "pe-build", env)
     unix = root / "unixlib"
     unix_src = src / "Source/Windows/UnixLib"
     run(["cmake", "-S", str(unix_src), "-B", str(unix), "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
          "-DCMAKE_CXX_COMPILER=" + clangxx, "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
          "-DCMAKE_OSX_ARCHITECTURES=arm64", "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + lock["deployment_target"],
          "-DCMAKE_OSX_SYSROOT=" + env["SDKROOT"],
-         "-DCMAKE_CXX_FLAGS=" + mapped], root, out, "unix-configure", env)
-    own_cmake_cache(unix, unix_src)
+         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", "-DCMAKE_CXX_FLAGS=" + mapped], root, out, "unix-configure", env)
+    unix_sources = configured_sources(unix, unix_src)
+    (out / 'configure-sources.json').write_text(json.dumps(dict(pe=pe_sources, unix=unix_sources), indent=2) + '\n')
+    if stage == 'configure':
+        return dict(status='STAGE_ONLY_NOT_ACCEPTED', stage=stage, install='skipped')
+    run(["cmake", "--build", str(pe), "--parallel", jobs, "--target", "wow64fex" if wow64 else "arm64ecfex"], root, out, "pe-build", env)
     run(["cmake", "--build", str(unix), "--parallel", jobs, "--target", "wow64fex_unixlib" if wow64 else "arm64ecfex_unixlib", "macrunner_hwtso"], root, out, "unix-build", env)
     outputs = {
         "fex/aarch64-windows/xtajit.dll": pe / "Bin/xtajit.dll",
@@ -492,14 +559,20 @@ def build(out, lock, tools, source_overlay=None):
         selected.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(built, selected)
         row = {"sha256": sha(selected), "bytes": selected.stat().st_size}
-        if name.endswith(".dll"):
-            row.update(pe_header(selected, ec=not wow64))
         receipt[name] = row
     (out / "outputs.json").write_text(json.dumps({"classification": "BUILT_SOURCE_ONLY_NOT_ACCEPTED_NOT_GOLDEN",
-        "files": receipt, "ec_modules": 0 if wow64 else sum(name.endswith(".dll") for name in receipt),
-        "unique_ec_binaries": 0 if wow64 else 1, "install": "skipped", "signing": "NOT_PERFORMED",
+        "files": receipt, "ec_modules": 'NOT_ENABLED',
+        "unique_ec_binaries": 'NOT_ENABLED', "install": "skipped", "signing": "NOT_PERFORMED",
         "section_comparison": "PENDING", "work_preserved_in_cloud": str(root)}, indent=2) + "\n")
     fex_notices.collect_source_notices(src, out, lock)
+    if stage == 'compile':
+        return dict(status='STAGE_ONLY_NOT_ACCEPTED', stage=stage, files=len(receipt), install='skipped')
+    admitted = admit_outputs(out, out, lock.get('variant', 'fex64'))
+    outputs_path = out / 'outputs.json'
+    outputs_report = json.loads(outputs_path.read_bytes())
+    outputs_report.update(files=admitted['files'], ec_modules=admitted['ec_modules'],
+                          unique_ec_binaries=admitted['unique_ec_binaries'])
+    outputs_path.write_text(json.dumps(outputs_report, indent=2) + '\n')
     if lock.get('build_native_stand'):
         native_stand.build(fork, src, lock, root / 'native-stand', out, env, sys.modules[__name__], clang, clangxx)
     print(json.dumps({"status": "BUILT_SOURCE_ONLY_NOT_ACCEPTED_NOT_GOLDEN", "outputs": len(receipt), "ec_modules": 0 if wow64 else 2,

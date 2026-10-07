@@ -2,6 +2,7 @@
   "schema": 1,
   "repo": "https://github.com/t0b1kent/hyperbridge.git",
   "revision": "4d489f182db3b05bb7465d9705483c490f718114",
+  "producer": {"source":"native-builder.py","bytes":3543,"sha256":"a9252c4bb31413250d1b8a009392bbddb8e5df40164aa7dfac5a3da2f7cc603e"},
   "files": [
     {"path":"stands/synthetic/CMakeLists.txt","bytes":4486,"sha256":"60f80700b3dc863baf0c9c071ce6b6886715c963c532b9577dc4702fe34ea8a7"},
     {"path":"stands/synthetic/LICENSE","bytes":1081,"sha256":"c8d31b493eb83ed65af7e30fc8ca3f63591aa092a74e1e09f52efad50ba1d95b"},

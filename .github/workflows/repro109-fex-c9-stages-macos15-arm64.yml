@@ -1,0 +1,135 @@
+name: REPRO109 FEX64 recipe stages and FEX32 control
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repro109-fex-c9-stages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    name: FEX ${{ matrix.slot }}
+    runs-on: macos-15
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - {slot: fex64-inventory, architecture: fex64, stage: inventory}
+          - {slot: fex64-patches, architecture: fex64, stage: patches}
+          - {slot: fex64-configure, architecture: fex64, stage: configure}
+          - {slot: fex64-compile, architecture: fex64, stage: compile}
+          - {slot: fex64-native-stand, architecture: fex64, stage: native-stand}
+          - {slot: fex32-full, architecture: fex32, stage: full}
+    env:
+      REPRO109_ARCHITECTURE: ${{ matrix.architecture }}
+      REPRO109_STAGE: ${{ matrix.stage }}
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - name: Initialize bounded evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repro109-fex-slot"
+          printf 'NOT_REACHED\n' > "$RUNNER_TEMP/repro109-fex-slot/state.txt"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+          architecture: arm64
+      - name: Check selected Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual=$(xcodebuild -version)
+          [ "$actual" = $'Xcode 16.4\nBuild version 16F6' ] || { printf 'Pinned Xcode differs\n'; exit 1; }
+      - name: Run one source recipe stage
+        shell: bash
+        run: |
+          set -uo pipefail
+          slot="$RUNNER_TEMP/repro109-fex-slot"
+          case "$REPRO109_ARCHITECTURE/$REPRO109_STAGE" in
+            fex64/inventory|fex64/patches|fex64/configure|fex64/compile|fex64/native-stand|fex32/full) ;;
+            *) printf 'Invalid stage selector\n'; exit 2 ;;
+          esac
+          python3 -I -B build/repro109fex/build.py --out "$slot/build" \
+            --only "$REPRO109_ARCHITECTURE" --stage "$REPRO109_STAGE" > "$slot/driver.log" 2>&1
+          stage_rc=$?
+          printf '%s\n' "$stage_rc" > "$slot/rc.txt"
+          printf 'EXECUTED\n' > "$slot/state.txt"
+          printf 'FEX %s/%s rc=%s; install skipped; complete log in artifact\n' "$REPRO109_ARCHITECTURE" "$REPRO109_STAGE" "$stage_rc"
+          exit "$stage_rc"
+      - name: Preserve reports and unsigned component bytes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repro109-${{ matrix.slot }}-${{ github.sha }}
+          path: ${{ runner.temp }}/repro109-fex-slot/
+          if-no-files-found: error
+          retention-days: 7
+
+  admission:
+    name: FEX fex64-admission
+    needs: stage
+    if: always()
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Initialize admission evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repro109-fex-admission"
+          printf 'NOT_REACHED\n' > "$RUNNER_TEMP/repro109-fex-admission/state.txt"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+          architecture: arm64
+      - name: Retrieve bytes from the compile cell of this run
+        id: compiled
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: repro109-fex64-compile-${{ github.sha }}
+          path: ${{ runner.temp }}/repro109-fex-compiled
+      - name: Admit previously compiled bytes without rebuilding
+        env:
+          REPRO109_COMPILE_TRANSFER: ${{ steps.compiled.outcome }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          slot="$RUNNER_TEMP/repro109-fex-admission"
+          component="$RUNNER_TEMP/repro109-fex-compiled/build"
+          if [ "$REPRO109_COMPILE_TRANSFER" != success ] || [ ! -f "$component/fex64/outputs.json" ]; then
+            printf 'NOT_ENABLED_PREDECESSOR_COMPILE_MISSING\n' > "$slot/state.txt"
+            printf 'Admission has no compiled predecessor; install skipped\n'
+            exit 1
+          fi
+          python3 -I -B build/repro109fex/build.py --out "$slot/build" \
+            --only fex64 --stage admission --from-outputs "$component" > "$slot/driver.log" 2>&1
+          stage_rc=$?
+          printf '%s\n' "$stage_rc" > "$slot/rc.txt"
+          printf 'EXECUTED\n' > "$slot/state.txt"
+          printf 'FEX admission rc=%s; install skipped; complete log in artifact\n' "$stage_rc"
+          exit "$stage_rc"
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repro109-fex64-admission-${{ github.sha }}
+          path: ${{ runner.temp }}/repro109-fex-admission/
+          if-no-files-found: error
+          retention-days: 7

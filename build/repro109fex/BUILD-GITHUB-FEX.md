@@ -89,3 +89,41 @@ FEX32 использует прежний source digest, без этого FEX64
 Сверка исходников не доказывает сборку, совместимость
 нативного adapter или исполнение готового компонента. Следующая предметная
 проверка — actual clean cloud build этого workflow.
+
+## Матрица шагов FEX64
+
+`repro109-fex-c9-stages-macos15-arm64.yml` сохраняет Xcode16.4/16F6,
+SDK15.5 и остальные закрепления текущей облачной сборки. Она запускает
+независимые задания с `fail-fast: false`; отказ нативного бегунка не мешает
+проверить байты из задания compile. FEX32 full остаётся отдельным контролем.
+
+| `--stage` | Проверяется | Граница |
+|---|---|---|
+| inventory | Отпечатки входов рецепта, опись6928 и порядок патчей | Actual patched source ещё NOT_ENABLED |
+| patches | Реальные pinned checkout, наложение серии, submodules, postimages6928 | CMake configure/build не вызывается |
+| configure | Та же подготовка плюс PE/Unix CMake и владение обоими деревьями | Ни один target не компилируется |
+| compile | Подготовка, configure, PE/Unix compilation, сохранение5outputs | EC admission и native runner не вызываются |
+| native-stand | Подготовка той же серии и её native adapter/runner | PE/Unix target compilation не вызывается |
+| admission | Байты из compile того же workflow:5files, SHA/size, Mach-O ARM64, EC2/unique1 | Сборка предшественников не повторяется |
+
+Каждая source-клетка сама выполняет необходимые ей предыдущие шаги;
+общая ошибка checkout/patch/tools может поэтому появиться в нескольких
+клетках. Inventory проверяет опись, а patches сверяет реальные postimages.
+Admission ждёт завершения matrix через `if: always()`, получает compile
+artifact по имени с текущим Git SHA. Если compile не вернул outputs,
+состояние — `NOT_ENABLED_PREDECESSOR_COMPILE_MISSING`, код1.
+Зелёные клетки означают только соответствующие границы, не принятие продукта.
+
+Нативный producer — `support/native-builder.py`, byte-pinned в
+`support/native-stand.lock.json`. Это точный snapshot публичного
+`stands/synthetic/build.py` с исправлением вывода для sibling build root.
+Wrapper задаёт ему ROOT уже проверенного публичного fork4d489f18;
+публичные adapter файлы по-прежнему проверяются по исходной описи16.
+Так source revision не зависит от ещё не созданного commit исправления.
+Native RESULT сохраняет SHA выбранного producer. Для child build root
+вывод остаётся относительным, для sibling — абсолютным. Это только
+форматирование вывода; source ownership и ARM64 output guards обязательны.
+
+Локальная проверка без загрузок/компилятора:
+`REPRO109_TEST_TMP=<свой scratch> python3 -I -B build/repro109fex/test_stages.py`.
+Повтор с `-O` проверяет те же отказы; сборка cloud-only.

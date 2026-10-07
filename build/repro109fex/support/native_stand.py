@@ -93,6 +93,12 @@ def verify_builder(fork, lock):
         require(path.is_file() and not path.is_symlink() and
                 path.stat().st_size == row['bytes'] and digest(path.read_bytes()) == row['sha256'],
                 'Pinned public native builder source differs')
+    row = selected['producer']
+    require(row['source'] == 'native-builder.py', 'Native producer path differs')
+    path = HERE / row['source']
+    require(path.is_file() and not path.is_symlink() and
+            path.stat().st_size == row['bytes'] and digest(path.read_bytes()) == row['sha256'],
+            'Pinned corrected native producer differs')
     return selected
 
 
@@ -129,6 +135,7 @@ def build(fork, source, lock, build_dir, out, env, fex, clang, clangxx):
     result = dict(schema=1, status='STARTED', first_failure=None, source_built=False,
                   stands='NOT_RUN', comparison='NOT_ENABLED', install='skipped',
                   builder_revision=builder_lock['revision'], builder_files=len(builder_lock['files']))
+    result['producer'] = builder_lock['producer']
     result['license_sha256'] = digest((report / 'LICENSE').read_bytes())
     native = Path(build_dir) / 'src'
     configured = False
@@ -151,9 +158,13 @@ def build(fork, source, lock, build_dir, out, env, fex, clang, clangxx):
     previous_argv = sys.argv[:]
     try:
         spec = importlib.util.spec_from_file_location('repro109_public_native_builder',
-                    Path(fork) / 'stands/synthetic/build.py')
+                    HERE / builder_lock['producer']['source'])
         producer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(producer)
+        # The byte-pinned producer is the public builder with its output-path
+        # fix. Its source root is the already verified public fork, even when
+        # the producer file itself lives in this immutable recipe snapshot.
+        producer.ROOT = Path(fork).resolve()
         producer.run = command  # Real existing producer; commands use the owned bounded runner.
         sys.argv = [str(producer.__file__), '--fex-source', str(source), '--build-dir', str(build_dir)]
         producer.main()
