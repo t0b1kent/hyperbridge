@@ -27,7 +27,7 @@ counterexamples bit for bit, for example:
 
 ## Results so far
 
-Two different tables exist — one per vendor (36 runs: 32 GitHub-hosted jobs, one cloud guest, one bare-metal machine,
+Two different tables exist — one per vendor (34 runs: 32 GitHub-hosted jobs, one cloud guest, one bare-metal machine,
 each run repeated twice with a byte-identical result):
 
 | Table (SHA-256 of `raw.csv`) | Processors |
