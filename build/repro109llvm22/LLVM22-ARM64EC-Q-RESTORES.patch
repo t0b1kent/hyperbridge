@@ -1,0 +1,250 @@
+--- a/llvm/lib/Target/AArch64/AArch64FrameLowering.cpp
++++ b/llvm/lib/Target/AArch64/AArch64FrameLowering.cpp
+@@ -270,6 +270,11 @@
+                                    cl::desc("enable use of redzone on AArch64"),
+                                    cl::init(false), cl::Hidden);
+ 
++static cl::opt<bool> SplitArm64ECThunkQRestores(
++    "aarch64-arm64ec-split-thunk-q-restores",
++    cl::desc("Use single Q-register restores in ARM64EC entry thunks"),
++    cl::init(false), cl::Hidden);
++
+ static cl::opt<bool> StackTaggingMergeSetTag(
+     "stack-tagging-merge-settag",
+     cl::desc("merge settag instruction in function epilog"), cl::init(true),
+@@ -1134,6 +1139,22 @@
+     MIB = BuildMI(MF, DL, TII.get(AArch64::SEH_SaveFReg))
+               .addImm(Reg)
+               .addImm(Imm * 8)
++              .setMIFlag(Flag);
++    break;
++  }
++  case AArch64::LDRQui: {
++    unsigned Reg = RegInfo->getSEHRegNum(MBBI->getOperand(0).getReg());
++    MIB = BuildMI(MF, DL, TII.get(AArch64::SEH_SaveAnyRegQ))
++              .addImm(Reg)
++              .addImm(Imm * 16)
++              .setMIFlag(Flag);
++    break;
++  }
++  case AArch64::LDRQpost: {
++    unsigned Reg = RegInfo->getSEHRegNum(MBBI->getOperand(1).getReg());
++    MIB = BuildMI(MF, DL, TII.get(AArch64::SEH_SaveAnyRegQX))
++              .addImm(Reg)
++              .addImm(-Imm)
+               .setMIFlag(Flag);
+     break;
+   }
+@@ -2182,6 +2203,11 @@
+   SmallVector<RegPairInfo, 8> RegPairs;
+   bool NeedsWinCFI = needsWinCFI(MF);
+ 
++  const bool SplitQRestores =
++      SplitArm64ECThunkQRestores &&
++      MF.getSubtarget<AArch64Subtarget>().isWindowsArm64EC() &&
++      MF.getFunction().getCallingConv() == CallingConv::ARM64EC_Thunk_X64;
++
+   if (MBBI != MBB.end())
+     DL = MBBI->getDebugLoc();
+ 
+@@ -2259,6 +2285,36 @@
+     if (isTargetWindows(MF) && RPI.isPaired()) {
+       std::swap(Reg1, Reg2);
+       std::swap(FrameIdxReg1, FrameIdxReg2);
++    }
++
++    if (SplitQRestores && RPI.Type == RegPairInfo::FPR128 && RPI.isPaired()) {
++      // Keep the spill layout and stores unchanged. On Apple M1 under hardware
++      // TSO, paired Q loads are expensive even though single Q loads are not.
++      // Reg2 is the lower-address register after the Windows register swap.
++      auto EmitSingleRestore = [&](Register Reg, unsigned FrameIdx, int Offset) {
++        MachineInstrBuilder MIB =
++            BuildMI(MBB, MBBI, DL, TII.get(AArch64::LDRQui))
++                .addReg(Reg, RegState::Define)
++                .addReg(AArch64::SP)
++                .addImm(Offset)
++                .setMIFlag(MachineInstr::FrameDestroy);
++        MIB.addMemOperand(MF.getMachineMemOperand(
++            MachinePointerInfo::getFixedStack(MF, FrameIdx),
++            MachineMemOperand::MOLoad, Size, Alignment));
++        TII.suppressLdStPair(*MIB);
++        if (NeedsWinCFI)
++          insertSEH(MIB, TII, MachineInstr::FrameDestroy);
++      };
++      if (RPI.Offset == 0) {
++        // Restore the higher slot first so emitEpilogue can fold the SP bump
++        // into the final load at offset zero. SP must not move before this load.
++        EmitSingleRestore(Reg1, FrameIdxReg1, RPI.Offset + 1);
++        EmitSingleRestore(Reg2, FrameIdxReg2, RPI.Offset);
++      } else {
++        EmitSingleRestore(Reg2, FrameIdxReg2, RPI.Offset);
++        EmitSingleRestore(Reg1, FrameIdxReg1, RPI.Offset + 1);
++      }
++      continue;
+     }
+ 
+     AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
+--- a/llvm/lib/Target/AArch64/AArch64InstrInfo.td
++++ b/llvm/lib/Target/AArch64/AArch64InstrInfo.td
+@@ -5708,6 +5708,8 @@
+   def SEH_PACSignLR : Pseudo<(outs), (ins), []>, Sched<[]>;
+   def SEH_SaveAnyRegI : Pseudo<(outs), (ins i32imm:$reg0, i32imm:$offs), []>, Sched<[]>;
+   def SEH_SaveAnyRegIP : Pseudo<(outs), (ins i32imm:$reg0, i32imm:$reg1, i32imm:$offs), []>, Sched<[]>;
++  def SEH_SaveAnyRegQ : Pseudo<(outs), (ins i32imm:$reg0, i32imm:$offs), []>, Sched<[]>;
++  def SEH_SaveAnyRegQX : Pseudo<(outs), (ins i32imm:$reg0, i32imm:$offs), []>, Sched<[]>;
+   def SEH_SaveAnyRegQP : Pseudo<(outs), (ins i32imm:$reg0, i32imm:$reg1, i32imm:$offs), []>, Sched<[]>;
+   def SEH_SaveAnyRegQPX : Pseudo<(outs), (ins i32imm:$reg0, i32imm:$reg1, i32imm:$offs), []>, Sched<[]>;
+   def SEH_AllocZ : Pseudo<(outs), (ins i32imm:$offs), []>, Sched<[]>;
+--- a/llvm/lib/Target/AArch64/AArch64InstrInfo.cpp
++++ b/llvm/lib/Target/AArch64/AArch64InstrInfo.cpp
+@@ -1404,6 +1404,8 @@
+     case AArch64::SEH_PACSignLR:
+     case AArch64::SEH_SaveAnyRegI:
+     case AArch64::SEH_SaveAnyRegIP:
++    case AArch64::SEH_SaveAnyRegQ:
++    case AArch64::SEH_SaveAnyRegQX:
+     case AArch64::SEH_SaveAnyRegQP:
+     case AArch64::SEH_SaveAnyRegQPX:
+     case AArch64::SEH_AllocZ:
+--- a/llvm/lib/Target/AArch64/AArch64PrologueEpilogue.cpp
++++ b/llvm/lib/Target/AArch64/AArch64PrologueEpilogue.cpp
+@@ -242,6 +242,8 @@
+   case AArch64::SEH_SaveFReg:
+   case AArch64::SEH_SaveAnyRegI:
+   case AArch64::SEH_SaveAnyRegIP:
++  case AArch64::SEH_SaveAnyRegQ:
++  case AArch64::SEH_SaveAnyRegQX:
+   case AArch64::SEH_SaveAnyRegQP:
+   case AArch64::SEH_SaveAnyRegQPX:
+     ImmOpnd = &MBBI->getOperand(ImmIdx);
+--- a/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
++++ b/llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp
+@@ -3621,6 +3621,24 @@
+                                     MI->getOperand(2).getImm());
+     return;
+ 
++  case AArch64::SEH_SaveAnyRegQ:
++    assert(MI->getOperand(1).getImm() >= 0 &&
++           MI->getOperand(1).getImm() <= 1008 &&
++           MI->getOperand(1).getImm() % 16 == 0 &&
++           "SaveAnyRegQ SEH opcode offset must fit into 6 scaled bits");
++    TS->emitARM64WinCFISaveAnyRegQ(MI->getOperand(0).getImm(),
++                                 MI->getOperand(1).getImm());
++    return;
++
++  case AArch64::SEH_SaveAnyRegQX:
++    assert(MI->getOperand(1).getImm() < 0 &&
++           MI->getOperand(1).getImm() >= -1008 &&
++           MI->getOperand(1).getImm() % 16 == 0 &&
++           "SaveAnyRegQX SEH opcode offset must fit into 6 scaled bits");
++    TS->emitARM64WinCFISaveAnyRegQX(MI->getOperand(0).getImm(),
++                                  -MI->getOperand(1).getImm());
++    return;
++
+   case AArch64::SEH_SaveAnyRegQP:
+     assert(MI->getOperand(1).getImm() - MI->getOperand(0).getImm() == 1 &&
+            "Non-consecutive registers not allowed for save_any_reg");
+--- /dev/null
++++ b/llvm/test/CodeGen/AArch64/arm64ec-split-thunk-q-restores.ll
+@@ -0,0 +1,101 @@
++; RUN: llc -mtriple=arm64ec-pc-windows-msvc -verify-machineinstrs %s -o %t.default
++; RUN: llc -mtriple=arm64ec-pc-windows-msvc -verify-machineinstrs -aarch64-arm64ec-split-thunk-q-restores=false %s -o %t.off
++; RUN: diff %t.default %t.off
++; RUN: FileCheck %s --check-prefixes=COMMON,PAIRED < %t.default
++; RUN: llc -mtriple=arm64ec-pc-windows-msvc -verify-machineinstrs -aarch64-arm64ec-split-thunk-q-restores %s -o %t.on
++; RUN: FileCheck %s --check-prefixes=COMMON,SPLIT < %t.on
++; RUN: llc -mtriple=arm64ec-pc-windows-msvc -verify-machineinstrs -aarch64-arm64ec-split-thunk-q-restores -filetype=obj %s -o %t.obj
++; RUN: llvm-readobj --unwind %t.obj > %t.unwind
++; RUN: llc -mtriple=arm64ec-pc-windows-msvc -verify-machineinstrs -aarch64-arm64ec-split-thunk-q-restores -filetype=obj %S/arm64ec-entry-thunks.ll -o %t.signatures.obj
++; RUN: llvm-readobj --unwind %t.signatures.obj > %t.signatures.unwind
++; RUN: llc -mtriple=arm64ec-pc-windows-msvc -verify-machineinstrs -aarch64-arm64ec-split-thunk-q-restores %S/arm64ec-exit-thunks.ll | FileCheck %S/arm64ec-exit-thunks.ll
++; RUN: llc -mtriple=arm64ec-pc-windows-msvc -arm64ec-generate-thunks=false %s -o %t.native-off
++; RUN: llc -mtriple=arm64ec-pc-windows-msvc -arm64ec-generate-thunks=false -aarch64-arm64ec-split-thunk-q-restores %s -o %t.native-on
++; RUN: diff %t.native-off %t.native-on
++; RUN: llc -mtriple=aarch64-pc-windows-msvc %s -o %t.arm64-off
++; RUN: llc -mtriple=aarch64-pc-windows-msvc -aarch64-arm64ec-split-thunk-q-restores %s -o %t.arm64-on
++; RUN: diff %t.arm64-off %t.arm64-on
++
++; The option changes only the Q restores of x64-to-native entry thunks.
++; Spills, GPR restores, native bodies, and non-EC targets are controls.
++; The second signature checks a non-void return; the third keeps a paired
++; vector memory operation in an ordinary native body.
++
++define void @no_op() nounwind {
++; COMMON-LABEL: $ientry_thunk$cdecl$v$v:
++; COMMON:       stp q6, q7, [sp, #-176]!
++; COMMON-NEXT:  .seh_save_any_reg_px q6, 176
++; COMMON-NEXT:  stp q8, q9, [sp, #32]
++; COMMON-NEXT:  .seh_save_any_reg_p q8, 32
++; COMMON-NEXT:  stp q10, q11, [sp, #64]
++; COMMON-NEXT:  .seh_save_any_reg_p q10, 64
++; COMMON-NEXT:  stp q12, q13, [sp, #96]
++; COMMON-NEXT:  .seh_save_any_reg_p q12, 96
++; COMMON-NEXT:  stp q14, q15, [sp, #128]
++; COMMON-NEXT:  .seh_save_any_reg_p q14, 128
++; COMMON:       .seh_startepilogue
++; COMMON-NEXT:  ldp x29, x30, [sp, #160]
++; COMMON-NEXT:  .seh_save_fplr 160
++; PAIRED-NEXT:  ldp q14, q15, [sp, #128]
++; PAIRED-NEXT:  .seh_save_any_reg_p q14, 128
++; PAIRED-NEXT:  ldp q12, q13, [sp, #96]
++; PAIRED-NEXT:  .seh_save_any_reg_p q12, 96
++; PAIRED-NEXT:  ldp q10, q11, [sp, #64]
++; PAIRED-NEXT:  .seh_save_any_reg_p q10, 64
++; PAIRED-NEXT:  ldp q8, q9, [sp, #32]
++; PAIRED-NEXT:  .seh_save_any_reg_p q8, 32
++; PAIRED-NEXT:  ldp q6, q7, [sp], #176
++; PAIRED-NEXT:  .seh_save_any_reg_px q6, 176
++; SPLIT-NEXT:   ldr q14, [sp, #128]
++; SPLIT-NEXT:   .seh_save_any_reg q14, 128
++; SPLIT-NEXT:   ldr q15, [sp, #144]
++; SPLIT-NEXT:   .seh_save_any_reg q15, 144
++; SPLIT-NEXT:   ldr q12, [sp, #96]
++; SPLIT-NEXT:   .seh_save_any_reg q12, 96
++; SPLIT-NEXT:   ldr q13, [sp, #112]
++; SPLIT-NEXT:   .seh_save_any_reg q13, 112
++; SPLIT-NEXT:   ldr q10, [sp, #64]
++; SPLIT-NEXT:   .seh_save_any_reg q10, 64
++; SPLIT-NEXT:   ldr q11, [sp, #80]
++; SPLIT-NEXT:   .seh_save_any_reg q11, 80
++; SPLIT-NEXT:   ldr q8, [sp, #32]
++; SPLIT-NEXT:   .seh_save_any_reg q8, 32
++; SPLIT-NEXT:   ldr q9, [sp, #48]
++; SPLIT-NEXT:   .seh_save_any_reg q9, 48
++; SPLIT-NEXT:   ldr q7, [sp, #16]
++; SPLIT-NEXT:   .seh_save_any_reg q7, 16
++; SPLIT-NEXT:   ldr q6, [sp], #176
++; SPLIT-NEXT:   .seh_save_any_reg_x q6, 176
++; COMMON-NEXT:  .seh_endepilogue
++; COMMON-NEXT:  br x0
++  ret void
++}
++
++define i64 @return_integer(i64 %x) nounwind {
++; COMMON-LABEL: $ientry_thunk$cdecl$i8$i8:
++; COMMON:       .seh_startepilogue
++; COMMON-NEXT:  ldp x29, x30, [sp, #160]
++; COMMON-NEXT:  .seh_save_fplr 160
++; PAIRED-NEXT:  ldp q14, q15, [sp, #128]
++; SPLIT-NEXT:   ldr q14, [sp, #128]
++; SPLIT-NEXT:   .seh_save_any_reg q14, 128
++; SPLIT-NEXT:   ldr q15, [sp, #144]
++; SPLIT-NOT:    ldp q
++; COMMON:       .seh_endepilogue
++  ret i64 %x
++}
++
++define void @copy_vectors(ptr noalias %out, ptr noalias %in) nounwind {
++  %v = load <4 x i64>, ptr %in, align 16
++  store <4 x i64> %v, ptr %out, align 16
++  ret void
++}
++
++declare void @external() nounwind
++
++; This native body has an FPR64 spill/reload across a call. The no-thunks
++; comparison above also checks that ordinary D-register restores are unchanged.
++define double @retain_double(double %x) nounwind {
++  call void @external()
++  ret double %x
++}

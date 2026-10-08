@@ -1,0 +1,58 @@
+name: REPRO109 LEVEL4 LLVM22 ARM64EC Q-restore matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [repro109/llvm22-q-restores-20261008]
+    paths:
+      - .github/workflows/repro109-llvm22-q-matrix.yml
+      - build/repro109llvm22/**
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 't0b1kent/hyperbridge'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [patch, build, level4-test, synthetic-asm]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+      - name: Run the selected boundary without Wine or target-code execution
+        env:
+          REPRO109_LLVM_PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          python3 -I -B build/repro109llvm22/run.py \
+            --phase "$REPRO109_LLVM_PHASE" --out "$RUNNER_TEMP/repro109-llvm22-results" \
+            </dev/null > "$RUNNER_TEMP/repro109-llvm22-driver.log" 2>&1
+      - name: Archive complete results even when a boundary fails
+        if: always()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/repro109-llvm22-results"
+          mkdir -p "$out"
+          if [ -f "$RUNNER_TEMP/repro109-llvm22-driver.log" ]; then
+            cp "$RUNNER_TEMP/repro109-llvm22-driver.log" "$out/driver.log"
+          else
+            printf '%s\n' 'WORKER_NOT_ENABLED: checkout/setup or an earlier action failed; inspect the workflow log.' > "$out/worker-not-started.txt"
+          fi
+          tar -czf "$RUNNER_TEMP/repro109-llvm22-${{ matrix.phase }}.tar.gz" -C "$out" .
+          shasum -a 256 "$RUNNER_TEMP/repro109-llvm22-${{ matrix.phase }}.tar.gz" \
+            > "$RUNNER_TEMP/repro109-llvm22-${{ matrix.phase }}.tar.gz.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: repro109-llvm22-${{ matrix.phase }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/repro109-llvm22-${{ matrix.phase }}.tar.gz
+            ${{ runner.temp }}/repro109-llvm22-${{ matrix.phase }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,46 @@
+{
+  "llvm_tag": "llvmorg-22.1.5",
+  "llvm_commit": "5ea218a153f4d2f815b8244eab3e4b4ba5e00e6c",
+  "archive_bytes": 167058820,
+  "archive_sha256": "7972b87b705a003ce70ab55f9f0fb495d156887cba0eb296d284731139118e2c",
+  "option": "aarch64-arm64ec-split-thunk-q-restores",
+  "default": false,
+  "files": [
+    {
+      "path": "llvm/lib/Target/AArch64/AArch64FrameLowering.cpp",
+      "base_sha256": "853b6bc86d7412d15672431fc69a19e57127f0ecd25a93cd4f6c8f170b9384a4",
+      "patched_sha256": "87fd072f4f1ac565d33f3a854b028e759ea400d3d70961855a8eb38e2d82d2ab"
+    },
+    {
+      "path": "llvm/lib/Target/AArch64/AArch64InstrInfo.td",
+      "base_sha256": "d1a699b11fe3b1c6af33aa603df73193b04f6455cbdbb0f6ee8fe7b4cbf02082",
+      "patched_sha256": "40d9569425bc0a7adb951f4b8c1a1847791dba19902056ad9ec0e83b032c363b"
+    },
+    {
+      "path": "llvm/lib/Target/AArch64/AArch64InstrInfo.cpp",
+      "base_sha256": "debd8c8b5e7151d5d507ab2ab7f3f1caa7e25fb9c79614c5affd43ba703357d5",
+      "patched_sha256": "38b7d1c805bf01a76fd5f288026ba0425c992bb877d0987e25c5f4119e0b5839"
+    },
+    {
+      "path": "llvm/lib/Target/AArch64/AArch64PrologueEpilogue.cpp",
+      "base_sha256": "e4cde48e372dc30dd33ccbd40645c717926725e4e561eec15befd8aae45e7efa",
+      "patched_sha256": "08ff1b20d2d085dec8523e99ba6d7d40096325393f711a7f8e47d75a591b6d0a"
+    },
+    {
+      "path": "llvm/lib/Target/AArch64/AArch64AsmPrinter.cpp",
+      "base_sha256": "5c4495a4ed58db3967e2e340c33e8eac6ca5e30554e2003d5cd0c74ed835b973",
+      "patched_sha256": "7a826a1afaa42fda63873903bd12c4b60a027b5f050f6b71e561ffe1580f26ec"
+    },
+    {
+      "path": "llvm/test/CodeGen/AArch64/arm64ec-split-thunk-q-restores.ll",
+      "base_sha256": null,
+      "patched_sha256": "20b1bc0303630146d935ab0f4c5c0fa0075aaa65b09a981b26cb9b664db32a30"
+    }
+  ],
+  "patch_sha256": "be727326e4b2592058b2fe00e37c3d9b330b3d5f64bd99bf3a9cc659f540b215",
+  "static_scope_checks": "PASS",
+  "spill_function_byte_identical": true,
+  "patched_compiler": "NOT_BUILT_LOCAL",
+  "runtime_new_compiler": "NOT_RUN",
+  "install": "SKIPPED"
+}
