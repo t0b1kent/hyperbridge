@@ -107,3 +107,17 @@ from implementation errors, and are not a game compatibility result.
 Built Windows executables from these references must not be executed in
 the translator environment. No game data, injection, debugger attachment,
 or external process handle is used by the requested cells.
+
+
+## Native object name/security sizes (254)
+
+`src/object_marshal254.c` queries Basic, Name and owner/group/DACL security for six synthetic Event/Mutex/Semaphore handles (named and unnamed), then Basic again. It records the namespace name, returned lengths, security control, component lengths/offsets, ACL/ACE sizes and masks. It emits no SID values, account names or process data. The purpose is to explain Basic NameInfoSize/SecurityDescriptorSize and reference consumption from actual native marshaling, without fitting constants to samples.
+
+The Windows runner compiles locally and runs two bounded30s repetitions into `object-marshal254`. Qualification requires rc0,6 INFO/NAME/SD/AFTER records and COMPLETE snapshots6/failures0 in each repetition. Source/binary/stdout hashes and raw stderr/outcomes are retained. Source-only publication; Windows-built executables must never be executed on the Mac. This is a Windows API reference, not a game test or release gate.
+
+
+## Exception continuation nonvolatile family (268)
+
+The source-only C/assembly pair extends pinned209 with all eight guest nonvolatile register seeds and a byte-exact after snapshot. Synthetic CloseHandle and direct NtClose tracing calls run in eight modes: SEH unwind, unchanged VEH continue, R14/R15 edits, nested CloseHandle, R12/R13 edits, RSI/RDI edits, RBP edit, RBX edit. The existing exception record/context dumper is retained. Windows compiles locally and records32 bounded30s runs (two repeats of16 cells) in process-continue268, preserving stdout/stderr, outcomes and source/binary hashes. Qualification checks complete entry/after snapshots, without assuming which register edits survive a native API epilogue. Windows binaries must not be executed on the Mac. No game code or game data.
+
+Combined315 retains both reference families and matches continuation268 build flags to the local console fixture: $probe includes -fms-extensions, -fno-vectorize and -fno-slp-vectorize. The two output directories have independent hashes, qualification and COMPLETE records.

@@ -35,6 +35,13 @@ $p5 = BuildC 'windows_process64-v5c' $probe
 $pi = Build 'windows_process64-pinned209' ($probe + @('-Wl,--no-insert-timestamp')) @()
 $mx = BuildC 'mxcsr_restore64' $probe
 $om = BuildC 'object_family193' $common
+$ma = Join-Path $bin 'object_marshal254.exe'
+& $cc @common (Join-Path $src 'object_marshal254.c') -Wl,--no-insert-timestamp -o $ma -ladvapi32
+if ($LASTEXITCODE -ne 0) { throw 'build failed: object_marshal254' }
+$ct = Join-Path $bin 'windows_process64-continue268.exe'
+& $cc @probe (Join-Path $src 'windows_process64-continue268.c') (Join-Path $src 'windows_process64-continue268.S') -Wl,--no-insert-timestamp -o $ct
+if ($LASTEXITCODE -ne 0) { throw 'build failed: windows_process64-continue268' }
+
 $sc = Build 'stack-context64' $probe @('-lntdll')
 $sr = Build 'stack-returns64' $probe @('-lntdll')
 $ts = Join-Path $bin 'thread_priority_starvation64.exe'
@@ -147,7 +154,75 @@ if (-not $pinnedFailed) {
   'COMPLETE8; Windows API reference only; games0' | Set-Content (Join-Path $d11 'COMPLETE')
 }
 
+$d12 = NewDir 'object-marshal254'
+(Get-FileHash -Algorithm SHA256 (Join-Path $src 'object_marshal254.c')).Hash.ToLower() |
+  Set-Content (Join-Path $d12 'source-sha256.txt')
+(Get-FileHash -Algorithm SHA256 $ma).Hash.ToLower() |
+  Set-Content (Join-Path $d12 'binary-sha256.txt')
+$marshalQualification = @()
+foreach ($rep in 1..2) {
+  $name = "all-rep$rep"
+  RunOne $ma $d12 $name $null 30000
+  $rawPath = Join-Path $d12 ($name + '.txt')
+  $raw = if (Test-Path -LiteralPath $rawPath) { Get-Content -Raw -LiteralPath $rawPath } else { '' }
+  $outcome = @(Get-Content -LiteralPath (Join-Path $d12 'outcomes.txt') |
+    Where-Object { $_ -match ('^' + [regex]::Escape($name) + ' ') })
+  $rc0 = $outcome.Count -eq 1 -and $outcome[0] -eq ($name + ' rc=0')
+  $complete = $raw.Contains('OBJECT254_COMPLETE snapshots=6 failures=0')
+  $info = [regex]::Matches($raw, '(?m)^OBJECT254_INFO ').Count -eq 6
+  $names = [regex]::Matches($raw, '(?m)^OBJECT254_NAME .*state=PRESENT ').Count -eq 6
+  $sd = [regex]::Matches($raw, '(?m)^OBJECT254_SD .*state=PRESENT ').Count -eq 6
+  $after = [regex]::Matches($raw, '(?m)^OBJECT254_AFTER ').Count -eq 6
+  $marshalQualification += [pscustomobject]@{
+    name=$name; repeat=$rep; rc0=$rc0; complete=$complete
+    info=$info; names=$names; sd=$sd; after=$after
+    stdout_sha256=if (Test-Path -LiteralPath $rawPath) {
+      (Get-FileHash -Algorithm SHA256 -LiteralPath $rawPath).Hash.ToLower()
+    } else { $null }
+  }
+  $marshalQualification | ConvertTo-Json -Depth 4 |
+    Set-Content (Join-Path $d12 'qualification.json')
+}
+$marshalFailed = $marshalQualification.Count -ne 2 -or
+  @($marshalQualification | Where-Object { -not ($_.rc0 -and $_.complete -and $_.info -and $_.names -and $_.sd -and $_.after) }).Count -ne 0
+if (-not $marshalFailed) { 'COMPLETE2; synthetic object metadata only; games0' | Set-Content (Join-Path $d12 'COMPLETE') }
+
+$d13 = NewDir 'process-continue268'
+foreach ($source in @('windows_process64-continue268.c','windows_process64-continue268.S')) {
+  $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $src $source)).Hash.ToLower()
+  "$hash  $source" | Add-Content (Join-Path $d13 'source-sha256.txt')
+}
+(Get-FileHash -Algorithm SHA256 $ct).Hash.ToLower() | Set-Content (Join-Path $d13 'binary-sha256.txt')
+$continueQualification = @()
+foreach ($rep in 1..2) {
+  foreach ($cell in @(2,3)) {
+    foreach ($mode in 0..7) {
+      $name = ('r{0}-cell{1:000}-m{2}' -f $rep,$cell,$mode)
+      RunOne $ct $d13 $name @('cell',"$cell","$mode") 30000
+      $rawPath = Join-Path $d13 ($name + '.txt')
+      $raw = if (Test-Path -LiteralPath $rawPath) { Get-Content -Raw -LiteralPath $rawPath } else { '' }
+      $outcome = @(Get-Content -LiteralPath (Join-Path $d13 'outcomes.txt') |
+        Where-Object { $_ -match ('^' + [regex]::Escape($name) + ' ') })
+      $rc0 = $outcome.Count -eq 1 -and $outcome[0] -eq ($name + ' rc=0')
+      $complete = $raw.Contains(('WINENV_PROBE COMPLETE cell={0:000}' -f $cell))
+      $entry = $raw.Contains('field=API.ENTRY268 ')
+      $after = $raw.Contains('field=API.AFTER268 ')
+      $continueQualification += [pscustomobject]@{
+        name=$name; repeat=$rep; cell=$cell; mode=$mode
+        rc0=$rc0; complete=$complete; entry=$entry; after=$after
+        stdout_sha256=if (Test-Path -LiteralPath $rawPath) {
+          (Get-FileHash -Algorithm SHA256 -LiteralPath $rawPath).Hash.ToLower()
+        } else { $null }
+      }
+      $continueQualification | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d13 'qualification.json')
+    }
+  }
+}
+$continueFailed = $continueQualification.Count -ne 32 -or
+  @($continueQualification | Where-Object { -not ($_.rc0 -and $_.complete -and $_.entry -and $_.after) }).Count -ne 0
+if (-not $continueFailed) { 'COMPLETE32; synthetic continuation family only; games0' | Set-Content (Join-Path $d13 'COMPLETE') }
+
 Get-Content $m
-foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10, $d11) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
-if ($pinnedFailed) { exit 1 }
+foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10, $d11, $d12, $d13) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+if ($pinnedFailed -or $marshalFailed -or $continueFailed) { exit 1 }
 exit 0
