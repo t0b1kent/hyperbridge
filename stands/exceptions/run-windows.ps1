@@ -36,10 +36,10 @@ $pi = Build 'windows_process64-pinned209' ($probe + @('-Wl,--no-insert-timestamp
 $mx = BuildC 'mxcsr_restore64' $probe
 $om = BuildC 'object_family193' $common
 $ma = Join-Path $bin 'object_marshal254.exe'
-& $cc @common (Join-Path $src 'object_marshal254.c') -Wl,--no-insert-timestamp -o $ma -ladvapi32
+& $cc @common (Join-Path $src 'object_marshal254.c') '-Wl,--no-insert-timestamp' -o $ma -ladvapi32
 if ($LASTEXITCODE -ne 0) { throw 'build failed: object_marshal254' }
 $ct = Join-Path $bin 'windows_process64-continue268.exe'
-& $cc @probe (Join-Path $src 'windows_process64-continue268.c') (Join-Path $src 'windows_process64-continue268.S') -Wl,--no-insert-timestamp -o $ct
+& $cc @probe (Join-Path $src 'windows_process64-continue268.c') (Join-Path $src 'windows_process64-continue268.S') '-Wl,--no-insert-timestamp' -o $ct
 if ($LASTEXITCODE -ne 0) { throw 'build failed: windows_process64-continue268' }
 
 $sc = Build 'stack-context64' $probe @('-lntdll')
