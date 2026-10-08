@@ -10,7 +10,7 @@ if (Test-Path -LiteralPath $Out) { throw 'Out must be new; preserve failed runs'
 $outDir = (New-Item -ItemType Directory -Path $Out).FullName
 $src = Join-Path $PSScriptRoot 'src'
 $status = @{ schema=1; status='FAILED'; backend='WARP, not hardware'; runtime='NOT_ENABLED'; timeout=$false }
-$build = @{ schema=1; status='NOT_ENABLED'; workers=1; minimum_steps=6; steps=@() }
+$build = @{ schema=1; status='NOT_ENABLED'; workers=1; minimum_steps=7; steps=@() }
 function Digest($path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
 function Native($exe, $argList) {
   & $exe @argList >> (Join-Path $outDir 'build.txt') 2>&1
@@ -68,6 +68,7 @@ try {
     foreach ($stage in @('vs','ps')) {
       Native $Dxc @('-T',"${stage}_6_0",'-E',"${stage}_main",(Join-Path $src 'triquad-endpoints.hlsl'),'-Fo',"shaders\$stage.dxil")
     }
+    Native $Dxc @('-T','ps_6_0','-E','ps_observe',(Join-Path $src 'triquad-endpoints.hlsl'),'-Fo','shaders\ps-observe.dxil')
     Native $Dxc @('-T','ds_6_0','-E','ds_main',(Join-Path $src 'quad-cross.hlsl'),'-Fo','shaders\ds.dxil')
     foreach ($winding in @('cw','ccw')) {
       Native $Dxc @('-T','hs_6_0','-E','hs_main',(Join-Path $src "hs-$winding.hlsl"),'-Fo',"shaders\hs-$winding.dxil")
@@ -79,9 +80,11 @@ try {
     })
     $built | ConvertTo-Json | Set-Content 'built-sha256.json' -Encoding utf8
     $status.arms = @()
-    foreach ($target in @('raw','raw-float')) {
+    foreach ($target in @('raw','raw-float','raw-observed','raw-float-observed')) {
       $childArgs = @('shaders','cases.csv',$target)
-      if ($target -eq 'raw-float') { $childArgs += 'float32' }
+      if ($target.StartsWith('raw-float')) { $childArgs += 'float32' }
+      elseif ($target.EndsWith('-observed')) { $childArgs += 'rgba8' }
+      if ($target.EndsWith('-observed')) { $childArgs += 'observe' }
       $status.runtime = 'STARTED'
       $proc = Start-Process -FilePath (Join-Path $outDir 'bin\quad-warp.exe') -ArgumentList $childArgs `
         -WorkingDirectory $outDir -NoNewWindow -PassThru -RedirectStandardOutput "$target.stdout.txt" -RedirectStandardError "$target.stderr.txt"
@@ -105,7 +108,7 @@ try {
   Write-Host ('FAILED: ' + $status.reason)
 } finally {
   $build | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $outDir 'BUILD.json') -Encoding utf8
-  $rawDirs = @(@('raw','raw-float') | ForEach-Object { Join-Path $outDir $_ } | Where-Object { Test-Path $_ })
+  $rawDirs = @(@('raw','raw-float','raw-observed','raw-float-observed') | ForEach-Object { Join-Path $outDir $_ } | Where-Object { Test-Path $_ })
   if ($rawDirs.Count) {
     @(Get-ChildItem -LiteralPath $rawDirs -Recurse -File | Sort-Object FullName | ForEach-Object {
       @{ path=[IO.Path]::GetRelativePath($outDir,$_.FullName).Replace('\','/'); bytes=$_.Length; sha256=(Digest $_.FullName) }
@@ -114,5 +117,5 @@ try {
   $status | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $outDir 'RUN.json') -Encoding utf8
 }
 if ($status.status -ne 'PRESENT') { exit 1 }
-Write-Host 'PRESENT: 6 cases, 12 RGBA8 and 12 RGBA32Float readbacks, WARP not hardware'
+Write-Host 'PRESENT: 6 cases, 48 baseline/observed RGBA8/Float readbacks, WARP not hardware'
 exit 0

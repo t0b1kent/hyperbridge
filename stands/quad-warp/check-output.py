@@ -10,13 +10,14 @@ import struct
 from pathlib import Path
 
 
-def qualify(run, float_target=False):
-    raw = run / ('raw-float' if float_target else 'raw')
+def qualify(run, float_target=False, observed=False):
+    raw = run / (('raw-float' if float_target else 'raw') + ('-observed' if observed else ''))
     cases = list(csv.DictReader((run / 'cases.csv').open(encoding='utf-8-sig')))
     assert len(cases) == 6
     device = json.loads((raw / 'device.json').read_text())
     assert device['backend'] == 'WARP, not hardware' and device['software'] is True
     assert device['format'] == ('RGBA32_FLOAT' if float_target else 'RGBA8_UNORM')
+    assert device['observer'] is observed
     results = [json.loads(line) for line in (raw / 'results.jsonl').read_text().splitlines()]
     assert len(results) == 12
     indexed = {(r['name'], r['pass']): r for r in results}
@@ -42,6 +43,9 @@ def qualify(run, float_target=False):
             else:
                 covered = sum(v != 0 for v in image[3::4])
             assert covered == r['covered'] and (p or covered == 112 * 112)
+            fragments = (raw / name / ('fragment.bin' if p else 'fragment-uncull.bin')).read_bytes()
+            fragment_count = qualify_fragment(image, fragments, float_target, observed)
+            assert fragment_count == (covered if observed else 0)
             assert r['winding'] == c['winding'] and r['guards_tags'] is True
             data = (raw / name / recorder_name).read_bytes()
             assert len(data) == 16 + 65536 * 48 + 256 and r['record_words'] == 12
@@ -82,16 +86,53 @@ def qualify(run, float_target=False):
         assert len(visible) == 1, ('back-cull qualification', cw, visible)
     assert images['c0000', 0] != images['c0002', 0], 'odd1/odd3 must differ'
     return dict(status='PRESENT', backend='WARP, not hardware', cases=6, draws=12,
-                format=device['format'],
+                format=device['format'], observer=observed,
                 diagonal_verdict='NOT_EVALUATED: compare raw output to both saved candidates', rows=rows)
 
 
+def qualify_fragment(image, data, float_target, observed=True):
+    assert len(data) == 16 + 16384*64 + 256, 'fragment size'
+    assert data[:16] == bytes(16), 'fragment overflow/header'
+    assert data[-256:] == b'\xa5'*256, 'fragment guard'
+    stride = 16 if float_target else 4
+    assert len(image) == 16384*stride, 'fragment target size'
+    active = 0
+    for i in range(16384):
+        record = data[16+64*i:16+64*(i+1)]
+        count = struct.unpack_from('<I', record)[0]
+        assert count <= 1, 'fragment overlap'
+        assert record[4:16] == b'\xa5'*12, 'fragment reserved'
+        pixel = image[stride*i:stride*(i+1)]
+        covered = pixel[12:16] == struct.pack('<f', 1.) if float_target else pixel[3] == 255
+        assert bool(count) == (covered and observed), 'fragment coverage'
+        if not count:
+            assert record[16:] == b'\xa5'*48, 'fragment empty record'
+            continue
+        active += 1
+        incoming, outgoing = record[16:32], record[32:48]
+        assert incoming == outgoing, 'fragment input/output'
+        assert record[48:56] == struct.pack('<2f', (i % 128)+.5, (i//128)+.5), 'fragment position'
+        values = struct.unpack('<4f', outgoing)
+        assert all(math.isfinite(v) and 0 <= v <= 1 for v in values), 'fragment output range'
+        assert pixel == (outgoing if float_target else bytes(round(v*255) for v in values)), 'fragment target/output'
+    return active
+
+
 def qualify_pair(run):
-    arms = [qualify(run), qualify(run, True)]
+    arms = [qualify(run), qualify(run, True), qualify(run, False, True), qualify(run, True, True)]
     # Both targets must rasterize the same coverage; color equality is a measurement.
     assert [(r['name'], r['pass_index'], r['covered'], r['unique_uv']) for r in arms[0]['rows']] == [
         (r['name'], r['pass_index'], r['covered'], r['unique_uv']) for r in arms[1]['rows']]
-    return dict(status='PRESENT', backend='WARP, not hardware', cases=6, draws=24, arms=arms)
+    equal = 0
+    for is_float in [False, True]:
+        baseline = run / ('raw-float' if is_float else 'raw')
+        observed = run / (baseline.name + '-observed')
+        for row in arms[int(is_float)]['rows']:
+            pixel_name = 'front.pixels.bin' if row['pass_index'] else 'own.pixels.bin'
+            assert (baseline/row['name']/pixel_name).read_bytes() == (observed/row['name']/pixel_name).read_bytes(), 'observer target drift'
+            equal += 1
+    return dict(status='PRESENT', backend='WARP, not hardware', cases=6, draws=48,
+                observer_targets_equal=equal, arms=arms)
 
 
 if __name__ == '__main__':

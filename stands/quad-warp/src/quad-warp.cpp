@@ -25,6 +25,7 @@ namespace fs = std::filesystem;
 constexpr UINT Width = 128, Height = 128, Capacity = 65536;
 constexpr UINT RecordWords = 12; // UV/tag + DS position + DS color, each uint4.
 constexpr UINT RecordBytes = 16 + 4 * RecordWords * Capacity + 256;
+constexpr UINT FragmentBytes = 16 + Width * Height * 64 + 256;
 void check(HRESULT hr, const char *where) {
     if (FAILED(hr)) {
         std::ostringstream out;
@@ -123,9 +124,11 @@ struct Event {
 };
 int main(int argc, char **argv) {
     try {
-        require(argc == 4 || argc == 5, "usage: quad-warp SHADERS CASES.csv NEW-OUT [float32]");
-        require(argc == 4 || std::string(argv[4]) == "float32", "unknown target format");
-        const bool float_target = argc == 5;
+        require(argc >= 4 && argc <= 6, "usage: quad-warp SHADERS CASES.csv NEW-OUT [rgba8|float32] [observe]");
+        require(argc == 4 || std::string(argv[4]) == "float32" || std::string(argv[4]) == "rgba8", "unknown target format");
+        require(argc < 6 || std::string(argv[5]) == "observe", "unknown observer mode");
+        const bool float_target = argc >= 5 && std::string(argv[4]) == "float32";
+        const bool observe = argc == 6;
         const DXGI_FORMAT target_format = float_target ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
         const UINT bytes_per_pixel = float_target ? 16u : 4u;
         const fs::path shader_dir(argv[1]), out(argv[3]);
@@ -148,15 +151,18 @@ int main(int argc, char **argv) {
         meta << "{\"backend\":\"WARP, not hardware\",\"software\":true,"
              << "\"feature_level\":\"12_1\",\"shader_model\":\"6_0\","
              << "\"format\":\"" << (float_target ? "RGBA32_FLOAT" : "RGBA8_UNORM") << "\","
+             << "\"observer\":" << (observe ? "true" : "false") << ","
              << "\"vendor_id\":" << ad.VendorId << ",\"device_id\":" << ad.DeviceId << "}\n";
         meta.close(); require(bool(meta), "device receipt");
 
-        D3D12_ROOT_PARAMETER rp[2]{};
+        D3D12_ROOT_PARAMETER rp[3]{};
         rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rp[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        rp[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        rp[2].Descriptor.ShaderRegister = 1;
         for (auto &p : rp) p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         D3D12_ROOT_SIGNATURE_DESC rd{};
-        rd.NumParameters = 2; rd.pParameters = rp;
+        rd.NumParameters = 3; rd.pParameters = rp;
         rd.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
         ComPtr<ID3DBlob> root_blob, root_error;
         check(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1,
@@ -164,7 +170,7 @@ int main(int argc, char **argv) {
         ComPtr<ID3D12RootSignature> root;
         check(device->CreateRootSignature(0, root_blob->GetBufferPointer(), root_blob->GetBufferSize(),
                                          IID_PPV_ARGS(&root)), "root signature");
-        auto vs = shader(shader_dir, L"vs.dxil"), ps = shader(shader_dir, L"ps.dxil");
+        auto vs = shader(shader_dir, L"vs.dxil"), ps = shader(shader_dir, observe ? L"ps-observe.dxil" : L"ps.dxil");
         auto ds = shader(shader_dir, L"ds.dxil");
         auto hs_cw = shader(shader_dir, L"hs-cw.dxil"), hs_ccw = shader(shader_dir, L"hs-ccw.dxil");
         ComPtr<ID3D12PipelineState> pipelines[2][2];
@@ -237,6 +243,7 @@ int main(int argc, char **argv) {
         require(rows == Height && row_size == Width * bytes_per_pixel, "RGBA footprint");
         auto pixels_rb = resource(device.Get(), D3D12_HEAP_TYPE_READBACK, buffer_desc(pixel_bytes), D3D12_RESOURCE_STATE_COPY_DEST);
         auto records_rb = resource(device.Get(), D3D12_HEAP_TYPE_READBACK, buffer_desc(RecordBytes), D3D12_RESOURCE_STATE_COPY_DEST);
+        auto fragments_rb = resource(device.Get(), D3D12_HEAP_TYPE_READBACK, buffer_desc(FragmentBytes), D3D12_RESOURCE_STATE_COPY_DEST);
         std::ofstream results(out / "results.jsonl");
         require(bool(results), "results file");
         for (const auto &c : cases) {
@@ -246,6 +253,9 @@ int main(int argc, char **argv) {
             auto init = resource(device.Get(), D3D12_HEAP_TYPE_UPLOAD, buffer_desc(RecordBytes), D3D12_RESOURCE_STATE_GENERIC_READ);
             auto ud = buffer_desc(RecordBytes); ud.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
             auto recorder = resource(device.Get(), D3D12_HEAP_TYPE_DEFAULT, ud, D3D12_RESOURCE_STATE_COPY_DEST);
+            auto fragment_init = resource(device.Get(), D3D12_HEAP_TYPE_UPLOAD, buffer_desc(FragmentBytes), D3D12_RESOURCE_STATE_GENERIC_READ);
+            auto fd = buffer_desc(FragmentBytes); fd.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+            auto fragments = resource(device.Get(), D3D12_HEAP_TYPE_DEFAULT, fd, D3D12_RESOURCE_STATE_COPY_DEST);
             void *mapped = nullptr;
             D3D12_RANGE no_read{0, 0};
             check(params->Map(0, &no_read, &mapped), "map constants");
@@ -254,10 +264,18 @@ int main(int argc, char **argv) {
             check(init->Map(0, &no_read, &mapped), "map initialization");
             std::memset(mapped, 0xa5, RecordBytes); std::memset(mapped, 0, 16);
             init->Unmap(0, nullptr);
+            check(fragment_init->Map(0, &no_read, &mapped), "map fragment initialization");
+            std::memset(mapped, 0xa5, FragmentBytes); std::memset(mapped, 0, 16);
+            for (UINT i = 0; i < Width * Height; ++i)
+                static_cast<uint32_t *>(mapped)[4 + 16*i] = 0;
+            fragment_init->Unmap(0, nullptr);
             bytes(dir / "params.bin", c.words.data(), 32);
             for (int pass = 0; pass < 2; ++pass) {
                 check(allocator->Reset(), "reset allocator");
                 check(cl->Reset(allocator.Get(), pipelines[c.winding == "ccw"][pass].Get()), "reset list");
+                if (pass) transition(cl.Get(), fragments.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+                cl->CopyBufferRegion(fragments.Get(), 0, fragment_init.Get(), 0, FragmentBytes);
+                transition(cl.Get(), fragments.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                 if (!pass) {
                     cl->CopyBufferRegion(recorder.Get(), 0, init.Get(), 0, RecordBytes);
                     transition(cl.Get(), recorder.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -274,16 +292,19 @@ int main(int argc, char **argv) {
                 cl->SetGraphicsRootSignature(root.Get());
                 cl->SetGraphicsRootConstantBufferView(0, params->GetGPUVirtualAddress());
                 cl->SetGraphicsRootUnorderedAccessView(1, recorder->GetGPUVirtualAddress());
+                cl->SetGraphicsRootUnorderedAccessView(2, fragments->GetGPUVirtualAddress());
                 cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST);
                 cl->DrawInstanced(1, 1, 0, 0);
                 transition(cl.Get(), target.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 transition(cl.Get(), recorder.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                transition(cl.Get(), fragments.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 D3D12_TEXTURE_COPY_LOCATION src{}, dst{};
                 src.pResource = target.Get(); src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
                 dst.pResource = pixels_rb.Get(); dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
                 dst.PlacedFootprint = footprint;
                 cl->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
                 cl->CopyBufferRegion(records_rb.Get(), 0, recorder.Get(), 0, RecordBytes);
+                cl->CopyBufferRegion(fragments_rb.Get(), 0, fragments.Get(), 0, FragmentBytes);
                 // Leave target ready for the next case after the second copy.
                 if (pass) transition(cl.Get(), target.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
                 execute();
@@ -305,6 +326,10 @@ int main(int argc, char **argv) {
                     } else covered += rgba_out[i + 3] != 0;
                 }
                 require(pass || covered != 0, "empty uncull target");
+                range.End = FragmentBytes;
+                check(fragments_rb->Map(0, &range, &mapped), "map fragment records");
+                bytes(dir / (pass ? "fragment.bin" : "fragment-uncull.bin"), mapped, FragmentBytes);
+                fragments_rb->Unmap(0, &no_read);
                 range.End = RecordBytes;
                 check(records_rb->Map(0, &range, &mapped), "map recorder");
                 std::vector<uint32_t> words(RecordBytes / 4);
