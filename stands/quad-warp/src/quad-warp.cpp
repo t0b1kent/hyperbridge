@@ -122,7 +122,11 @@ struct Event {
 };
 int main(int argc, char **argv) {
     try {
-        require(argc == 4, "usage: quad-warp SHADERS CASES.csv NEW-OUT");
+        require(argc == 4 || argc == 5, "usage: quad-warp SHADERS CASES.csv NEW-OUT [float32]");
+        require(argc == 4 || std::string(argv[4]) == "float32", "unknown target format");
+        const bool float_target = argc == 5;
+        const DXGI_FORMAT target_format = float_target ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+        const UINT bytes_per_pixel = float_target ? 16u : 4u;
         const fs::path shader_dir(argv[1]), out(argv[3]);
         const auto cases = read_cases(argv[2]);
         require(!fs::exists(out) && fs::create_directories(out), "fresh output directory");
@@ -142,6 +146,7 @@ int main(int argc, char **argv) {
         std::ofstream meta(out / "device.json");
         meta << "{\"backend\":\"WARP, not hardware\",\"software\":true,"
              << "\"feature_level\":\"12_1\",\"shader_model\":\"6_0\","
+             << "\"format\":\"" << (float_target ? "RGBA32_FLOAT" : "RGBA8_UNORM") << "\","
              << "\"vendor_id\":" << ad.VendorId << ",\"device_id\":" << ad.DeviceId << "}\n";
         meta.close(); require(bool(meta), "device receipt");
 
@@ -187,7 +192,7 @@ int main(int argc, char **argv) {
             pd.DepthStencilState.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
             pd.DepthStencilState.BackFace = pd.DepthStencilState.FrontFace;
             pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
-            pd.NumRenderTargets = 1; pd.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+            pd.NumRenderTargets = 1; pd.RTVFormats[0] = target_format;
             pd.SampleDesc.Count = 1;
             check(device->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipelines[winding][cull])), "PSO");
         }
@@ -220,7 +225,7 @@ int main(int argc, char **argv) {
         const auto rtv = heap->GetCPUDescriptorHandleForHeapStart();
         D3D12_RESOURCE_DESC td{};
         td.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; td.Width = Width; td.Height = Height;
-        td.DepthOrArraySize = 1; td.MipLevels = 1; td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        td.DepthOrArraySize = 1; td.MipLevels = 1; td.Format = target_format;
         td.SampleDesc.Count = 1; td.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
         D3D12_CLEAR_VALUE clear{}; clear.Format = td.Format;
         auto target = resource(device.Get(), D3D12_HEAP_TYPE_DEFAULT, td, D3D12_RESOURCE_STATE_RENDER_TARGET, &clear);
@@ -228,7 +233,7 @@ int main(int argc, char **argv) {
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
         UINT rows = 0; UINT64 row_size = 0, pixel_bytes = 0;
         device->GetCopyableFootprints(&td, 0, 1, 0, &footprint, &rows, &row_size, &pixel_bytes);
-        require(rows == Height && row_size == Width * 4, "RGBA footprint");
+        require(rows == Height && row_size == Width * bytes_per_pixel, "RGBA footprint");
         auto pixels_rb = resource(device.Get(), D3D12_HEAP_TYPE_READBACK, buffer_desc(pixel_bytes), D3D12_RESOURCE_STATE_COPY_DEST);
         auto records_rb = resource(device.Get(), D3D12_HEAP_TYPE_READBACK, buffer_desc(RecordBytes), D3D12_RESOURCE_STATE_COPY_DEST);
         std::ofstream results(out / "results.jsonl");
@@ -281,16 +286,23 @@ int main(int argc, char **argv) {
                 // Leave target ready for the next case after the second copy.
                 if (pass) transition(cl.Get(), target.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
                 execute();
-                std::vector<uint8_t> rgba_out(Width * Height * 4);
+                std::vector<uint8_t> rgba_out(Width * Height * bytes_per_pixel);
                 D3D12_RANGE range{0, SIZE_T(pixel_bytes)};
                 check(pixels_rb->Map(0, &range, &mapped), "map pixels");
                 for (UINT y = 0; y < Height; ++y)
-                    std::memcpy(rgba_out.data() + y * Width * 4,
-                        static_cast<const uint8_t *>(mapped) + footprint.Offset + y * footprint.Footprint.RowPitch, Width * 4);
+                    std::memcpy(rgba_out.data() + y * Width * bytes_per_pixel,
+                        static_cast<const uint8_t *>(mapped) + footprint.Offset + y * footprint.Footprint.RowPitch, Width * bytes_per_pixel);
                 pixels_rb->Unmap(0, &no_read);
                 bytes(dir / (pass ? "front.pixels.bin" : "own.pixels.bin"), rgba_out.data(), rgba_out.size());
                 UINT covered = 0;
-                for (size_t i = 3; i < rgba_out.size(); i += 4) covered += rgba_out[i] != 0;
+                for (size_t i = 0; i < rgba_out.size(); i += bytes_per_pixel) {
+                    if (float_target) {
+                        float alpha = 0;
+                        std::memcpy(&alpha, rgba_out.data() + i + 12, 4);
+                        require(alpha == 0.f || alpha == 1.f, "float alpha");
+                        covered += alpha != 0.f;
+                    } else covered += rgba_out[i + 3] != 0;
+                }
                 require(pass || covered != 0, "empty uncull target");
                 range.End = RecordBytes;
                 check(records_rb->Map(0, &range, &mapped), "map recorder");

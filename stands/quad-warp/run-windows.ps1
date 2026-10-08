@@ -78,17 +78,24 @@ try {
       @{ path=[IO.Path]::GetRelativePath($outDir,$_.FullName).Replace('\','/'); bytes=$_.Length; sha256=(Digest $_.FullName) }
     })
     $built | ConvertTo-Json | Set-Content 'built-sha256.json' -Encoding utf8
-    $status.runtime = 'STARTED'
-    $proc = Start-Process -FilePath (Join-Path $outDir 'bin\quad-warp.exe') -ArgumentList @('shaders','cases.csv','raw') `
-      -WorkingDirectory $outDir -NoNewWindow -PassThru -RedirectStandardOutput 'stdout.txt' -RedirectStandardError 'stderr.txt'
-    $null = $proc.Handle
-    if (-not $proc.WaitForExit(55000)) {
-      $status.timeout = $true; $status.runtime = 'TIMEOUT'
-      $proc.Kill($true); $null = $proc.WaitForExit(5000)
-      throw 'WARP process exceeded 55 seconds'
+    $status.arms = @()
+    foreach ($target in @('raw','raw-float')) {
+      $childArgs = @('shaders','cases.csv',$target)
+      if ($target -eq 'raw-float') { $childArgs += 'float32' }
+      $status.runtime = 'STARTED'
+      $proc = Start-Process -FilePath (Join-Path $outDir 'bin\quad-warp.exe') -ArgumentList $childArgs `
+        -WorkingDirectory $outDir -NoNewWindow -PassThru -RedirectStandardOutput "$target.stdout.txt" -RedirectStandardError "$target.stderr.txt"
+      $null = $proc.Handle
+      if (-not $proc.WaitForExit(55000)) {
+        $status.timeout = $true; $status.runtime = 'TIMEOUT'
+        $proc.Kill($true); $null = $proc.WaitForExit(5000)
+        $status.arms += @{ target=$target; status='TIMEOUT'; timeout_seconds=55 }
+        throw "WARP $target process exceeded 55 seconds"
+      }
+      $status.runtime = 'EXITED'; $status.exit_code = $proc.ExitCode
+      $status.arms += @{ target=$target; status='EXITED'; exit_code=$proc.ExitCode; timeout_seconds=55 }
+      if ($proc.ExitCode -ne 0) { throw "WARP $target failed rc=$($proc.ExitCode)" }
     }
-    $status.runtime = 'EXITED'; $status.exit_code = $proc.ExitCode
-    if ($proc.ExitCode -ne 0) { throw "WARP failed rc=$($proc.ExitCode)" }
     & $python (Join-Path $PSScriptRoot 'check-output.py') --run . > 'qualification.txt' 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'readback qualification failed' }
     $status.status = 'PRESENT'
@@ -98,14 +105,14 @@ try {
   Write-Host ('FAILED: ' + $status.reason)
 } finally {
   $build | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $outDir 'BUILD.json') -Encoding utf8
-  $rawDir = Join-Path $outDir 'raw'
-  if (Test-Path $rawDir) {
-    @(Get-ChildItem -LiteralPath $rawDir -Recurse -File | Sort-Object FullName | ForEach-Object {
+  $rawDirs = @(@('raw','raw-float') | ForEach-Object { Join-Path $outDir $_ } | Where-Object { Test-Path $_ })
+  if ($rawDirs.Count) {
+    @(Get-ChildItem -LiteralPath $rawDirs -Recurse -File | Sort-Object FullName | ForEach-Object {
       @{ path=[IO.Path]::GetRelativePath($outDir,$_.FullName).Replace('\','/'); bytes=$_.Length; sha256=(Digest $_.FullName) }
     }) | ConvertTo-Json | Set-Content (Join-Path $outDir 'raw-sha256.json') -Encoding utf8
   }
   $status | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $outDir 'RUN.json') -Encoding utf8
 }
 if ($status.status -ne 'PRESENT') { exit 1 }
-Write-Host 'PRESENT: 6 cases, 12 RGBA readbacks, WARP not hardware'
+Write-Host 'PRESENT: 6 cases, 12 RGBA8 and 12 RGBA32Float readbacks, WARP not hardware'
 exit 0

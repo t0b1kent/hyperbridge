@@ -15,7 +15,7 @@ invoke `cmd /c` or parse an environment dump. Missing `cl.exe` fails explicitly.
 Use `-Dxc <installed-dxc.exe>` if discovery is unsuitable. The script downloads
 nothing and fails if DXC is missing. All five stages use shader model 6.0 DXIL;
 there is no DXBC fallback. The output directory must not exist. Builds are serial.
-The WARP child is bounded at 55 seconds; each fence wait is bounded at 5 seconds.
+Each of the two serial WARP children is bounded at 55 seconds; each fence wait is bounded at 5 seconds.
 The workflow runs Windows 2022 and 2025 serially and preserves failure artifacts.
 
 `cases.csv` is the exact bitwise input contract. Six cases cover both hull output
@@ -25,7 +25,7 @@ The unchanged public DS outputs position `(-0.875+1.75u,-0.875+1.75v,0,1)`
 and color `(u*v,u*u,0.25,1)`. The red cross term distinguishes the two diagonals.
 The VS and HS produce one control point; PS passes color through.
 
-State: 128 by 128 RGBA8 UNORM, one sample, viewport origin (0,0), full scissor,
+Two targets: 128 by 128 RGBA8 UNORM and RGBA32 FLOAT, one sample, viewport origin (0,0), full scissor,
 clear (0,0,0,0), no blending, no depth/stencil, depth clipping enabled.
 FrontCounterClockwise is FALSE. Each case draws once with no culling and once
 with back culling. Root parameters are CBV b0 and UAV u0, space 0, all stages.
@@ -34,6 +34,10 @@ the two draws. Float factors are uploaded as raw uint32 words without conversion
 
 `raw/<case>/own.pixels.bin` is tightly packed, top-to-bottom RGBA without row
 padding; `front.pixels.bin` is the back-cull pass. Each is 65536 bytes.
+`raw-float/<case>/` repeats the same inputs and shader binaries with the float
+target: each pixel file is 262144 bytes, little-endian RGBA float32, no padding.
+Both arms preserve their own device receipt and recorder buffers. The float arm
+separates interpolation from UNORM conversion; neither arm adds bias or tolerance.
 `params.bin` contains eight little-endian words (six factors, tag, capacity).
 `recorder-uncull.bin` and `recorder.bin` contain a 16-byte header
 (count, overflow, two reserved zero words), then (u bits,v bits,zero,tag)

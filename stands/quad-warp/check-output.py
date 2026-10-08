@@ -5,16 +5,18 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import struct
 from pathlib import Path
 
 
-def qualify(run):
-    raw = run / 'raw'
+def qualify(run, float_target=False):
+    raw = run / ('raw-float' if float_target else 'raw')
     cases = list(csv.DictReader((run / 'cases.csv').open(encoding='utf-8-sig')))
     assert len(cases) == 6
     device = json.loads((raw / 'device.json').read_text())
     assert device['backend'] == 'WARP, not hardware' and device['software'] is True
+    assert device['format'] == ('RGBA32_FLOAT' if float_target else 'RGBA8_UNORM')
     results = [json.loads(line) for line in (raw / 'results.jsonl').read_text().splitlines()]
     assert len(results) == 12
     indexed = {(r['name'], r['pass']): r for r in results}
@@ -31,8 +33,14 @@ def qualify(run):
             (1, 'front.pixels.bin', 'recorder.bin')]:
             r = indexed[name, p]
             image = (raw / name / pixel_name).read_bytes()
-            assert len(image) == 128 * 128 * 4
-            covered = sum(v != 0 for v in image[3::4])
+            assert len(image) == 128 * 128 * (16 if float_target else 4)
+            if float_target:
+                values = struct.unpack('<65536f', image)
+                assert all(math.isfinite(v) and 0 <= v <= 1 for v in values), 'float range'
+                assert all(v in (0., 1.) for v in values[3::4]), 'float alpha'
+                covered = sum(v != 0 for v in values[3::4])
+            else:
+                covered = sum(v != 0 for v in image[3::4])
             assert covered == r['covered'] and (p or covered == 112 * 112)
             assert r['winding'] == c['winding'] and r['guards_tags'] is True
             data = (raw / name / recorder_name).read_bytes()
@@ -63,13 +71,22 @@ def qualify(run):
         assert len(visible) == 1, ('back-cull qualification', cw, visible)
     assert images['c0000', 0] != images['c0002', 0], 'odd1/odd3 must differ'
     return dict(status='PRESENT', backend='WARP, not hardware', cases=6, draws=12,
+                format=device['format'],
                 diagonal_verdict='NOT_EVALUATED: compare raw output to both saved candidates', rows=rows)
+
+
+def qualify_pair(run):
+    arms = [qualify(run), qualify(run, True)]
+    # Both targets must rasterize the same coverage; color equality is a measurement.
+    assert [(r['name'], r['pass_index'], r['covered'], r['unique_uv']) for r in arms[0]['rows']] == [
+        (r['name'], r['pass_index'], r['covered'], r['unique_uv']) for r in arms[1]['rows']]
+    return dict(status='PRESENT', backend='WARP, not hardware', cases=6, draws=24, arms=arms)
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--run', type=Path, required=True)
     args = ap.parse_args()
-    result = qualify(args.run)
+    result = qualify_pair(args.run)
     (args.run / 'QUALIFICATION.json').write_text(json.dumps(result, indent=2) + '\n')
-    print(json.dumps({k:v for k,v in result.items() if k != 'rows'}))
+    print(json.dumps({k:v for k,v in result.items() if k != 'arms'}))
