@@ -1,0 +1,168 @@
+{
+  "schema": 1,
+  "classification": "SOURCE_BUILD_NOT_PRODUCT_ACCEPTANCE",
+  "llvm": {
+    "schema": 1,
+    "classification": "DIAGNOSTIC_ONLY_NOT_GOLDEN",
+    "tag": "llvmorg-22.1.5",
+    "source_url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.5/llvm-project-22.1.5.src.tar.xz",
+    "source_sha256": "7972b87b705a003ce70ab55f9f0fb495d156887cba0eb296d284731139118e2c",
+    "source_bytes": 167058820,
+    "source_root": "llvm-project-22.1.5.src",
+    "patch_sha256": "be727326e4b2592058b2fe00e37c3d9b330b3d5f64bd99bf3a9cc659f540b215",
+    "source_manifest_sha256": "8fb3b44d7f2b32ea73d35f4838f61b874e5bb8008a0dcadfdab3a369209c9a5e",
+    "extra_tests_manifest_sha256": "6f508f3bcbb5f80dd574a0f82ff8d633b565d859c93b88876a807b0b2349c869",
+    "synthetic_sha256": "d554bc11556ffc660576d4c38661b71c7c8fd17fb59e9fe98d06ea75bb5fa3ef",
+    "archive_safety_sha256": "3a13e7c6a335a2e6cbf282e2c755a7caed0000720fd719cf2b282f5473355305",
+    "option": "aarch64-arm64ec-split-thunk-q-restores",
+    "default": false,
+    "phases": [
+      "patch",
+      "build",
+      "level4-test",
+      "synthetic-asm"
+    ],
+    "test_run_count": 17,
+    "support_inputs": [
+      {
+        "file": "arm64ec-entry-thunks.ll",
+        "bytes": 31991,
+        "sha256": "c7157fbc330a476da82f0ee4eb551a776cd81c5d7617b60872bee503522c090b"
+      },
+      {
+        "file": "arm64ec-exit-thunks.ll",
+        "bytes": 32170,
+        "sha256": "d7dd0d72acaa24e03bae51d77b528b6fc6651e571b10e0aa3487a556d30c5029"
+      }
+    ],
+    "build_targets": [
+      "llc",
+      "clang",
+      "FileCheck",
+      "llvm-readobj"
+    ],
+    "runner": "ubuntu-24.04",
+    "python": "3.13.7",
+    "cc": "gcc-13",
+    "cxx": "g++-13",
+    "parallel_compile": 4,
+    "parallel_link": 1,
+    "minimum_free_disk_bytes": 10737418240,
+    "minimum_available_memory_bytes": 10737418240,
+    "build_command_minutes": 150,
+    "producer_minutes": 180,
+    "workflow_minutes": 200,
+    "check_producer_minutes": 20,
+    "check_workflow_minutes": 30,
+    "shared_archive_max_bytes": 2147483648,
+    "shared_archive_max_members": 1000,
+    "command_log_cap_bytes": 67108864,
+    "recipe_reuse": {
+      "repository": "t0b1kent/dxmt",
+      "run": "37567821557",
+      "revision": "f804f27c7a3ee61e2d7882ae12600cfeb9e05bc5",
+      "path": "build/repro109dxmt/build_llvm15.py",
+      "scope": "publisher/hash-before-extract/root/required-files/static-CMake/source-cache-ownership; LLVM22 Linux subset, no AIR/libunwind/runtime"
+    }
+  },
+  "host": {
+    "runner": "macos-26",
+    "python": "3.13.7",
+    "xcode": "26.6",
+    "xcode_build": "17F113",
+    "sdk": "26.5",
+    "machine": "arm64",
+    "deployment_target": "14.0",
+    "developer_dir": "/Applications/Xcode_26.6.app/Contents/Developer",
+    "image_document": "https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md",
+    "image_document_sha256": "688dc6f11befc470dd78896f4b69f5956dd9cc3986287919a6b912d748b97f21",
+    "image_git_blob": "2e73acda8e6e1ba3271e46ed84ef517170564a9b",
+    "image_version": "20260907.0351.1",
+    "label_document": "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+    "advertised_cpu": 3,
+    "advertised_ram_gb": 7
+  },
+  "parallel_compile": 2,
+  "parallel_link": 1,
+  "minutes": 330,
+  "build_minutes": 270,
+  "preflight_minutes": 75,
+  "minimum_free_disk_bytes": 32212254720,
+  "minimum_memory_bytes": 6442450944,
+  "archive_max_bytes": 2147483648,
+  "bootstrap": {
+    "name": "llvm-mingw",
+    "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-macos-universal.tar.xz",
+    "sha256": "050379de888f0c843787819dadf183df3693330a5724643919e9121f16355295",
+    "bytes": 121913248,
+    "root": "llvm-mingw-20260505-ucrt-macos-universal",
+    "wrapper_sha256": "c9b86311ade81d53235c93fafabdf98328d094de344ea9a9038e0dab6695ee9f"
+  },
+  "tools": [
+    {
+      "name": "cmake",
+      "version": "4.3.2",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.3.2/cmake-4.3.2.tar.gz",
+      "sha256": "b0231eb39b3c3cabdc568c619df78208a7bd95ea10c9b2236d61218bac1b367d",
+      "kind": "cmake-bootstrap"
+    },
+    {
+      "name": "ninja",
+      "version": "1.13.2",
+      "url": "https://github.com/ninja-build/ninja/archive/refs/tags/v1.13.2.tar.gz",
+      "sha256": "974d6b2f4eeefa25625d34da3cb36bdcebe7fbce40f4c16ac0835fd1c0cbae17",
+      "kind": "ninja-bootstrap"
+    }
+  ],
+  "local_dependencies": [
+    {
+      "path": "run.py",
+      "bytes": 27867,
+      "sha256": "73c37dac619dbf472ef35bcb4bf5bc234b66b70e547a745ed6aa0c65efd09743"
+    },
+    {
+      "path": "reuse.py",
+      "bytes": 11739,
+      "sha256": "72159a29ade841c24ba81366998f56bbce018d55a0211c8536af3a39c394beec"
+    },
+    {
+      "path": "llvm22.lock.json",
+      "bytes": 2178,
+      "sha256": "cbabc59f36e33e445e71ecb1a4994771ec8697d8ba122d50e0be77b65cb97c9b"
+    },
+    {
+      "path": "SOURCE-MANIFEST.json",
+      "bytes": 2061,
+      "sha256": "8fb3b44d7f2b32ea73d35f4838f61b874e5bb8008a0dcadfdab3a369209c9a5e"
+    },
+    {
+      "path": "EXTRA-TESTS.json",
+      "bytes": 868,
+      "sha256": "6f508f3bcbb5f80dd574a0f82ff8d633b565d859c93b88876a807b0b2349c869"
+    },
+    {
+      "path": "LLVM22-ARM64EC-Q-RESTORES.patch",
+      "bytes": 11071,
+      "sha256": "be727326e4b2592058b2fe00e37c3d9b330b3d5f64bd99bf3a9cc659f540b215"
+    },
+    {
+      "path": "synthetic.c",
+      "bytes": 429,
+      "sha256": "d554bc11556ffc660576d4c38661b71c7c8fd17fb59e9fe98d06ea75bb5fa3ef"
+    }
+  ],
+  "archive_safety_sha256": "3a13e7c6a335a2e6cbf282e2c755a7caed0000720fd719cf2b282f5473355305",
+  "build_targets": [
+    "clang",
+    "lld",
+    "llc",
+    "FileCheck",
+    "llvm-readobj",
+    "llvm-ar",
+    "llvm-nm",
+    "llvm-objcopy",
+    "llvm-objdump"
+  ],
+  "package_root": "macrunner-llvm22-22.1.5-macos-arm64-ucrt",
+  "scope": "Source-built LLVM backend/tools; pinned official llvm-mingw sysroots, runtime, wrappers and remaining auxiliary tools. No Wine, signing, notarization or target execution."
+}

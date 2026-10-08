@@ -1,0 +1,98 @@
+name: REPRO109 macOS LLVM22 Wine compiler with pinned sysroots
+
+on:
+  push:
+    branches: [repro109/llvm22-wine-macos-20261008, repro109/llvm22-wine-macos-full-20261008]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Build the full compiler after the three preflight cells pass
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    if: github.repository == 't0b1kent/hyperbridge'
+    runs-on: macos-26
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [llvm-source, sysroots, build-tools]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+      - name: Run the selected preflight with complete bounded logs
+        env:
+          REPRO109_PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          python3 -I -B build/repro109llvm22/macos.py \
+            --phase "$REPRO109_PHASE" --out "$RUNNER_TEMP/llvm22-macos-results" \
+            </dev/null > "$RUNNER_TEMP/llvm22-macos-driver.log" 2>&1
+      - name: Preserve complete results on success and failure
+        if: always()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/llvm22-macos-results"
+          mkdir -p "$out"
+          if [ -f "$RUNNER_TEMP/llvm22-macos-driver.log" ]; then
+            cp "$RUNNER_TEMP/llvm22-macos-driver.log" "$out/driver.log"
+          else
+            printf '%s\n' 'WORKER_NOT_ENABLED: inspect checkout/setup logs.' > "$out/worker-not-started.txt"
+          fi
+          tar -czf "$RUNNER_TEMP/llvm22-macos-results.tar.gz" -C "$out" .
+          shasum -a 256 "$RUNNER_TEMP/llvm22-macos-results.tar.gz" > "$RUNNER_TEMP/llvm22-macos-results.tar.gz.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: repro109-llvm22-macos-${{ matrix.phase }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/llvm22-macos-results.tar.gz
+            ${{ runner.temp }}/llvm22-macos-results.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  compiler:
+    needs: preflight
+    if: github.repository == 't0b1kent/hyperbridge' && needs.preflight.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/repro109/llvm22-wine-macos-full-20261008') || (github.event_name == 'workflow_dispatch' && inputs.full))
+    runs-on: macos-26
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+      - name: Build native LLVM tools and verify all four Wine targets
+        shell: bash
+        run: |
+          python3 -I -B build/repro109llvm22/macos.py \
+            --phase full --out "$RUNNER_TEMP/llvm22-macos-results" \
+            </dev/null > "$RUNNER_TEMP/llvm22-macos-driver.log" 2>&1
+      - name: Preserve compiler, provenance, exact logs and failed evidence
+        if: always()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/llvm22-macos-results"
+          mkdir -p "$out"
+          if [ -f "$RUNNER_TEMP/llvm22-macos-driver.log" ]; then
+            cp "$RUNNER_TEMP/llvm22-macos-driver.log" "$out/driver.log"
+          else
+            printf '%s\n' 'WORKER_NOT_ENABLED: inspect checkout/setup logs.' > "$out/worker-not-started.txt"
+          fi
+          tar -czf "$RUNNER_TEMP/llvm22-macos-results.tar.gz" -C "$out" .
+          shasum -a 256 "$RUNNER_TEMP/llvm22-macos-results.tar.gz" > "$RUNNER_TEMP/llvm22-macos-results.tar.gz.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: repro109-llvm22-macos-full-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/llvm22-macos-results.tar.gz
+            ${{ runner.temp }}/llvm22-macos-results.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
