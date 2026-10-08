@@ -58,3 +58,13 @@ and receipts only; executable/object/DXIL binaries stay out of the repository
 and out of uploaded artifacts. A successful build is not a Windows execution
 result. Independent equality remains unmeasured until the returned raw data is
 compared locally. No shader timing or frame-time claim follows from this probe.
+
+Producer readback revision004 keeps the six cases, shader arithmetic and paired
+RGBA8/RGBA32Float targets. Each DS invocation now records48 bytes: UV/tag,
+SV_Position and COLOR, each16 bytes. The host allocates the corresponding bounded
+buffer; the qualifier checks its full stride, padding, duplicate UV consistency,
+finite/range outputs and guards. The observer adds stores, so first compare both
+targets to revision003 exactly. Any target drift prevents attributing previous
+differences to the newly observed producer values. The values must then be
+compared by UV to the preserved Metal DS output buffers to distinguish producer
+arithmetic from interpolation; no raster precision conclusion is assumed.

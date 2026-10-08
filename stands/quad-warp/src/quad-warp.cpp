@@ -23,7 +23,8 @@
 using Microsoft::WRL::ComPtr;
 namespace fs = std::filesystem;
 constexpr UINT Width = 128, Height = 128, Capacity = 65536;
-constexpr UINT RecordBytes = 16 + 16 * Capacity + 256;
+constexpr UINT RecordWords = 12; // UV/tag + DS position + DS color, each uint4.
+constexpr UINT RecordBytes = 16 + 4 * RecordWords * Capacity + 256;
 void check(HRESULT hr, const char *where) {
     if (FAILED(hr)) {
         std::ostringstream out;
@@ -312,11 +313,12 @@ int main(int argc, char **argv) {
                 bytes(dir / (pass ? "recorder.bin" : "recorder-uncull.bin"), words.data(), RecordBytes);
                 bool valid = words[0] > 0 && words[0] <= Capacity && words[1] == 0 && words[2] == 0 && words[3] == 0;
                 for (UINT i = 0; i < words[0] && i < Capacity; ++i)
-                    valid &= words[4 + i * 4 + 2] == 0 && words[4 + i * 4 + 3] == c.words[6];
-                for (size_t i = 4 + size_t(words[0]) * 4; i < words.size(); ++i) valid &= words[i] == 0xa5a5a5a5u;
+                    valid &= words[4 + i * RecordWords + 2] == 0 && words[4 + i * RecordWords + 3] == c.words[6];
+                for (size_t i = 4 + size_t(words[0]) * RecordWords; i < words.size(); ++i) valid &= words[i] == 0xa5a5a5a5u;
                 results << "{\"name\":\"" << c.name << "\",\"winding\":\"" << c.winding
                         << "\",\"pass\":" << pass << ",\"covered\":" << covered
                         << ",\"invocations_cumulative\":" << words[0] << ",\"overflow\":" << words[1]
+                        << ",\"record_words\":" << RecordWords
                         << ",\"guards_tags\":" << (valid ? "true" : "false") << "}\n";
                 results.flush(); require(bool(results), "result receipt");
                 require(valid, "recorder bounds tags guards");
