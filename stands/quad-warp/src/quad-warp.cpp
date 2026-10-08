@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 #include "fixed-fixture.h"
+#include "float-readback.h"
 static float unpack(uint32_t x) { float f; std::memcpy(&f,&x,4); return f; }
 
 using Microsoft::WRL::ComPtr;
@@ -322,8 +323,8 @@ int main(int argc, char **argv) {
                     if (float_target) {
                         float alpha = 0;
                         std::memcpy(&alpha, rgba_out.data() + i + 12, 4);
-                        require(alpha == 0.f || alpha == 1.f, "float alpha");
-                        covered += alpha != 0.f;
+                        require(readback_alpha_valid(alpha), "nonfinite float alpha");
+                        covered += readback_alpha_covered(alpha);
                     } else covered += rgba_out[i + 3] != 0;
                 }
                 require(pass || covered != 0, "empty uncull target");
@@ -351,7 +352,7 @@ int main(int argc, char **argv) {
             }
         }
         results.close(); require(bool(results), "close results");
-        std::cout << "COMPLETE cases=12 draws=24 backend=WARP_NOT_HARDWARE\n";
+        std::cout << "COMPLETE cases=" << cases.size() << " draws=" << cases.size()*2 << " backend=WARP_NOT_HARDWARE\n";
         return 0;
     } catch (const std::exception &e) {
         std::cerr << "FAILED " << e.what() << '\n';

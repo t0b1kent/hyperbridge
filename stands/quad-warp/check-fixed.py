@@ -78,8 +78,29 @@ def tests():
             try:legacy.qualify_fragment(bytes(im),bytes(rec),True)
             except AssertionError:negatives+=1;continue
             raise AssertionError('fragment negative not detected: '+kind)
+    # Same family as the WARP009 alpha trigger: exact covered values below and
+    # above one must survive. Nonfinite, absent-record and changed-target arms
+    # still fail. This is qualifier validation, not backend equality.
+    alpha_positive=0;alpha_negative=0
+    for word in (0x3f7fffff,0x3f800001):
+        payload=struct.pack('<4I',0,0,0x3e800000,word)
+        image=bytearray(16384*16);image[:16]=payload
+        rec=bytearray(bytes(16)+(struct.pack('<I',0)+b'\xa5'*60)*16384+b'\xa5'*256)
+        rec[16:80]=struct.pack('<I',1)+b'\xa5'*12+payload+payload+struct.pack('<4f',.5,.5,0.,1.)
+        assert legacy.qualify_fragment(bytes(image),bytes(rec),True)==1;alpha_positive+=1
+        for mode in ('target','count','nan','inf'):
+            im=bytearray(image);rr=bytearray(rec)
+            if mode=='target':im[12]^=1
+            elif mode=='count':struct.pack_into('<I',rr,16,0)
+            else:
+                bad_word=0x7fc00000 if mode=='nan' else 0x7f800000
+                for off in (12,):struct.pack_into('<I',im,off,bad_word)
+                for off in (44,60):struct.pack_into('<I',rr,off,bad_word)
+            try:legacy.qualify_fragment(bytes(im),bytes(rr),True)
+            except AssertionError:alpha_negative+=1;continue
+            raise AssertionError('alpha negative not detected: '+mode)
     return dict(vertex_positive=1,vertex_negative=len(bad),permutations=6,
-                finite_excursion_positive=positives,fragment_negative=negatives)
+                finite_excursion_positive=positives,fragment_negative=negatives,alpha_positive=alpha_positive,alpha_negative=alpha_negative)
 
 def float_excursions(image):
     values=struct.unpack('<65536f',image)
@@ -97,7 +118,7 @@ def qualify(run):
     cases=list(csv.DictReader((run/'cases.csv').open(encoding='utf-8-sig')))
     normalized=[{k:(v if k=='name' else int(v)) for k,v in c.items()} for c in cases]
     assert normalized==FIXTURE['cases'], 'exact declared matrix'
-    rows=[];images={};arms={};raw=[];excursions=[]
+    rows=[];images={};arms={};raw=[];excursions=[];alpha_excursions=[];constant_observations=[]
     for observed in [False,True]:
         for floating in [False,True]:
             arm=('raw-float' if floating else 'raw')+('-observed' if observed else '')
@@ -117,8 +138,10 @@ def qualify(run):
                     if floating:
                         values,excursion=float_excursions(image)
                         if excursion['words']:excursions.append(dict(arm=arm,name=c['name'],pass_index=p,**excursion))
-                        alpha=values[3::4];assert set(alpha)<={0.,1.}
-                    else:alpha=image[3::4];assert set(alpha)<={0,255}
+                        alpha=values[3::4]
+                        unexpected=collections.Counter(f'{struct.unpack_from("<I",image,16*i+12)[0]:08x}' for i,a in enumerate(alpha) if a not in (0.,1.))
+                        if unexpected:alpha_excursions.append(dict(arm=arm,name=c['name'],pass_index=p,words=sum(unexpected.values()),bits=dict(unexpected)))
+                    else:alpha=image[3::4]
                     covered=sum(a!=0 for a in alpha)
                     assert 0<=covered<=16384
                     if not p:assert covered>0, 'uncull empty'
@@ -129,7 +152,8 @@ def qualify(run):
                         stride=len(expected_pixel)
                         for pixel in range(16384):
                             actual=image[stride*pixel:stride*(pixel+1)]
-                            assert actual==(expected_pixel if alpha[pixel] else bytes(stride)), 'constant color'
+                            if not alpha[pixel]:assert actual==bytes(stride), 'clear pixel'
+                            elif actual!=expected_pixel:constant_observations.append(dict(arm=arm,name=c['name'],pass_index=p,pixel=pixel,actual=actual.hex(),expected=expected_pixel.hex()))
                     last=vertex((cd/('recorder.bin' if p else 'recorder-uncull.bin')).read_bytes(),cfg,last)
                     r=results[c['name'],p];assert r['covered']==covered and r['invocations_cumulative']==last and r['guards_tags'] is True and r['overflow']==0
                     active=legacy.qualify_fragment(image,(cd/('fragment.bin' if p else 'fragment-uncull.bin')).read_bytes(),floating,observed)
@@ -152,7 +176,7 @@ def qualify(run):
             assert images[arm,f'c{reverse:04}',0]!=images[arm,f'c{14+reverse:04}',0], 'color negative';negative+=1
     return dict(status='PRESENT',backend=next(iter(arms.values()))['backend'],cases=16,draws=128,
                 observer_targets_equal=observer_equal,color_negatives_detected=negative,permutation_matrix=matrix,
-                rows=rows,raw=raw,float_range_excursions=excursions)
+                rows=rows,raw=raw,float_range_excursions=excursions,alpha_excursions=alpha_excursions,constant_color_differences=constant_observations)
 
 if __name__=='__main__':
     ap=argparse.ArgumentParser();ap.add_argument('--run',type=Path);ap.add_argument('--test',action='store_true');a=ap.parse_args()

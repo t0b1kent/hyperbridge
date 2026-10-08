@@ -103,7 +103,7 @@ def qualify_fragment(image, data, float_target, observed=True):
         assert count <= 1, 'fragment overlap'
         assert record[4:16] == b'\xa5'*12, 'fragment reserved'
         pixel = image[stride*i:stride*(i+1)]
-        covered = pixel[12:16] == struct.pack('<f', 1.) if float_target else pixel[3] == 255
+        covered = struct.unpack_from('<f',pixel,12)[0] != 0. if float_target else pixel[3] != 0
         assert bool(count) == (covered and observed), 'fragment coverage'
         if not count:
             assert record[16:] == b'\xa5'*48, 'fragment empty record'

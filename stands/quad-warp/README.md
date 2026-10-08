@@ -23,3 +23,11 @@ order byte differences are reported, not silently treated as equivalent.
 
 This is DIAGNOSTIC_ONLY/NOT_GOLDEN. Windows runs do not measure GPU speed.
 The historical 007 qualifier failure and 008 correction remain preserved.
+
+010 preserves the failed 009 evidence. Its host/qualifier accept finite float
+alpha as recorded; coverage means nonzero alpha for this declared corpus and
+is cross-checked against fragment counts. Alpha excursions and constant-color
+differences are inventoried instead of aborting capture. Exact output/target
+equality, corruption controls and later cross-backend comparisons are unchanged.
+No HLSL, geometry, compiler flags or raw readback layout changed. The COMPLETE
+message now reports cases/draws from the actual case vector.
