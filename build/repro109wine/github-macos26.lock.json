@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "classification": "SOURCE_RECIPE_NOT_ACCEPTED_NOT_GOLDEN",
+  "runner_label": "macos-26",
+  "developer_dir": "/Applications/Xcode_26.6.app/Contents/Developer",
+  "toolchain": {
+    "python": "3.13.7",
+    "xcode": "26.6",
+    "xcode_build": "17F113",
+    "sdk": "26.5",
+    "apple_clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "deployment_target": "14.0"
+  },
+  "measured_reference": {
+    "repository": "t0b1kent/hyperbridge",
+    "revision": "f2c751ac5e2c744aa66486b1a75f46b204f83017",
+    "run": "37780468082",
+    "artifact": "repro109-llvm22-macos-build-tools-f2c751ac5e2c744aa66486b1a75f46b204f83017",
+    "scope": "Xcode, SDK and native Apple clang versions measured by the compiler producer preflight; Wine SDK x18 exports are not established by this receipt"
+  },
+  "official_runner_document": "https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md",
+  "sdk_x18_exports": "MUST_BE_PRESENT_BEFORE_DOWNLOADS; Wine cloud result pending",
+  "expected_standalone_wine": {
+    "ec": 642,
+    "pe64": 757,
+    "hexpthk": 642,
+    "a64xrm": 642
+  },
+  "count_reference": "Retained source-built standalone Wine b43; new compiler output and packaged engine counts require measurement",
+  "signing": "OWNER_ONLY",
+  "games": "NOT_ENABLED"
+}

@@ -1,0 +1,66 @@
+name: repro109-wine-sourcebuilt26
+on:
+  push:
+    branches: [repro109/wine-sourcebuilt26-20261009]
+    paths:
+      - 'build/repro109*/**'
+      - 'jobs/repro109-wine-sourcebuilt26.sh'
+      - '.github/workflows/repro109-wine-sourcebuilt26.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: repro109-wine-sourcebuilt26
+  cancel-in-progress: false
+jobs:
+  inputs:
+    if: github.repository == 't0b1kent/hyperbridge'
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+      - name: Check exact recipe files without source downloads or compilation
+        run: python -I -B build/repro109wine/build_full.py --check-inputs
+  wine:
+    needs: inputs
+    if: github.event_name == 'workflow_dispatch' && github.repository == 't0b1kent/hyperbridge'
+    runs-on: macos-26
+    timeout-minutes: 360
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+      - name: Retrieve the existing compiler artifact from this repository
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: repro109-llvm22-macos-full-f2c751ac5e2c744aa66486b1a75f46b204f83017
+          run-id: 37782806683
+          repository: t0b1kent/hyperbridge
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/compiler-input
+      - name: Run pinned source recipe with archive guards before compiler execution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash jobs/repro109-wine-sourcebuilt26.sh \
+            "$RUNNER_TEMP/sourcebuilt26-results" \
+            "$RUNNER_TEMP/compiler-input/llvm22-macos-results.tar.gz"
+      - name: Preserve complete bounded results even on build or publisher failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repro109-wine-sourcebuilt26-${{ github.sha }}
+          path: ${{ runner.temp }}/sourcebuilt26-results
+          if-no-files-found: warn
+          retention-days: 7
