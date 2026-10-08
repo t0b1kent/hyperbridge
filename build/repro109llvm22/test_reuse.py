@@ -189,8 +189,18 @@ class ReuseTests(unittest.TestCase):
                 member.size = len(data)
                 stream.addfile(member, io.BytesIO(data))
         lock = dict(self.lock, support_inputs=rows)
-        selected, inputs = reuse.prepare_tests(test, self.root, lock, archive)
+        selected, inputs, adjustment = reuse.prepare_tests(test, self.root, lock, archive)
         self.assertEqual(len(inputs), 6)
+        self.assertEqual(test.read_bytes(), primary)
+        self.assertEqual(adjustment['run_index'], 10)
+        self.assertEqual(adjustment['changed_run_count'], 1)
+        self.assertEqual(adjustment['original_sha256'], hashlib.sha256(primary).hexdigest())
+        self.assertEqual(adjustment['effective_sha256'], reuse.sha(selected))
+        self.assertEqual(adjustment['effective_bytes'] - adjustment['original_bytes'], 5)
+        old_runs = reuse.current.run_lines(primary.decode(), selected, self.root / 'run-a', 17)
+        fixed_runs = reuse.current.run_lines(selected.read_text(), selected, self.root / 'run-a', 17)
+        self.assertEqual([i for i, (a, b) in enumerate(zip(old_runs, fixed_runs)) if a != b], [10])
+        self.assertIn(' -o - ', fixed_runs[10])
         result = {}
         with patch.object(reuse.current, 'command') as command:
             reuse.current.run_checks('level4-test', Path('never-executed-tools'), selected,
@@ -199,6 +209,33 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual(result['test_run_lines_passed'], 44)
         self.assertEqual([row['run_lines_passed'] for row in result['tests']], [17, 6, 9, 12])
         self.assertEqual(len({call.args[1] for call in command.call_args_list}), 44)
+        pipelines = [call.args[0][-1] for call in command.call_args_list
+                     if call.args[0][-1].startswith('llc ') and '| FileCheck ' in call.args[0][-1]]
+        self.assertGreater(len(pipelines), 1)
+        for line in pipelines:
+            with self.subTest(run=line):
+                self.assertTrue(' -o - ' in line or ' < ' in line, line)
+
+    def test_12_primary_stdout_fix_refuses_unknown_input_before_write(self):
+        test = self.root / 'unknown-primary.ll'
+        original = b'; RUN: llc unexpected.ll | FileCheck unexpected.ll\n'
+        test.write_bytes(original)
+        with self.assertRaisesRegex(ValueError, 'Primary stdout fix preimage differs'):
+            reuse.fix_primary_test_stdout(test)
+        self.assertEqual(test.read_bytes(), original)
+
+    def test_13_primary_stdout_fix_is_not_silently_applied_twice(self):
+        patch_text = (HERE / 'LLVM22-ARM64EC-Q-RESTORES.patch').read_text()
+        marker = '+++ b/llvm/test/CodeGen/AArch64/arm64ec-split-thunk-q-restores.ll\n'
+        section = patch_text.split(marker, 1)[1].split('\ndiff --git ', 1)[0]
+        primary = ''.join(line[1:] + '\n' for line in section.splitlines() if line.startswith('+')).encode()
+        test = self.root / 'double-apply-primary.ll'
+        test.write_bytes(primary)
+        reuse.fix_primary_test_stdout(test)
+        original = test.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'Primary stdout fix preimage differs'):
+            reuse.fix_primary_test_stdout(test)
+        self.assertEqual(test.read_bytes(), original)
 
     def test_11_same_size_support_corruption_refused(self):
         data = b'; owned support fixture\n'

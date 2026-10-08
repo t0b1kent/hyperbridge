@@ -1,6 +1,7 @@
 """Check new IR with a frozen older build. No compiler build or fallback path."""
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 import os
@@ -109,6 +110,30 @@ def extract_support(lock, archive, inputs):
             require(sha(target) == row['sha256'], 'Support member SHA differs: ' + row['file'])
 
 
+def fix_primary_test_stdout(test):
+    """Correct one pinned test RUN, preserving the frozen compiler/source recipe."""
+    before = test.read_bytes()
+    require(len(before) == 4553 and hashlib.sha256(before).hexdigest() ==
+            '20b1bc0303630146d935ab0f4c5c0fa0075aaa65b09a981b26cb9b664db32a30',
+            'Primary stdout fix preimage differs')
+    old = (b'; RUN: llc -mtriple=arm64ec-pc-windows-msvc -verify-machineinstrs '
+           b'-aarch64-arm64ec-split-thunk-q-restores %S/arm64ec-exit-thunks.ll '
+           b'| FileCheck %S/arm64ec-exit-thunks.ll\n')
+    new = old.replace(b' %S/arm64ec-exit-thunks.ll |',
+                      b' -o - %S/arm64ec-exit-thunks.ll |')
+    require(before.count(old) == 1, 'Primary stdout RUN count differs')
+    after = before.replace(old, new, 1)
+    require(len(after) == 4558 and hashlib.sha256(after).hexdigest() ==
+            '6662a8e180386ad1546e153601ef5941d09e17c84c6b7e07ee2ee47cd8685820',
+            'Primary stdout fix output differs')
+    test.write_bytes(after)
+    return {'classification': 'TEST_RUN_ONLY_UNCHANGED_COMPILER', 'run_index': 10,
+            'changed_run_count': 1, 'original_bytes': len(before), 'effective_bytes': len(after),
+            'original_sha256': hashlib.sha256(before).hexdigest(),
+            'effective_sha256': hashlib.sha256(after).hexdigest(),
+            'before': old.decode().strip(), 'after': new.decode().strip()}
+
+
 def prepare_tests(test, root, lock, support_archive):
     inputs = root / 'current-test-inputs'
     inputs.mkdir()
@@ -118,11 +143,12 @@ def prepare_tests(test, root, lock, support_archive):
             'llvm/test/CodeGen/AArch64/' + test.name]
     require(len(rows) == 1 and sha(inputs / test.name) == rows[0]['patched_sha256'],
             'Current primary test differs from verified producer test')
+    adjustment = fix_primary_test_stdout(inputs / test.name)
     for row in current.extra_test_rows(lock):
         shutil.copy2(HERE / row['file'], inputs / row['file'])
     extract_support(lock, support_archive, inputs)
     return inputs / test.name, [{'file': path.name, 'bytes': path.stat().st_size, 'sha256': sha(path)}
-                                for path in sorted(inputs.iterdir())]
+                                for path in sorted(inputs.iterdir())], adjustment
 
 
 def check_tools(tools, manifest):
@@ -173,8 +199,12 @@ def main():
             archive = root / 'official-support-source.tar.xz'
             fetch_support(lock, archive, deadline)
             result['support_source_archive'] = {'bytes': archive.stat().st_size, 'sha256': sha(archive)}
-            test, rows = prepare_tests(test, root, lock, archive)
+            producer_test = test
+            test, rows, adjustment = prepare_tests(test, root, lock, archive)
             result['effective_test_inputs'] = rows
+            result['primary_test_run_adjustment'] = adjustment
+            shutil.copy2(producer_test, out / 'primary.producer.ll')
+            shutil.copy2(test, out / test.name)
             require(len(rows) == 6, 'Complete current IR input set differs')
         else:
             result['effective_test_inputs'] = [{'file': 'synthetic.c', 'sha256': lock['synthetic_sha256']}]
