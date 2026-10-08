@@ -1,21 +1,19 @@
-# Public interpolation holdout 011
+# Public clip-anchor holdout 012
 
-Only synthetic positions, colors, viewports and HLSL; no game or Apple inputs.
-All eight geometry groups are new versus 010. They exercise both leftmost
-anchor locations, subpixel offsets, W=3 and nonuniform non-power-of-two W,
-nonuniform COLOR, constant COLOR under perspective, and COLOR permutation.
-The 16 cases, four readback arms, 128 draws, timeouts, DXIL flags, host and
-qualifier are unchanged from successful 010. No coefficients are embedded:
-Windows uses ordinary D3D12 WARP interpolation. WARP is software, not hardware.
+Synthetic inputs only; no game or Apple data. Eight groups, each with all six
+vertex permutations: 48 cases, 384 draws, four complete readback arms.
+Includes exact equal clip X with unequal W, clip/NDC anchor changes, nonbinary
+W, offset/subpixel viewports, constant COLOR and a negative COLOR permutation.
+Frozen Mac setup: minimum clip X, ties minimum clip Y, negative screen-space
+determinant; unchanged projection, plane arithmetic and fragment evaluation.
+Geometry and this rule were fixed before this corpus produced backend bytes.
 
-The Mac candidate was frozen before any output of this corpus: post-VS
-runtime plane setup chooses minimum screen X, ties by maximum screen Y,
-and negative determinant. Geometry and runtime rule must not be retuned
-after reference bytes arrive; mismatches are reported exactly.
+Windows uses normal D3D12 WARP. WARP is software, not hardware. Preserve every
+raw ledger entry even on qualification failure. Finite range/alpha excursions
+are recorded; observer/target equality stays byte-exact. No timing claim.
+Only matrix cardinality and permutation reporting extend the previous host
+and checker. HLSL, DXIL flags, recorder ABI and runtime timeouts are unchanged.
 
 From an initialized x64 Native Tools Command Prompt:
-`pwsh -NoLogo -NoProfile -File stands/quad-warp/run-windows.ps1 -Out build/holdout011`
-MSVC setup remains a separate cmd workflow step. Upload all four raw arms
-and every ledger entry even if qualification fails. Readback rules preserve
-finite alpha/range excursions and require exact observer/target equality.
-No GPU timing conclusion; DIAGNOSTIC_ONLY/NOT_GOLDEN.
+`pwsh -NoLogo -NoProfile -File stands/quad-warp/run-windows.ps1 -Out build/holdout012`
+MSVC environment is initialized by the separate cmd workflow step.

@@ -82,7 +82,7 @@ std::vector<Case> read_cases(const fs::path &path) {
         c.words[7] = Capacity;
         result.push_back(c);
     }
-    require(result.size() == 16, "sixteen cases required");
+    require(result.size() == 48, "forty-eight cases required");
     return result;
 }
 ComPtr<ID3DBlob> shader(const fs::path &dir, const wchar_t *name) {

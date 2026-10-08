@@ -127,7 +127,7 @@ def qualify(run):
             assert device['observer']==observed
             assert device['format']==('RGBA32_FLOAT' if floating else 'RGBA8_UNORM')
             results=[json.loads(l) for l in (root/'results.jsonl').read_text().splitlines()]
-            assert len(results)==32;results={(r['name'],r['pass']):r for r in results};assert len(results)==32
+            assert len(results)==2*len(normalized);results={(r['name'],r['pass']):r for r in results};assert len(results)==2*len(normalized)
             for c in normalized:
                 cfg=(c['rotation'],c['reverse'],c['color_shift'],c['geometry'],0,0,c['tag'],64)
                 cd=root/c['name'];assert (cd/'params.bin').read_bytes()==struct.pack('<8I',*cfg)
@@ -168,13 +168,20 @@ def qualify(run):
         for c in normalized:
             for p in [0,1]:
                 assert images[arm,c['name'],p]==images[arm+'-observed',c['name'],p], 'observer target drift';observer_equal+=1
+        by_key={(c['geometry'],c['rotation'],c['reverse']):c['name'] for c in normalized}
+        assert len(by_key)==48 and len(normalized)==48, 'full permutation matrix'
         for g in range(8):
-            base=images[arm,f'c{2*g:04}',0];actual=images[arm,f'c{2*g+1:04}',0]
-            matrix.append(dict(format=arm,geometry=g,different_bytes_reversed=sum(x!=y for x,y in zip(base,actual))))
-            # Report exact ordering differences; do not assume the arithmetic is order invariant.
-        for reverse in range(2):
-            assert images[arm,f'c{reverse:04}',0]!=images[arm,f'c{14+reverse:04}',0], 'color negative';negative+=1
-    return dict(status='PRESENT',backend=next(iter(arms.values()))['backend'],cases=16,draws=128,
+            base=images[arm,by_key[g,0,0],0]
+            for rotation in range(3):
+                for reverse in range(2):
+                    actual=images[arm,by_key[g,rotation,reverse],0]
+                    matrix.append(dict(format=arm,geometry=g,rotation=rotation,reverse=reverse,
+                                       different_bytes_from_order0=sum(x!=y for x,y in zip(base,actual))))
+        for rotation in range(3):
+            for reverse in range(2):
+                assert images[arm,by_key[0,rotation,reverse],0]!=images[arm,by_key[7,rotation,reverse],0], 'color negative'
+                negative+=1
+    return dict(status='PRESENT',backend=next(iter(arms.values()))['backend'],cases=len(normalized),draws=8*len(normalized),
                 observer_targets_equal=observer_equal,color_negatives_detected=negative,permutation_matrix=matrix,
                 rows=rows,raw=raw,float_range_excursions=excursions,alpha_excursions=alpha_excursions,constant_color_differences=constant_observations)
 
