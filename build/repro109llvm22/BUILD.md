@@ -1,11 +1,11 @@
-ДЛЯ КУРАТОРА: пакет по поручению 08.10 11:06 для отдельной ветки
+ДЛЯ КУРАТОРА: повтор по поручению 08.10 13:19 поверх d6663e2 для ветки
 repro109/llvm22-q-restores-20261008 открытого hyperbridge. Narrow push этой
 описи запускает четыре клетки; workflow_dispatch не требует регистрации на main
 для первого запуска. Лейн не отправляет и не запускает задачу.
 
-Матрица fail-fast:false: patch / build / level4-test / synthetic-asm.
-Каждая клетка независима и получает официальный llvmorg-22.1.5 source archive
-только в cloud, с точными 167058820 Б / SHA7972b87b… из lock. Перед извлечением
+Четыре границы: patch / build / level4-test / synthetic-asm. Первый job:
+матрица patch/build, fail-fast:false. Только эти две клетки получают официальный
+llvmorg-22.1.5 archive в cloud, с точными167058820Б/SHA7972b87b… из lock. Перед извлечением
 — прежний собственный archive validator; base/patched SHA шести файлов LEVEL4
 проверяются до/после git apply. Патч11071Б/SHAbe727326… иsynthetic MIT input
 перенесены без изменения, default:false сохранён.
@@ -15,16 +15,29 @@ repro109/llvm22-q-restores-20261008 открытого hyperbridge. Narrow push 
 Различия явные: LLVM22 вместо15.0.7, Linux x86-64/GCC13 вместоDarwin,
 LLVM_TARGETS_TO_BUILD=AArch64, LLVM_ENABLE_PROJECTS=clang; AIR/libunwind не нужны.
 Собираются llc+clang и малые FileCheck/llvm-readobj для полного теста.
-Все17 RUN строки LEVEL4 выполняются по порядку, включая FileCheck, unwind,
+Все17 RUN строки исходного LEVEL4 выполняются по порядку, включая FileCheck, unwind,
 entry/exit siblings, disabled thunk generation и обычный AArch64 control.
-Skip/нулевой testcount успехом не считается. Три клетки скомпиляцией делают
-свои независимые сборки; артефакт проваленной клетки не отменяет остальные.
+Skip/нулевой testcount успехом не считается. Компиляция РОВНО ОДНА — в build.
+После успешного первого job второй job запускает матрицу level4-test/synthetic-asm,
+fail-fast:false; оба получают build artifact ЭТОГО run через закреплённый
+actions/download-artifact. При отказе build эти проверки NOT_ENABLED/skipped,
+не PASS. Никакого fallback к скачиванию LLVM или повторной компиляции.
+SHARED-BUILD.json связывает tools, patched test, license и recipe/source hashes
+с repository/revision/run_id. До исполнения: SHA tar и всех выбранных файлов,
+успешный RESULT build, exact tool set, executable modes, ELF64 x86-64,
+source/patch/lock pins и точные SHA всех четырёх тестов; caps1000members/2GiB,
+без symlinks/hardlinks/traversal/duplicates. Sidecar должен называть выбранный tar.
 
 Runnerubuntu-24.04, Python3.13.7, GCC13/g++13; фактические host tool versions
 полностью сохраняются. CMake/Ninja patch versions ещё не квалифицированы как
 неизменный toolchain для BUILD.md продукта: это boundedDIAGNOSTIC_ONLY/NOT_GOLDEN.
-До download нужны ≥10ГиБ free disk и≥6ГиБ available RAM; compile2/link1.
-Потолки75минproducer/90минjob, один command≤60мин; actualruntimeNOT_MEASURED.
+Для source/build нужны≥10ГиБ free disk и≥10ГиБ available RAM; compile4/link1.
+Потолки180минproducer/200минjob; build command150мин вместо прежних60,
+остальные команды60мин. Проверки:20минproducer/30минjob. Timeout команды
+ограничивается также оставшимся общим deadline и записывается в RESULT.
+Прошлый run37717057447: patchSUCCESS, три компиляции FAILED_TIMEOUT60мин;
+этот факт не доказывает ни корректность, ни ошибку ещё не собранного compiler.
+Повтор ещёNOT_ENABLED, фактическая длительность нового build не измерена.
 Первая границаhost/platform/tool/capacity, следующая official SHA иpatch preimages.
 
 synthetic-asm порождает REAL .s исправленным clang: before — defaultoff,
@@ -42,10 +55,24 @@ bytes/SHA записываются. Переполнение —DROPPED/scopedst
 Actions artifacts хранятся7дней, release не создаётся, contents:read.
 
 Офлайн из клона, без source downloads/compiler:
-`REPRO109_TEST_SCRATCH=<new-normal-dir> python3 -I -B build/repro109llvm22/test_run.py`;
+`REPRO109_TEST_SCRATCH=<new-normal-dir> python3 -I -B -m unittest discover -s build/repro109llvm22 -p 'test_*.py'`;
 повтор с -O иДРУГИМscratch. На Маке только эти собственные controls;
 run.py cloudgate отказывает до файлов/сети/чужого кода.
 
 Это Linux host tools для codegen probe, не Wine toolchain и не продуктовый
 runtime. Полный compiler для пересборки Wine — отдельный следующий пакет
 ТОЛЬКО после зелёных четырёх клеток. Games/Winert/sign/notarization/install0.
+
+Дополнение LEVEL4 08.10 03:56:40UTC: три собственных IR-входа перенесены
+побайтно, 6+9+12 RUN строк, вместе с исходным 17 = 44. EXTRA-TESTS.json
+закрепляет байты, SHA и число команд; lock закрепляет SHA самой описи.
+Патч и SOURCE-MANIFEST.json НЕ изменены. После git apply новые имена должны
+отсутствовать в upstream, только затем они копируются в CodeGen/AArch64.
+Shared artifact содержит все четыре IR и их SHA; пропуск/замена/дубликат
+отказывает до исполнения. Один и тот же llc/FileCheck/llvm-readobj выполняет
+все 44 команды; отдельные временные файлы и полные журналы для каждого IR.
+Используется прежний исполнитель точных RUN-команд с %s/%S/%t и pipefail;
+llvm-lit не запускается, LLVM build/test config не переносится между машинами.
+Тесты покрывают frame192/offset16, frame256/add-SP, default=false и неизменные
+ordinary Windows/ELF функции. После первого отказа сохраняются достигнутые
+счётчики по каждому входу; 44 подготовленные команды ещё не 44 PASS LLVM.

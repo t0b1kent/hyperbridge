@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "classification": "PREPARED_TEST_INPUTS_NOT_NEW_COMPILER_PASS",
+  "source_input_manifest_sha256": "04212df313224bb8c120aa16c454f7855bfe41c94d6c681416592aef02ec1e97",
+  "source_patch_sha256": "be727326e4b2592058b2fe00e37c3d9b330b3d5f64bd99bf3a9cc659f540b215",
+  "tests": [
+    {
+      "file": "arm64ec-split-q-restores.ll",
+      "bytes": 5707,
+      "sha256": "ceb6076207b44c0c3e472077430bf4f3c8a8f531f5434ca3faac47e83a52af5d",
+      "run_directives": 6
+    },
+    {
+      "file": "large-thunk-split-q-restores.ll",
+      "bytes": 2633,
+      "sha256": "a3d9c54a3c05c1be1fd924aeceb7111ddadf81e7ee0af14eea3cf9c4f20b649c",
+      "run_directives": 9
+    },
+    {
+      "file": "windows-split-q-restores.ll",
+      "bytes": 4211,
+      "sha256": "f878a8cc30ae7f716136ebb099475911bf10de8186e80ee30b32382eb782814c",
+      "run_directives": 12
+    }
+  ]
+}
