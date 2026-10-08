@@ -39,6 +39,8 @@ jobs:
           path: |
             build/quad-warp/raw/
             build/quad-warp/raw-float/
+            build/quad-warp/raw-observed/
+            build/quad-warp/raw-float-observed/
             build/quad-warp/*.json
             build/quad-warp/*.txt
             build/quad-warp/cases.csv
