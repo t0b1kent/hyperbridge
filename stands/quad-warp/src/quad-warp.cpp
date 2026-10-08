@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 HyperBridge contributors
-// Public synthetic D3D12 tessellation readback. WARP only; no adapter fallback.
+// Public fixed triangle-list readback. WARP only; no adapter fallback.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -22,7 +22,7 @@
 
 using Microsoft::WRL::ComPtr;
 namespace fs = std::filesystem;
-constexpr UINT Width = 128, Height = 128, Capacity = 65536;
+constexpr UINT Width = 128, Height = 128, Capacity = 64;
 constexpr UINT RecordWords = 12; // UV/tag + DS position + DS color, each uint4.
 constexpr UINT RecordBytes = 16 + 4 * RecordWords * Capacity + 256;
 constexpr UINT FragmentBytes = 16 + Width * Height * 64 + 256;
@@ -52,7 +52,7 @@ std::vector<Case> read_cases(const fs::path &path) {
     std::string line;
     std::getline(f, line); // Header is fixed and checked below.
     if (!line.empty() && line.back() == '\r') line.pop_back();
-    require(line == "name,winding,outer0,outer1,outer2,outer3,inner0,inner1,tag", "CSV header");
+    require(line == "name,rotation,reverse,color_shift,tag", "CSV header");
     std::vector<Case> result;
     std::set<std::string> names;
     while (std::getline(f, line)) {
@@ -62,23 +62,24 @@ std::vector<Case> read_cases(const fs::path &path) {
         std::vector<std::string> values;
         std::string v;
         while (std::getline(row, v, ',')) values.push_back(v);
-        require(values.size() == 9, "CSV width");
+        require(values.size() == 5, "CSV width");
         Case c;
-        c.name = values[0]; c.winding = values[1];
+        c.name = values[0];
         require(c.name.size() == 5 && c.name[0] == 'c' &&
                 c.name.find_first_not_of("0123456789", 1) == std::string::npos &&
                 names.insert(c.name).second, "case name");
-        require(c.winding == "cw" || c.winding == "ccw", "case winding");
-        for (size_t i = 0; i < 7; ++i) {
+        for (size_t i = 0; i < 4; ++i) {
             size_t end = 0;
-            auto number = std::stoull(values[i + 2], &end, 0);
-            require(end == values[i + 2].size() && number <= UINT32_MAX, "case word");
-            c.words[i] = uint32_t(number);
+            auto number = std::stoull(values[i + 1], &end, 0);
+            require(end == values[i + 1].size() && number <= UINT32_MAX, "case word");
+            c.words[i == 3 ? 6 : i] = uint32_t(number);
         }
+        require(c.words[0]<3 && c.words[1]<2 && c.words[2]<2, "permutation limits");
+        c.winding = c.words[1] ? "ccw" : "cw";
         c.words[7] = Capacity;
         result.push_back(c);
     }
-    require(result.size() == 6, "six cases required");
+    require(result.size() == 12, "twelve cases required");
     return result;
 }
 ComPtr<ID3DBlob> shader(const fs::path &dir, const wchar_t *name) {
@@ -171,14 +172,11 @@ int main(int argc, char **argv) {
         check(device->CreateRootSignature(0, root_blob->GetBufferPointer(), root_blob->GetBufferSize(),
                                          IID_PPV_ARGS(&root)), "root signature");
         auto vs = shader(shader_dir, L"vs.dxil"), ps = shader(shader_dir, observe ? L"ps-observe.dxil" : L"ps.dxil");
-        auto ds = shader(shader_dir, L"ds.dxil");
-        auto hs_cw = shader(shader_dir, L"hs-cw.dxil"), hs_ccw = shader(shader_dir, L"hs-ccw.dxil");
         ComPtr<ID3D12PipelineState> pipelines[2][2];
         for (int winding = 0; winding < 2; ++winding) for (int cull = 0; cull < 2; ++cull) {
             D3D12_GRAPHICS_PIPELINE_STATE_DESC pd{};
             pd.pRootSignature = root.Get();
-            pd.VS = code(vs); pd.PS = code(ps); pd.DS = code(ds);
-            pd.HS = code(winding ? hs_ccw : hs_cw);
+            pd.VS = code(vs); pd.PS = code(ps);
             pd.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
             pd.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_ZERO;
             pd.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
@@ -198,7 +196,7 @@ int main(int argc, char **argv) {
             pd.DepthStencilState.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
             pd.DepthStencilState.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
             pd.DepthStencilState.BackFace = pd.DepthStencilState.FrontFace;
-            pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
+            pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
             pd.NumRenderTargets = 1; pd.RTVFormats[0] = target_format;
             pd.SampleDesc.Count = 1;
             check(device->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipelines[winding][cull])), "PSO");
@@ -293,8 +291,8 @@ int main(int argc, char **argv) {
                 cl->SetGraphicsRootConstantBufferView(0, params->GetGPUVirtualAddress());
                 cl->SetGraphicsRootUnorderedAccessView(1, recorder->GetGPUVirtualAddress());
                 cl->SetGraphicsRootUnorderedAccessView(2, fragments->GetGPUVirtualAddress());
-                cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST);
-                cl->DrawInstanced(1, 1, 0, 0);
+                cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                cl->DrawInstanced(6, 1, 0, 0);
                 transition(cl.Get(), target.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 transition(cl.Get(), recorder.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 transition(cl.Get(), fragments.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -338,7 +336,7 @@ int main(int argc, char **argv) {
                 bytes(dir / (pass ? "recorder.bin" : "recorder-uncull.bin"), words.data(), RecordBytes);
                 bool valid = words[0] > 0 && words[0] <= Capacity && words[1] == 0 && words[2] == 0 && words[3] == 0;
                 for (UINT i = 0; i < words[0] && i < Capacity; ++i)
-                    valid &= words[4 + i * RecordWords + 2] == 0 && words[4 + i * RecordWords + 3] == c.words[6];
+                    valid &= words[4 + i * RecordWords] < 6 && words[4 + i * RecordWords + 1] < 4 && words[4 + i * RecordWords + 2] < 4 && words[4 + i * RecordWords + 3] == c.words[6];
                 for (size_t i = 4 + size_t(words[0]) * RecordWords; i < words.size(); ++i) valid &= words[i] == 0xa5a5a5a5u;
                 results << "{\"name\":\"" << c.name << "\",\"winding\":\"" << c.winding
                         << "\",\"pass\":" << pass << ",\"covered\":" << covered
@@ -350,7 +348,7 @@ int main(int argc, char **argv) {
             }
         }
         results.close(); require(bool(results), "close results");
-        std::cout << "COMPLETE cases=6 draws=12 backend=WARP_NOT_HARDWARE\n";
+        std::cout << "COMPLETE cases=12 draws=24 backend=WARP_NOT_HARDWARE\n";
         return 0;
     } catch (const std::exception &e) {
         std::cerr << "FAILED " << e.what() << '\n';

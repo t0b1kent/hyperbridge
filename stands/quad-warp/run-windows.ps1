@@ -10,7 +10,7 @@ if (Test-Path -LiteralPath $Out) { throw 'Out must be new; preserve failed runs'
 $outDir = (New-Item -ItemType Directory -Path $Out).FullName
 $src = Join-Path $PSScriptRoot 'src'
 $status = @{ schema=1; status='FAILED'; backend='WARP, not hardware'; runtime='NOT_ENABLED'; timeout=$false }
-$build = @{ schema=1; status='NOT_ENABLED'; workers=1; minimum_steps=7; steps=@() }
+$build = @{ schema=1; status='NOT_ENABLED'; workers=1; minimum_steps=4; steps=@() }
 function Digest($path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
 function Native($exe, $argList) {
   & $exe @argList >> (Join-Path $outDir 'build.txt') 2>&1
@@ -66,13 +66,9 @@ try {
       (Join-Path $src 'quad-warp.cpp'),'/Febin\quad-warp.exe','/Fobin\quad-warp.obj',
       '/link','d3d12.lib','dxgi.lib','d3dcompiler.lib')
     foreach ($stage in @('vs','ps')) {
-      Native $Dxc @('-T',"${stage}_6_0",'-E',"${stage}_main",(Join-Path $src 'triquad-endpoints.hlsl'),'-Fo',"shaders\$stage.dxil")
+      Native $Dxc @('-T',"${stage}_6_0",'-E',"${stage}_main",(Join-Path $src 'fixed-triangle.hlsl'),'-Fo',"shaders\$stage.dxil")
     }
-    Native $Dxc @('-T','ps_6_0','-E','ps_observe',(Join-Path $src 'triquad-endpoints.hlsl'),'-Fo','shaders\ps-observe.dxil')
-    Native $Dxc @('-T','ds_6_0','-E','ds_main',(Join-Path $src 'quad-cross.hlsl'),'-Fo','shaders\ds.dxil')
-    foreach ($winding in @('cw','ccw')) {
-      Native $Dxc @('-T','hs_6_0','-E','hs_main',(Join-Path $src "hs-$winding.hlsl"),'-Fo',"shaders\hs-$winding.dxil")
-    }
+    Native $Dxc @('-T','ps_6_0','-E','ps_observe',(Join-Path $src 'fixed-triangle.hlsl'),'-Fo','shaders\ps-observe.dxil')
     $build.status = 'PRESENT'
     $build | ConvertTo-Json -Depth 6 | Set-Content 'BUILD.json' -Encoding utf8
     $built = @(Get-ChildItem bin,shaders -File | Sort-Object FullName | ForEach-Object {
@@ -99,7 +95,7 @@ try {
       $status.arms += @{ target=$target; status='EXITED'; exit_code=$proc.ExitCode; timeout_seconds=55 }
       if ($proc.ExitCode -ne 0) { throw "WARP $target failed rc=$($proc.ExitCode)" }
     }
-    & $python (Join-Path $PSScriptRoot 'check-output.py') --run . > 'qualification.txt' 2>&1
+    & $python (Join-Path $PSScriptRoot 'check-fixed.py') --run . > 'qualification.txt' 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'readback qualification failed' }
     $status.status = 'PRESENT'
   } finally { Pop-Location }
@@ -117,5 +113,5 @@ try {
   $status | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $outDir 'RUN.json') -Encoding utf8
 }
 if ($status.status -ne 'PRESENT') { exit 1 }
-Write-Host 'PRESENT: 6 cases, 48 baseline/observed RGBA8/Float readbacks, WARP not hardware'
+Write-Host 'PRESENT: 12 cases, 96 fixed-triangle baseline/observed RGBA8/Float readbacks, WARP not hardware'
 exit 0

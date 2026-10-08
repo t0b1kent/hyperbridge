@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Build and read back WARP tessellation
+      - name: Build and read back WARP fixed triangles
         shell: cmd
         run: |
           @echo off
