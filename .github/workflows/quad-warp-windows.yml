@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT
+name: quad-warp-windows
+on:
+  workflow_dispatch:
+  push:
+    paths: ['stands/quad-warp/**', '.github/workflows/quad-warp-windows.yml']
+permissions:
+  contents: read
+concurrency:
+  group: quad-warp-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  reference:
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and read back WARP tessellation
+        shell: pwsh
+        run: ./stands/quad-warp/run-windows.ps1 -Out "$PWD/build/quad-warp"
+      - name: Preserve receipts and raw readbacks even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quad-warp-${{ matrix.os }}
+          path: |
+            build/quad-warp/raw/
+            build/quad-warp/*.json
+            build/quad-warp/*.txt
+            build/quad-warp/cases.csv
+          if-no-files-found: error
