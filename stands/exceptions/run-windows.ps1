@@ -41,6 +41,12 @@ if ($LASTEXITCODE -ne 0) { throw 'build failed: object_marshal254' }
 $ct = Join-Path $bin 'windows_process64-continue268.exe'
 & $cc @probe (Join-Path $src 'windows_process64-continue268.c') (Join-Path $src 'windows_process64-continue268.S') '-Wl,--no-insert-timestamp' -o $ct
 if ($LASTEXITCODE -ne 0) { throw 'build failed: windows_process64-continue268' }
+# PF354 and NV341 use the exact ordered flags from their local build receipts.
+$winctxFlags = @('-O1','-g0','-static','-fms-extensions','-fno-stack-protector',
+                 '-fno-vectorize','-fno-slp-vectorize','-Wl,--no-insert-timestamp')
+$pf354 = Build 'pf-stack354' $winctxFlags @('-lntdll')
+$nv341 = Build 'windows_process64-nv341' $winctxFlags @()
+
 
 $sc = Build 'stack-context64' $probe @('-lntdll')
 $sr = Build 'stack-returns64' $probe @('-lntdll')
@@ -222,7 +228,77 @@ $continueFailed = $continueQualification.Count -ne 32 -or
   @($continueQualification | Where-Object { -not ($_.rc0 -and $_.complete -and $_.entry -and $_.after) }).Count -ne 0
 if (-not $continueFailed) { 'COMPLETE32; synthetic continuation family only; games0' | Set-Content (Join-Path $d13 'COMPLETE') }
 
+# Raw evidence only: values are compared to local execution after collection.
+$d14 = NewDir 'pf-count-0-3-354'
+foreach ($source in @('pf-stack354.c','pf-stack354.S')) {
+  $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $src $source)).Hash.ToLower()
+  "$hash  $source" | Add-Content (Join-Path $d14 'source-sha256.txt')
+}
+(Get-FileHash -Algorithm SHA256 $pf354).Hash.ToLower() | Set-Content (Join-Path $d14 'binary-sha256.txt')
+@{ flags=$winctxFlags; libraries=@('-lntdll'); compiler_sha256=(Get-FileHash -Algorithm SHA256 $cc).Hash.ToLower() } |
+  ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d14 'compiler-flags.json')
+$pfQualification = @()
+foreach ($rep in 1..2) {
+  $name = 'all-rep{0}' -f $rep
+  RunOne $pf354 $d14 $name @() 30000
+  $rawPath = Join-Path $d14 ($name + '.txt')
+  $raw = if (Test-Path -LiteralPath $rawPath) { Get-Content -Raw -LiteralPath $rawPath } else { '' }
+  $outcome = @(Get-Content -LiteralPath (Join-Path $d14 'outcomes.txt') |
+    Where-Object { $_ -match ('^' + [regex]::Escape($name) + ' ') })
+  $rc0 = $outcome.Count -eq 1 -and $outcome[0] -eq ($name + ' rc=0')
+  $contexts = [regex]::Matches($raw, '(?m)^STACK_CONTEXT path=').Count
+  $returns = [regex]::Matches($raw, '(?m)^STACK_RETURN path=').Count
+  $contextComplete = [regex]::Matches($raw, '(?m)^PF354_CONTEXT_COMPLETE rows=96 failures=0\r?$').Count -eq 1
+  $returnComplete = [regex]::Matches($raw, '(?m)^PF354_RETURN_COMPLETE rows=128 failures=0\r?$').Count -eq 1
+  $pfQualification += [pscustomobject]@{
+    name=$name; repeat=$rep; rc0=$rc0; contexts=$contexts; returns=$returns
+    complete=($contextComplete -and $returnComplete)
+    stdout_sha256=if (Test-Path -LiteralPath $rawPath) { (Get-FileHash -Algorithm SHA256 -LiteralPath $rawPath).Hash.ToLower() } else { $null }
+  }
+  $pfQualification | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d14 'qualification.json')
+}
+$pfFailed = $pfQualification.Count -ne 2 -or
+  @($pfQualification | Where-Object { -not ($_.rc0 -and $_.complete -and $_.contexts -eq 96 -and $_.returns -eq 128) }).Count -ne 0
+if (-not $pfFailed) { 'COMPLETE2; PF argument/stack reference only; games0' | Set-Content (Join-Path $d14 'COMPLETE') }
+
+$d15 = NewDir 'process-nv341'
+foreach ($source in @('windows_process64-nv341.c','windows_process64-nv341.S')) {
+  $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $src $source)).Hash.ToLower()
+  "$hash  $source" | Add-Content (Join-Path $d15 'source-sha256.txt')
+}
+(Get-FileHash -Algorithm SHA256 $nv341).Hash.ToLower() | Set-Content (Join-Path $d15 'binary-sha256.txt')
+@{ flags=$winctxFlags; libraries=@(); compiler_sha256=(Get-FileHash -Algorithm SHA256 $cc).Hash.ToLower() } |
+  ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d15 'compiler-flags.json')
+$nvQualification = @()
+foreach ($rep in 1..2) {
+  foreach ($cell in @(2,3)) {
+    foreach ($mode in 8..15) {
+      $name = 'r{0}-cell{1:000}-m{2}' -f $rep,$cell,$mode
+      RunOne $nv341 $d15 $name @('cell',"$cell","$mode") 15000
+      $rawPath = Join-Path $d15 ($name + '.txt')
+      $raw = if (Test-Path -LiteralPath $rawPath) { Get-Content -Raw -LiteralPath $rawPath } else { '' }
+      $outcome = @(Get-Content -LiteralPath (Join-Path $d15 'outcomes.txt') |
+        Where-Object { $_ -match ('^' + [regex]::Escape($name) + ' ') })
+      $rc0 = $outcome.Count -eq 1 -and $outcome[0] -eq ($name + ' rc=0')
+      $complete = $raw.Contains(('WINENV_PROBE COMPLETE cell={0:000}' -f $cell))
+      $prefix = '(?m)^WINENV cell=' + ('{0:000}' -f $cell) + ' field='
+      $entry = [regex]::Matches($raw, ($prefix + 'API\.ENTRY268 bytes=120 hex=[0-9a-f]{240}\r?$')).Count -eq 1
+      $after = [regex]::Matches($raw, ($prefix + 'API\.AFTER341 bytes=256 hex=[0-9a-f]{512}\r?$')).Count -eq 1
+      $requestedMode = [regex]::Matches($raw, ($prefix + 'Continue\.Mode value=' + ('{0:x16}' -f $mode) + '\r?$')).Count -eq 1
+      $nvQualification += [pscustomobject]@{
+        name=$name; repeat=$rep; cell=$cell; mode=$mode
+        rc0=$rc0; complete=$complete; entry=$entry; after=$after; requested_mode=$requestedMode
+        stdout_sha256=if (Test-Path -LiteralPath $rawPath) { (Get-FileHash -Algorithm SHA256 -LiteralPath $rawPath).Hash.ToLower() } else { $null }
+      }
+      $nvQualification | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d15 'qualification.json')
+    }
+  }
+}
+$nvFailed = $nvQualification.Count -ne 32 -or
+  @($nvQualification | Where-Object { -not ($_.rc0 -and $_.complete -and $_.entry -and $_.after -and $_.requested_mode) }).Count -ne 0
+if (-not $nvFailed) { 'COMPLETE32; nonvolatile continuation reference only; games0' | Set-Content (Join-Path $d15 'COMPLETE') }
+
 Get-Content $m
-foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10, $d11, $d12, $d13) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
-if ($pinnedFailed -or $marshalFailed -or $continueFailed) { exit 1 }
+foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10, $d11, $d12, $d13, $d14, $d15) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+if ($pinnedFailed -or $marshalFailed -or $continueFailed -or $pfFailed -or $nvFailed) { exit 1 }
 exit 0

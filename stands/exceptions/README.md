@@ -121,3 +121,24 @@ The Windows runner compiles locally and runs two bounded30s repetitions into `ob
 The source-only C/assembly pair extends pinned209 with all eight guest nonvolatile register seeds and a byte-exact after snapshot. Synthetic CloseHandle and direct NtClose tracing calls run in eight modes: SEH unwind, unchanged VEH continue, R14/R15 edits, nested CloseHandle, R12/R13 edits, RSI/RDI edits, RBP edit, RBX edit. The existing exception record/context dumper is retained. Windows compiles locally and records32 bounded30s runs (two repeats of16 cells) in process-continue268, preserving stdout/stderr, outcomes and source/binary hashes. Qualification checks complete entry/after snapshots, without assuming which register edits survive a native API epilogue. Windows binaries must not be executed on the Mac. No game code or game data.
 
 Combined315 retains both reference families and matches continuation268 build flags to the local console fixture: $probe includes -fms-extensions, -fno-vectorize and -fno-slp-vectorize. The two output directories have independent hashes, qualification and COMPLETE records.
+
+## PF354 and NV341 reference requests
+
+These two existing synthetic probes have unchanged C and assembly sources.
+Both use ordered flags -O1 -g0 -static -fms-extensions -fno-stack-protector
+-fno-vectorize -fno-slp-vectorize -Wl,--no-insert-timestamp; PF354 also links
+-lntdll. The runner saves source, binary and compiler hashes, effective flags,
+raw stdout/stderr, process outcomes and qualification for each family.
+
+* pf-count-0-3-354: two separate runs, each with 128 return rows and 96 handler
+  context rows. It exercises RaiseException counts 0 and 3, RtlRaiseException
+  and ordinary invalid CloseHandle, VEH/SEH, at 16 stack depths. CloseHandle
+  has no handler entry in this probe. Compare EFLAGS at identical callee entry
+  RSP and arguments, preserving the raw fixed-input table separately.
+* process-nv341: 32 separate runs: two repeats, cells 2/3 and modes 8 through
+  15. The 120-byte API entry and 256-byte API return snapshots include the
+  nonvolatile GPRs and XMM6 through XMM15. Modes 14/15 edit only XMM6/XMM15.
+
+Qualification establishes collection completeness, not value correctness or
+engine acceptance. Compare these outputs against local runs before selecting
+a runtime change. There are no games, game data or emulator changes here.
