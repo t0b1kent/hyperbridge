@@ -19,6 +19,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "fixed-fixture.h"
+static float unpack(uint32_t x) { float f; std::memcpy(&f,&x,4); return f; }
 
 using Microsoft::WRL::ComPtr;
 namespace fs = std::filesystem;
@@ -52,7 +54,7 @@ std::vector<Case> read_cases(const fs::path &path) {
     std::string line;
     std::getline(f, line); // Header is fixed and checked below.
     if (!line.empty() && line.back() == '\r') line.pop_back();
-    require(line == "name,rotation,reverse,color_shift,tag", "CSV header");
+    require(line == "name,rotation,reverse,color_shift,geometry,tag", "CSV header");
     std::vector<Case> result;
     std::set<std::string> names;
     while (std::getline(f, line)) {
@@ -62,24 +64,24 @@ std::vector<Case> read_cases(const fs::path &path) {
         std::vector<std::string> values;
         std::string v;
         while (std::getline(row, v, ',')) values.push_back(v);
-        require(values.size() == 5, "CSV width");
+        require(values.size() == 6, "CSV width");
         Case c;
         c.name = values[0];
         require(c.name.size() == 5 && c.name[0] == 'c' &&
                 c.name.find_first_not_of("0123456789", 1) == std::string::npos &&
                 names.insert(c.name).second, "case name");
-        for (size_t i = 0; i < 4; ++i) {
+        for (size_t i = 0; i < 5; ++i) {
             size_t end = 0;
             auto number = std::stoull(values[i + 1], &end, 0);
             require(end == values[i + 1].size() && number <= UINT32_MAX, "case word");
-            c.words[i == 3 ? 6 : i] = uint32_t(number);
+            c.words[i == 4 ? 6 : i] = uint32_t(number);
         }
-        require(c.words[0]<3 && c.words[1]<2 && c.words[2]<2, "permutation limits");
+        require(c.words[0]<3 && c.words[1]<2 && c.words[2]<2 && c.words[3]<8, "permutation limits");
         c.winding = c.words[1] ? "ccw" : "cw";
         c.words[7] = Capacity;
         result.push_back(c);
     }
-    require(result.size() == 12, "twelve cases required");
+    require(result.size() == 16, "sixteen cases required");
     return result;
 }
 ComPtr<ID3DBlob> shader(const fs::path &dir, const wchar_t *name) {
@@ -284,7 +286,8 @@ int main(int argc, char **argv) {
                 const float rgba[4] = {0, 0, 0, 0};
                 cl->ClearRenderTargetView(rtv, rgba, 0, nullptr);
                 cl->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-                D3D12_VIEWPORT viewport{0, 0, float(Width), float(Height), 0, 1};
+                const auto *vp=FixedViewportBits[c.words[3]];
+                D3D12_VIEWPORT viewport{unpack(vp[0]),unpack(vp[1]),unpack(vp[2]),unpack(vp[3]),0,1};
                 D3D12_RECT scissor{0, 0, LONG(Width), LONG(Height)};
                 cl->RSSetViewports(1, &viewport); cl->RSSetScissorRects(1, &scissor);
                 cl->SetGraphicsRootSignature(root.Get());

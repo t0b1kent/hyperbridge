@@ -113,8 +113,11 @@ def qualify_fragment(image, data, float_target, observed=True):
         assert incoming == outgoing, 'fragment input/output'
         assert record[48:56] == struct.pack('<2f', (i % 128)+.5, (i//128)+.5), 'fragment position'
         values = struct.unpack('<4f', outgoing)
-        assert all(math.isfinite(v) and 0 <= v <= 1 for v in values), 'fragment output range'
-        assert pixel == (outgoing if float_target else bytes(round(v*255) for v in values)), 'fragment target/output'
+        assert all(math.isfinite(v) for v in values), 'fragment output finite'
+        # Float targets retain the exact recorded words, including interpolation
+        # excursions. UNORM conversion saturates; it does not alter float evidence.
+        converted = outgoing if float_target else bytes(round(min(1., max(0., v))*255) for v in values)
+        assert pixel == converted, 'fragment target/output'
     return active
 
 

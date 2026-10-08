@@ -113,5 +113,5 @@ try {
   $status | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $outDir 'RUN.json') -Encoding utf8
 }
 if ($status.status -ne 'PRESENT') { exit 1 }
-Write-Host 'PRESENT: 12 cases, 96 fixed-triangle baseline/observed RGBA8/Float readbacks, WARP not hardware'
+Write-Host 'PRESENT: 16 cases, 128 general-plane baseline/observed RGBA8/Float readbacks, WARP not hardware'
 exit 0

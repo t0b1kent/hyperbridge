@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "fixed-fixture.h"
-cbuffer Params : register(b0) { uint rotation; uint reverse_order; uint color_shift; uint reserved;
+cbuffer Params : register(b0) { uint rotation; uint reverse_order; uint color_shift; uint geometry;
     uint unused0; uint unused1; uint tag; uint cap; };
 RWByteAddressBuffer Recorder : register(u0);
 RWByteAddressBuffer Fragment : register(u1);
@@ -13,8 +13,8 @@ uint source_index(uint vid, uint shift) {
 Pixel vs_main(uint vid : SV_VertexID) {
     uint pi=source_index(vid,0), ci=source_index(vid,color_shift);
     Pixel result;
-    result.position=asfloat(uint4(FixedPositions[pi][0],FixedPositions[pi][1],FixedPositions[pi][2],FixedPositions[pi][3]));
-    result.color=asfloat(uint4(FixedColors[ci][0],FixedColors[ci][1],FixedColors[ci][2],FixedColors[ci][3]));
+    result.position=asfloat(uint4(FixedPositions[geometry][pi][0],FixedPositions[geometry][pi][1],FixedPositions[geometry][pi][2],FixedPositions[geometry][pi][3]));
+    result.color=asfloat(uint4(FixedColors[geometry][ci][0],FixedColors[geometry][ci][1],FixedColors[geometry][ci][2],FixedColors[geometry][ci][3]));
     uint index; Recorder.InterlockedAdd(0,1,index);
     if (index < cap) {
         Recorder.Store4(16+index*48,uint4(vid,pi,ci,tag));
