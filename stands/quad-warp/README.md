@@ -5,8 +5,13 @@ The reference is **WARP, not hardware**. It measures pixels and domain coordinat
 not GPU performance. There are no game inputs, precompiled shaders, SDK binaries,
 or translator implementation details in this package.
 
-Run PowerShell 7 on Windows with installed MSVC x64 C++ tools, Windows SDK DXC,
-and Python 3: `./stands/quad-warp/run-windows.ps1 -Out build/quad-warp`.
+Use an **x64 Native Tools Command Prompt for Visual Studio** with installed
+Windows SDK DXC, PowerShell 7 and Python 3. From the repository root run
+`pwsh -NoLogo -NoProfile -File stands\quad-warp\run-windows.ps1 -Out build\quad-warp`.
+The workflow discovers the installed Visual Studio with `vswhere`, calls
+`VsDevCmd.bat -arch=x64 -host_arch=x64` in a `cmd` step, and starts PowerShell
+in that same step. PowerShell inherits the compiler environment; it does not
+invoke `cmd /c` or parse an environment dump. Missing `cl.exe` fails explicitly.
 Use `-Dxc <installed-dxc.exe>` if discovery is unsuitable. The script downloads
 nothing and fails if DXC is missing. All five stages use shader model 6.0 DXIL;
 there is no DXBC fallback. The output directory must not exist. Builds are serial.

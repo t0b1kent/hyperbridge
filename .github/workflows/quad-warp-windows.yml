@@ -19,13 +19,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Build and read back WARP tessellation
-        shell: pwsh
-        run: ./stands/quad-warp/run-windows.ps1 -Out "$PWD/build/quad-warp"
+        shell: cmd
+        run: |
+          @echo off
+          set "VS_INSTALL="
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          pwsh -NoLogo -NoProfile -File stands\quad-warp\run-windows.ps1 -Out "%CD%\build\quad-warp"
+          exit /b %ERRORLEVEL%
       - name: Preserve receipts and raw readbacks even on failure
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: quad-warp-${{ matrix.os }}
           path: |

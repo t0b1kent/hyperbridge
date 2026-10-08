@@ -22,19 +22,10 @@ function Native($exe, $argList) {
   if ($rc -ne 0) { throw "build failed: $([IO.Path]::GetFileName($exe)), rc=$rc" }
 }
 try {
-  # Use the runner's installed Visual Studio and Windows SDK. No downloads.
+  # The caller initializes MSVC once, before starting PowerShell.
+  # The workflow uses a cmd step so VsDevCmd's environment is inherited directly.
   if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-    if (-not (Test-Path $vswhere)) { throw 'Installed Visual Studio vswhere is required' }
-    $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if ($LASTEXITCODE -ne 0 -or -not $vs) { throw 'Installed MSVC x64 C++ tools are required' }
-    $dev = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
-    $envLines = & $env:ComSpec /d /s /c "`"`"$dev`" -arch=x64 -host_arch=x64 >nul && set`""
-    if ($LASTEXITCODE -ne 0) { throw 'VsDevCmd failed' }
-    foreach ($line in $envLines) {
-      $at = $line.IndexOf('=')
-      if ($at -gt 0) { [Environment]::SetEnvironmentVariable($line.Substring(0,$at),$line.Substring($at+1),'Process') }
-    }
+    throw 'MSVC cl.exe is not in PATH; initialize VsDevCmd.bat -arch=x64 -host_arch=x64 before starting PowerShell'
   }
   if (-not $Dxc) {
     $found = Get-Command dxc.exe -ErrorAction SilentlyContinue
