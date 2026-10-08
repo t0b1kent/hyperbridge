@@ -1,7 +1,26 @@
-ДЛЯ КУРАТОРА: повтор по поручению 08.10 13:19 поверх d6663e2 для ветки
-repro109/llvm22-q-restores-20261008 открытого hyperbridge. Narrow push этой
-описи запускает четыре клетки; workflow_dispatch не требует регистрации на main
-для первого запуска. Лейн не отправляет и не запускает задачу.
+ДЛЯ КУРАТОРА: проверки готовой сборкой run37736522794 по поручению 08.10 17:32,
+поверх d3466bfc484a5cebed042dc0c6a727e85a3cb243 в ветке
+repro109/llvm22-q-restores-20261008 открытого hyperbridge. Эта опись отключает
+push-триггер прежней полной матрицы. Узкая выкладка куратора в эту ветку запускает
+только repro109-llvm22-q-reuse.yml: две клетки level4-test/synthetic-asm, actions:read,
+закреплённый download-artifact с run-id37736522794. Лейн ничего не отправляет.
+
+Первый запуск нового workflow — branch push куратора: dispatch-only требует
+регистрации workflow на default branch по документации GitHub. После первого
+запуска manual dispatch доступен через API/CLI; вынос в main не нужен для этой
+проверки. Прежняя полная матрица по push не запускается.
+
+REUSE-BUILD.json закрепляет actual tar116047837Б, SHA256
+872ecde61f1042988b912008073cd9f3821a7cb79f5c73e6b0d9f12cff3a5302.
+BuildRESULT602bcb0f…/SHAREDafbf9368… подтвердили успешную общую сборку.
+Архив хранится7дней; при потере артефакта задача отказывает без fallback/rebuild.
+Frozen producer-d3466bf/run.py сначала проверяет старый export по своему lock,
+затем reuse.py готовит новые6IR и зовёт прежний run_checks с теми же4tools.
+Для LEVEL4 только в облаке скачивается официальный pinnedLLVMarchive из lock:
+копируются ровно arm64ec-entry-thunks.ll/arm64ec-exit-thunks.ll с SHA иразмерами.
+Сама сборка LLVM в reuse не вызывается. SHARED-SUPPORT-INPUTS иTEST-ORDER-FIX
+включены; исправленный arm64ec-split-q-restores.ll проверяется по новой описи.
+Оригинальный full workflow ниже остаётся для будущей отдельной полной сборки.
 
 Четыре границы: patch / build / level4-test / synthetic-asm. Первый job:
 матрица patch/build, fail-fast:false. Только эти две клетки получают официальный
@@ -37,7 +56,9 @@ Runnerubuntu-24.04, Python3.13.7, GCC13/g++13; фактические host tool 
 ограничивается также оставшимся общим deadline и записывается в RESULT.
 Прошлый run37717057447: patchSUCCESS, три компиляции FAILED_TIMEOUT60мин;
 этот факт не доказывает ни корректность, ни ошибку ещё не собранного compiler.
-Повтор ещёNOT_ENABLED, фактическая длительность нового build не измерена.
+Повтор37736522794 завершён: patch/buildSUCCESS, synthetic-asmPASS_BOUNDARY,
+level4-testFAILED наRUN08 (нетsupportIR); RUN00–07PASS. Эти receipts не означают
+прохождение нового полногоLEVEL4. Облачный reuse ещёNOT_ENABLED.
 Первая границаhost/platform/tool/capacity, следующая official SHA иpatch preimages.
 
 synthetic-asm порождает REAL .s исправленным clang: before — defaultoff,

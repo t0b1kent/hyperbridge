@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "status": "ACTUAL_EXPORT_VERIFIED",
+  "repository": "t0b1kent/hyperbridge",
+  "revision": "d3466bfc484a5cebed042dc0c6a727e85a3cb243",
+  "run_id": "37736522794",
+  "archive_sha256": "872ecde61f1042988b912008073cd9f3821a7cb79f5c73e6b0d9f12cff3a5302",
+  "producer_receipt_sha256": "602bcb0f2bd82f575311108e56920e7d2dfe156491b19f4b1f1f2e6248338996",
+  "producer_manifest_sha256": "afbf9368a2c7ca959d0ae455c5fb42990702c05d30488084ca1dfcacf3df2860",
+  "producer_recipe": {
+    "run.py": "60b91c9e52041dca035e326699f077810f824eb01d55e943f631eccf952e71c2",
+    "llvm22.lock.json": "fc36b0268af11140022e0521189721152b1c21f2dd2bab3f0e570ad9245f0db8",
+    "SOURCE-MANIFEST.json": "8fb3b44d7f2b32ea73d35f4838f61b874e5bb8008a0dcadfdab3a369209c9a5e",
+    "EXTRA-TESTS.json": "643b2f1a67d73944a32a1519da15dfab507039cac7867888bb25135531be6595"
+  }
+}

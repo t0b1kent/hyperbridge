@@ -182,12 +182,6 @@ def export_shared_build(out, tools, test, source, lock, result):
     extras = extra_test_rows(lock)
     for row in extras:
         shutil.copy2(source / 'llvm/test/CodeGen/AArch64' / row['file'], out / 'test-inputs' / row['file'])
-    for row in lock['support_inputs']:
-        path = source / 'llvm/test/CodeGen/AArch64' / row['file']
-        require(path.is_file() and not path.is_symlink() and
-                path.stat().st_size == row['bytes'] and sha(path) == row['sha256'],
-                'Support source bytes differ: ' + row['file'])
-        shutil.copy2(path, out / 'test-inputs' / row['file'])
     manifest = {
         'schema': 1, 'repository': os.environ['GITHUB_REPOSITORY'],
         'revision': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
@@ -198,7 +192,6 @@ def export_shared_build(out, tools, test, source, lock, result):
         'tools': [dict(row, path='tools/' + row['name']) for row in result['tools']],
         'test': {'path': 'test-inputs/' + test.name, 'bytes': test.stat().st_size, 'sha256': sha(test)},
         'extra_tests': [dict(row, path='test-inputs/' + row['file']) for row in extras],
-        'support_inputs': [dict(row, path='test-inputs/' + row['file']) for row in lock['support_inputs']],
         'license': {'path': 'tools/LICENSE.TXT', 'sha256': sha(out / 'tools/LICENSE.TXT')},
     }
     (out / 'SHARED-BUILD.json').write_text(json.dumps(manifest, indent=2) + '\n')
@@ -271,11 +264,6 @@ def prepare_shared_build(archive, checksum, destination, lock, identity):
     pinned = [dict(row, path='test-inputs/' + row['file']) for row in extra_test_rows(lock)]
     require(extras == pinned, 'Shared extra test set/pins differs')
     for row in extras:
-        selected(row)
-    support = manifest.get('support_inputs')
-    pinned_support = [dict(row, path='test-inputs/' + row['file']) for row in lock['support_inputs']]
-    require(support == pinned_support, 'Shared support input set/pins differs')
-    for row in support:
         selected(row)
     selected(manifest.get('license'))
     return destination / 'tools', test, manifest

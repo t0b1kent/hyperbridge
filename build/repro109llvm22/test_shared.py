@@ -36,6 +36,12 @@ class SharedBuildTests(unittest.TestCase):
                                      'patched_sha256': hashlib.sha256(test.encode()).hexdigest()}]}
         (self.metadata / 'SOURCE-MANIFEST.json').write_text(json.dumps(source_manifest))
         self.lock['source_manifest_sha256'] = probe.sha(self.metadata / 'SOURCE-MANIFEST.json')
+        # Support fixtures are data; compiler tools are never executed here.
+        self.support_data = {row['file']: ('; fixture ' + row['file'] + '\n').encode()
+                             for row in self.lock['support_inputs']}
+        self.lock['support_inputs'] = [dict(file=name, bytes=len(data),
+                                           sha256=hashlib.sha256(data).hexdigest())
+                                       for name, data in self.support_data.items()]
         (self.metadata / 'llvm22.lock.json').write_text(json.dumps(self.lock))
         (self.fixture / 'tools').mkdir(parents=True)
         rows = []
@@ -52,6 +58,8 @@ class SharedBuildTests(unittest.TestCase):
         extras = probe.extra_test_rows(self.lock)
         for row in extras:
             shutil.copy2(HERE / row['file'], self.fixture / 'test-inputs' / row['file'])
+        for name, data in self.support_data.items():
+            (self.fixture / 'test-inputs' / name).write_bytes(data)
         self.manifest = {'schema': 1, **self.identity,
                          'lock_sha256': probe.sha(self.metadata / 'llvm22.lock.json'),
                          **{key: self.lock[key] for key in
@@ -61,6 +69,8 @@ class SharedBuildTests(unittest.TestCase):
                           'test': {'path': 'test-inputs/' + self.test.name,
                                    'bytes': self.test.stat().st_size, 'sha256': probe.sha(self.test)},
                           'extra_tests': [dict(row, path='test-inputs/' + row['file']) for row in extras],
+                          'support_inputs': [dict(row, path='test-inputs/' + row['file'])
+                                             for row in self.lock['support_inputs']],
                          'license': {'path': 'tools/LICENSE.TXT',
                                      'sha256': probe.sha(self.fixture / 'tools/LICENSE.TXT')}}
         self.receipt = {'phase': 'build', 'status': 'PASS_BOUNDARY_NOT_PRODUCT_ACCEPTANCE', 'first_failure': None}
@@ -91,6 +101,52 @@ class SharedBuildTests(unittest.TestCase):
         self.assertEqual(probe.sha(test), self.manifest['test']['sha256'])
         self.assertEqual(len(manifest['tools']), 4)
         self.assertEqual(len(manifest['extra_tests']), 3)
+        self.assertEqual(len(manifest['support_inputs']), 2)
+
+    def test_support_missing_bytes_and_same_size_corruption_refused(self):
+        for index, row in enumerate(self.manifest['support_inputs']):
+            with self.subTest(file=row['file']):
+                path = self.fixture / row['path']
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, 'bytes differ'):
+                    self.verify(destination='support-missing-' + str(index))
+                path.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+                with self.assertRaisesRegex(ValueError, 'bytes differ'):
+                    self.verify(destination='support-corrupt-' + str(index))
+                path.write_bytes(original)
+
+    def test_support_row_omission_duplication_and_pin_change_refused(self):
+        original = self.manifest['support_inputs']
+        for index, rows in enumerate([original[:-1], original + original[:1],
+                                      [dict(original[0], sha256='0' * 64)] + original[1:]]):
+            self.manifest['support_inputs'] = rows
+            with self.assertRaisesRegex(ValueError, 'support input set/pins differs'):
+                self.verify(destination='support-rows-' + str(index))
+        self.manifest['support_inputs'] = original
+
+    def test_exported_support_inputs_survive_real_export_import(self):
+        source = self.root / 'source'
+        inputs = source / 'llvm/test/CodeGen/AArch64'
+        inputs.mkdir(parents=True)
+        shutil.copy2(self.fixture / 'tools/LICENSE.TXT', source / 'llvm/LICENSE.TXT')
+        for path in (self.fixture / 'test-inputs').iterdir():
+            shutil.copy2(path, inputs / path.name)
+        out = self.root / 'exported'
+        out.mkdir()
+        result = dict(self.receipt, tools=self.manifest['tools'])
+        env = {'GITHUB_REPOSITORY': self.identity['repository'],
+               'GITHUB_SHA': self.identity['revision'], 'GITHUB_RUN_ID': self.identity['run_id']}
+        with patch.object(probe, 'HERE', self.metadata), patch.dict(os.environ, env):
+            probe.export_shared_build(out, self.fixture / 'tools', inputs / self.test.name,
+                                      source, self.lock, result)
+        self.fixture = out
+        self.manifest = json.loads((out / 'SHARED-BUILD.json').read_bytes())
+        self.receipt = result
+        self.verify()
+        self.assertEqual({path.name for path in (out / 'test-inputs').iterdir()},
+                         {self.test.name, *(row['file'] for row in self.manifest['extra_tests']),
+                          *self.support_data})
 
     def test_archive_sha_mismatch_before_extract(self):
         with self.assertRaisesRegex(ValueError, 'pin/size'):

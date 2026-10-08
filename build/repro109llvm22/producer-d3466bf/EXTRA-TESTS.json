@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "classification": "PREPARED_TEST_INPUTS_NOT_NEW_COMPILER_PASS",
-  "source_input_manifest_sha256": "4bc2e24b01454010acbc9f16a41fda53f9b5c6cb2a7ed8ccea485d9573b93c83",
+  "source_input_manifest_sha256": "04212df313224bb8c120aa16c454f7855bfe41c94d6c681416592aef02ec1e97",
   "source_patch_sha256": "be727326e4b2592058b2fe00e37c3d9b330b3d5f64bd99bf3a9cc659f540b215",
   "tests": [
     {
       "file": "arm64ec-split-q-restores.ll",
-      "bytes": 5863,
-      "sha256": "a1be92526dd09c01fec6779db8677993d3d7c524aef4904a7a210b3ec0bc4edd",
+      "bytes": 5707,
+      "sha256": "ceb6076207b44c0c3e472077430bf4f3c8a8f531f5434ca3faac47e83a52af5d",
       "run_directives": 6
     },
     {

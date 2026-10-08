@@ -8,17 +8,13 @@
   "source_root": "llvm-project-22.1.5.src",
   "patch_sha256": "be727326e4b2592058b2fe00e37c3d9b330b3d5f64bd99bf3a9cc659f540b215",
   "source_manifest_sha256": "8fb3b44d7f2b32ea73d35f4838f61b874e5bb8008a0dcadfdab3a369209c9a5e",
-  "extra_tests_manifest_sha256": "6f508f3bcbb5f80dd574a0f82ff8d633b565d859c93b88876a807b0b2349c869",
+  "extra_tests_manifest_sha256": "643b2f1a67d73944a32a1519da15dfab507039cac7867888bb25135531be6595",
   "synthetic_sha256": "d554bc11556ffc660576d4c38661b71c7c8fd17fb59e9fe98d06ea75bb5fa3ef",
   "archive_safety_sha256": "3a13e7c6a335a2e6cbf282e2c755a7caed0000720fd719cf2b282f5473355305",
   "option": "aarch64-arm64ec-split-thunk-q-restores",
   "default": false,
   "phases": ["patch", "build", "level4-test", "synthetic-asm"],
   "test_run_count": 17,
-  "support_inputs": [
-    {"file": "arm64ec-entry-thunks.ll", "bytes": 31991, "sha256": "c7157fbc330a476da82f0ee4eb551a776cd81c5d7617b60872bee503522c090b"},
-    {"file": "arm64ec-exit-thunks.ll", "bytes": 32170, "sha256": "d7dd0d72acaa24e03bae51d77b528b6fc6651e571b10e0aa3487a556d30c5029"}
-  ],
   "build_targets": ["llc", "clang", "FileCheck", "llvm-readobj"],
   "runner": "ubuntu-24.04",
   "python": "3.13.7",

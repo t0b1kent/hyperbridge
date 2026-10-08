@@ -2,11 +2,6 @@ name: REPRO109 LEVEL4 LLVM22 ARM64EC Q-restore matrix
 
 on:
   workflow_dispatch:
-  push:
-    branches: [repro109/llvm22-q-restores-20261008]
-    paths:
-      - .github/workflows/repro109-llvm22-q-matrix.yml
-      - build/repro109llvm22/**
 
 permissions:
   contents: read

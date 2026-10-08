@@ -82,6 +82,8 @@ define void @no_op() nounwind {
 
 ; The aggregate signature makes the generated entry thunk use a local stack
 ; slot. Every Q pair has a nonzero offset and stack deallocation is explicit.
+; Q6/Q7 are ordered while their CSR-relative offset is still zero. The later
+; local-stack fixup adds 16 to both slots without reordering the instructions.
 define [2 x i8] @small_array([2 x i8] %arg, [2 x float]) nounwind {
 ; CHECK-LABEL: .def $ientry_thunk$cdecl$m2$m2F8;
 ; CHECK:       sub sp, sp, #192
@@ -101,10 +103,10 @@ define [2 x i8] @small_array([2 x i8] %arg, [2 x float]) nounwind {
 ; SPLIT-NEXT:  .seh_save_any_reg q14, 144
 ; SPLIT-NEXT:  ldr q15, [sp, #160]
 ; SPLIT-NEXT:  .seh_save_any_reg q15, 160
-; SPLIT:       ldr q6, [sp, #16]
-; SPLIT-NEXT:  .seh_save_any_reg q6, 16
-; SPLIT-NEXT:  ldr q7, [sp, #32]
+; SPLIT:       ldr q7, [sp, #32]
 ; SPLIT-NEXT:  .seh_save_any_reg q7, 32
+; SPLIT-NEXT:  ldr q6, [sp, #16]
+; SPLIT-NEXT:  .seh_save_any_reg q6, 16
 ; CHECK-NEXT:  add sp, sp, #192
 ; CHECK-NEXT:  .seh_stackalloc 192
 ; CHECK-NEXT:  .seh_endepilogue
@@ -127,6 +129,6 @@ define [2 x i8] @small_array([2 x i8] %arg, [2 x float]) nounwind {
 ; UNWIND:      {{Epilogue|EpilogueScopes}} [
 ; UNWIND:      0xe70e89 {{.*}}ldr q14, [sp, #144]
 ; UNWIND-NEXT: 0xe70f8a {{.*}}ldr q15, [sp, #160]
-; UNWIND:      0xe70681 {{.*}}ldr q6, [sp, #16]
-; UNWIND-NEXT: 0xe70782 {{.*}}ldr q7, [sp, #32]
+; UNWIND:      0xe70782 {{.*}}ldr q7, [sp, #32]
+; UNWIND-NEXT: 0xe70681 {{.*}}ldr q6, [sp, #16]
 ; UNWIND:      add sp, #192

@@ -1,0 +1,68 @@
+name: REPRO109 LLVM22 checks with completed cross-run compiler tools
+
+on:
+  push:
+    branches:
+      - repro109/llvm22-q-restores-20261008
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    if: github.repository == 't0b1kent/hyperbridge'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [level4-test, synthetic-asm]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+      - name: Read the frozen producer artifact from run 37736522794
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: repro109-llvm22-build-d3466bfc484a5cebed042dc0c6a727e85a3cb243
+          run-id: 37736522794
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/repro109-llvm22-shared
+      - name: Verify the old export, select new test inputs and keep compiler tools unchanged
+        env:
+          REPRO109_LLVM_PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          python3 -I -B build/repro109llvm22/reuse.py \
+            --phase "$REPRO109_LLVM_PHASE" --out "$RUNNER_TEMP/repro109-llvm22-results" \
+            --build-archive "$RUNNER_TEMP/repro109-llvm22-shared/repro109-llvm22-build.tar.gz" \
+            --build-sha256-file "$RUNNER_TEMP/repro109-llvm22-shared/repro109-llvm22-build.tar.gz.sha256" \
+            </dev/null > "$RUNNER_TEMP/repro109-llvm22-driver.log" 2>&1
+      - name: Preserve complete check evidence even after a failure
+        if: always()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/repro109-llvm22-results"
+          mkdir -p "$out"
+          if [ -f "$RUNNER_TEMP/repro109-llvm22-driver.log" ]; then
+            cp "$RUNNER_TEMP/repro109-llvm22-driver.log" "$out/driver.log"
+          else
+            printf '%s\n' 'WORKER_NOT_ENABLED: checkout/setup/download failed; inspect workflow log.' > "$out/worker-not-started.txt"
+          fi
+          tar -czf "$RUNNER_TEMP/repro109-llvm22-reuse-${{ matrix.phase }}.tar.gz" -C "$out" .
+          shasum -a 256 "$RUNNER_TEMP/repro109-llvm22-reuse-${{ matrix.phase }}.tar.gz" \
+            > "$RUNNER_TEMP/repro109-llvm22-reuse-${{ matrix.phase }}.tar.gz.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: repro109-llvm22-reuse-${{ matrix.phase }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/repro109-llvm22-reuse-${{ matrix.phase }}.tar.gz
+            ${{ runner.temp }}/repro109-llvm22-reuse-${{ matrix.phase }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
