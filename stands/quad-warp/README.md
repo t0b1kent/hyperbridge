@@ -1,33 +1,21 @@
-# Public plane interpolation discriminator 009
+# Public interpolation holdout 011
 
-WARP is Microsoft software D3D12, not physical hardware. This package contains
-only synthetic vertices, colors, shaders and a bounded readback host. It tests
-whether a candidate interpolation rule generalizes beyond the original quad.
+Only synthetic positions, colors, viewports and HLSL; no game or Apple inputs.
+All eight geometry groups are new versus 010. They exercise both leftmost
+anchor locations, subpixel offsets, W=3 and nonuniform non-power-of-two W,
+nonuniform COLOR, constant COLOR under perspective, and COLOR permutation.
+The 16 cases, four readback arms, 128 draws, timeouts, DXIL flags, host and
+qualifier are unchanged from successful 010. No coefficients are embedded:
+Windows uses ordinary D3D12 WARP interpolation. WARP is software, not hardware.
 
-`geometry.json` declares eight groups: baseline, skew, offset viewport,
-subpixel viewport/vertices, uniform W=2, nonuniform W=(1,2,4,1), constant COLOR,
-and negative COLOR assignment. Both windings give 16 cases and 128 draws.
-All four baseline/observed RGBA8/float arms must be uploaded, including every
-raw ledger entry. Output layouts are unchanged from 008. Coefficients are not
-part of the WARP shader: it uses normal D3D12 perspective interpolation.
+The Mac candidate was frozen before any output of this corpus: post-VS
+runtime plane setup chooses minimum screen X, ties by maximum screen Y,
+and negative determinant. Geometry and runtime rule must not be retuned
+after reference bytes arrive; mismatches are reported exactly.
 
-Run from an x64 Native Tools Command Prompt:
-`pwsh -NoLogo -NoProfile -File stands/quad-warp/run-windows.ps1 -Out build/plane009`
-Initialize MSVC before PowerShell. No downloads or compiler fallback occur.
-The workflow pins the same checkout/upload actions as 008. Each child has a
-55-second timeout. `check-fixed.py --test` checks corruption controls;
-`--run <directory>` verifies exact vertices, guards, coverage, constant color,
-observer neutrality and recorded-input/output/target equality. Finite float
-values outside [0,1] are inventoried, never clamped in float readback. Reversed
-order byte differences are reported, not silently treated as equivalent.
-
-This is DIAGNOSTIC_ONLY/NOT_GOLDEN. Windows runs do not measure GPU speed.
-The historical 007 qualifier failure and 008 correction remain preserved.
-
-010 preserves the failed 009 evidence. Its host/qualifier accept finite float
-alpha as recorded; coverage means nonzero alpha for this declared corpus and
-is cross-checked against fragment counts. Alpha excursions and constant-color
-differences are inventoried instead of aborting capture. Exact output/target
-equality, corruption controls and later cross-backend comparisons are unchanged.
-No HLSL, geometry, compiler flags or raw readback layout changed. The COMPLETE
-message now reports cases/draws from the actual case vector.
+From an initialized x64 Native Tools Command Prompt:
+`pwsh -NoLogo -NoProfile -File stands/quad-warp/run-windows.ps1 -Out build/holdout011`
+MSVC setup remains a separate cmd workflow step. Upload all four raw arms
+and every ledger entry even if qualification fails. Readback rules preserve
+finite alpha/range excursions and require exact observer/target equality.
+No GPU timing conclusion; DIAGNOSTIC_ONLY/NOT_GOLDEN.
