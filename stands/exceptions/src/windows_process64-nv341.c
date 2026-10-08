@@ -77,6 +77,7 @@ static API_AFTER268 api_after268;
 static unsigned continue_mode;
 static volatile LONG continue_level,continue_faults,nested_faults,nested_returned;
 static CONTEXT nested_context;
+static CONTEXT nested_requested385;
 static EXCEPTION_RECORD nested_record;
 static void exact_copy(void *d,const void *s,size_t n) {
     volatile unsigned char *to=(volatile unsigned char*)d;
@@ -97,9 +98,15 @@ static LONG CALLBACK observer(PEXCEPTION_POINTERS p) {
             exact_copy(&nested_record,p->ExceptionRecord,sizeof(nested_record));
             exact_copy(&nested_context,p->ContextRecord,sizeof(nested_context));
             nested_faults++;
+            if(continue_mode>=17) {
+                p->ContextRecord->R12=0xdeaddeaddead0012ULL;
+                p->ContextRecord->R13=0xdeaddeaddead0013ULL;
+                p->ContextRecord->ContextFlags &= ~2u;
+                exact_copy(&nested_requested385,p->ContextRecord,sizeof(nested_requested385));
+            }
             return EXCEPTION_CONTINUE_EXECUTION;
         }
-        if(continue_mode==3 || continue_mode==10) {
+        if(continue_mode==3 || continue_mode==10 || continue_mode>=16) {
             continue_level=1;
             (void)CloseHandle((HANDLE)(uintptr_t)0x0de42346u);
             nested_returned=1;
@@ -119,6 +126,12 @@ static LONG CALLBACK observer(PEXCEPTION_POINTERS p) {
             if(continue_mode>=9 && continue_mode<=13) p->ContextRecord->Rbp=continue_mode==11?0:0xabcde00500500501ULL;
             if(continue_mode==12) p->ContextRecord->ContextFlags &= ~8u; /* unselected FLOAT */
             if(continue_mode==13) p->ContextRecord->ContextFlags &= ~2u; /* unselected INTEGER */
+            if(continue_mode>=16) {
+                p->ContextRecord->R12=0xabcde01201201201ULL;
+                p->ContextRecord->R13=0xabcde01301301301ULL;
+                p->ContextRecord->Rbp=0xabcde00500500501ULL;
+                if(continue_mode!=17) p->ContextRecord->ContextFlags &= ~2u;
+            }
         }
         return EXCEPTION_CONTINUE_EXECUTION;
     }
@@ -273,6 +286,7 @@ static void exercise_close(void) {
     blob("API.ENTRY268",&api_entry209,sizeof(api_entry209));
     blob("API.AFTER341",&api_after268,sizeof(api_after268));
     if(nested_faults) {blob("NESTED.CONTEXT",&nested_context,sizeof(nested_context));blob("NESTED.EXCEPTION_RECORD",&nested_record,sizeof(nested_record));}
+    if(continue_mode>=17 && nested_faults) blob("NESTED.REQUESTED385",&nested_requested385,sizeof(nested_requested385));
     exception_dump();
     if(mode==4) {SetHandleInformation(h,HANDLE_FLAG_PROTECT_FROM_CLOSE,0);CloseHandle(h);}
 }
@@ -489,7 +503,7 @@ int main(int argc,char **argv) {
         for(unsigned i=0;i<sizeof(names)/sizeof(names[0]);i++) printf("WINENV_CELL %03u %s\n",i,names[i]);return 0;
     }
     if((argc!=3&&argc!=4)||strcmp(argv[1],"cell")) {fprintf(stderr,"usage: windows_process64-v5c.exe --list | cell <0..82>\n");return 2;}
-    char *end=NULL;unsigned long n=strtoul(argv[2],&end,10);if(!end||*end||n>=CELL_COUNT) return 2;cell=(unsigned)n;continue_mode=argc==4?(unsigned)strtoul(argv[3],NULL,10):0;if(continue_mode>15||(cell!=2&&cell!=3))return 2;
+    char *end=NULL;unsigned long n=strtoul(argv[2],&end,10);if(!end||*end||n>=CELL_COUNT) return 2;cell=(unsigned)n;continue_mode=argc==4?(unsigned)strtoul(argv[3],NULL,10):0;if(continue_mode>18||(cell!=2&&cell!=3))return 2;
     printf("WINENV_PROBE version=continue268 base=pinned209 cell=%03u name=%s context_bytes=%zu exception_bytes=%zu\n",cell,names[cell],sizeof(CONTEXT),sizeof(EXCEPTION_RECORD));
     value("Image.Base",(uintptr_t)GetModuleHandleW(NULL));value("Cell.Entry",(uintptr_t)&main);value("Process.Debugged",IsDebuggerPresent());
     load_exports();PVOID veh=AddVectoredExceptionHandler(1,observer);if(!veh) {printf("WINENV_PROBE FAILED_VEH_INSTALL\n");fflush(stdout);return 2;}

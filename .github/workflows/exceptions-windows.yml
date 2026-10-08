@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: exceptions-windows-${{ github.ref }}
@@ -32,9 +33,29 @@ jobs:
           $hash = (Get-FileHash -Algorithm SHA256 llvm-mingw.zip).Hash.ToLower()
           if ($hash -ne '3e6919b3da2b6bfc05d8caf0ab10d5c0be4ddbb873b3c33790a71fe43c09c51f') { throw "toolchain hash mismatch: $hash" }
           Expand-Archive llvm-mingw.zip -DestinationPath toolchain
+      - name: Saved old stack-context control
+        uses: actions/download-artifact@v4
+        with:
+          name: exceptions-${{ matrix.os }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 37425633239
+          path: reference/old
+      - name: Saved new stack-context control
+        uses: actions/download-artifact@v4
+        with:
+          name: exceptions-${{ matrix.os }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 37790391364
+          path: reference/new
       - name: Build and run the probes
         shell: pwsh
-        run: ./stands/exceptions/run-windows.ps1 -Toolchain "$PWD\toolchain\llvm-mingw-20260505-ucrt-x86_64" -Out "$PWD\build\exceptions"
+        run: |
+          $tokens = $null; $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile("$PWD\stands\exceptions\run-windows.ps1", [ref]$tokens, [ref]$errors)
+          if ($errors.Count -ne 0) { $errors | Format-List | Out-String | Write-Error; exit 1 }
+          ./stands/exceptions/run-windows.ps1 -Toolchain "$PWD\toolchain\llvm-mingw-20260505-ucrt-x86_64" -Out "$PWD\build\exceptions" -OldStackExe "$PWD\reference\old\bin\stack-context64.exe" -NewStackExe "$PWD\reference\new\bin\stack-context64.exe"
       - name: Keep outputs
         if: always()
         uses: actions/upload-artifact@v4

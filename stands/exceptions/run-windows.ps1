@@ -3,7 +3,9 @@
 # Builds the exception probes with a given llvm-mingw toolchain and runs every cell in its own process with a time limit.
 param(
   [Parameter(Mandatory = $true)][string]$Toolchain,
-  [Parameter(Mandatory = $true)][string]$Out
+  [Parameter(Mandatory = $true)][string]$Out,
+  [Parameter(Mandatory = $true)][string]$OldStackExe,
+  [Parameter(Mandatory = $true)][string]$NewStackExe
 )
 $ErrorActionPreference = 'Stop'
 $src = Join-Path $PSScriptRoot 'src'
@@ -46,6 +48,9 @@ $winctxFlags = @('-O1','-g0','-static','-fms-extensions','-fno-stack-protector',
                  '-fno-vectorize','-fno-slp-vectorize','-Wl,--no-insert-timestamp')
 $pf354 = Build 'pf-stack354' $winctxFlags @('-lntdll')
 $nv341 = Build 'windows_process64-nv341' $winctxFlags @()
+$pf375 = Join-Path $bin 'pf-stack375.exe'
+& $cc @winctxFlags (Join-Path $src 'pf-stack375.c') (Join-Path $src 'pf-stack375.S') (Join-Path $src 'pf-meta375.c') -o $pf375 '-lntdll'
+if ($LASTEXITCODE -ne 0) { throw 'build failed: pf-stack375' }
 
 
 $sc = Build 'stack-context64' $probe @('-lntdll')
@@ -272,7 +277,7 @@ foreach ($source in @('windows_process64-nv341.c','windows_process64-nv341.S')) 
 $nvQualification = @()
 foreach ($rep in 1..2) {
   foreach ($cell in @(2,3)) {
-    foreach ($mode in 8..15) {
+    foreach ($mode in 8..18) {
       $name = 'r{0}-cell{1:000}-m{2}' -f $rep,$cell,$mode
       RunOne $nv341 $d15 $name @('cell',"$cell","$mode") 15000
       $rawPath = Join-Path $d15 ($name + '.txt')
@@ -294,11 +299,137 @@ foreach ($rep in 1..2) {
     }
   }
 }
-$nvFailed = $nvQualification.Count -ne 32 -or
+$nvFailed = $nvQualification.Count -ne 44 -or
   @($nvQualification | Where-Object { -not ($_.rc0 -and $_.complete -and $_.entry -and $_.after -and $_.requested_mode) }).Count -ne 0
-if (-not $nvFailed) { 'COMPLETE32; nonvolatile continuation reference only; games0' | Set-Content (Join-Path $d15 'COMPLETE') }
+if (-not $nvFailed) { 'COMPLETE44; nested INTEGER selection reference only; games0' | Set-Content (Join-Path $d15 'COMPLETE') }
+
+# Saved references run unchanged; these binaries are job inputs, not source payload.
+$ErrorActionPreference = 'Stop'
+$d16 = NewDir 'pf-metadata-375'
+$d17 = NewDir 'stack-context-byteexact-375'
+$referenceHashes = @{
+  '20348' = @{
+    old='a4820ee62b7d0ab70b2e2cbfa40462a369dd65dc41e288aaf4995870aa0d3f81'
+    new='b906b4f833baf303a38439a20d8c60010007cec1aea89e0a9d4f83663762d99d'
+  }
+  '26100' = @{
+    old='f15533e53b12c4ee67644b3ead927c716f109da11c804e74d6f9884f17ac86f0'
+    new='c23849c12b9a14b4533f047ffe2e46f885a7682d24a3d8677c70690782d3ed9b'
+  }
+}
+$referenceBuild = [string]$w.CurrentBuild
+if (-not $referenceHashes.ContainsKey($referenceBuild)) { throw "unqualified reference OS build: $referenceBuild" }
+$references = @(
+  @{ label='old'; exe=$OldStackExe; run_id='37425633239' },
+  @{ label='new'; exe=$NewStackExe; run_id='37790391364' }
+)
+$referencePins = @()
+foreach ($reference in $references) {
+  $item = Get-Item -LiteralPath $reference.exe
+  $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $reference.exe).Hash.ToLower()
+  if ($item.Length -ne 92160 -or $hash -ne $referenceHashes[$referenceBuild][$reference.label]) {
+    throw ("reference bytes/SHA mismatch: " + $reference.label)
+  }
+  $referencePins += [pscustomobject]@{
+    label=$reference.label; origin_run_id=$reference.run_id; bytes=$item.Length; sha256=$hash
+  }
+}
+$referencePins | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d17 'input-pins.json')
+$stackControlQualification = @()
+foreach ($rep in 1..2) {
+  foreach ($reference in $references) {
+    $name = '{0}-rep{1}' -f $reference.label,$rep
+    RunOne $reference.exe $d17 $name @() 30000
+    $rawPath = Join-Path $d17 ($name + '.txt')
+    $raw = if (Test-Path -LiteralPath $rawPath) { Get-Content -Raw -LiteralPath $rawPath } else { '' }
+    $outcome = @(Get-Content -LiteralPath (Join-Path $d17 'outcomes.txt') |
+      Where-Object { $_ -match ('^' + [regex]::Escape($name) + ' ') })
+    $rc0 = $outcome.Count -eq 1 -and $outcome[0] -eq ($name + ' rc=0')
+    $contexts = [regex]::Matches($raw, '(?m)^STACK_CONTEXT path=').Count
+    $complete = [regex]::Matches($raw, '(?m)^STACK_CONTEXT_COMPLETE rows=64 failures=0\r?$').Count -eq 1
+    $hashAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $reference.exe).Hash.ToLower()
+    $stderrBytes = (Get-Item -LiteralPath (Join-Path $d17 ($name + '.err.txt'))).Length
+    $stackControlQualification += [pscustomobject]@{
+      name=$name; repeat=$rep; origin_run_id=$reference.run_id; rc0=$rc0
+      contexts=$contexts; complete=$complete
+      byte_exact=($hashAfter -eq $referenceHashes[$referenceBuild][$reference.label])
+      stderr_bytes=$stderrBytes; exe_sha256_after=$hashAfter
+      stdout_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $rawPath).Hash.ToLower()
+    }
+    $stackControlQualification | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d17 'qualification.json')
+  }
+}
+$stackControlFailed = $stackControlQualification.Count -ne 4 -or
+  @($stackControlQualification | Where-Object {
+    -not ($_.rc0 -and $_.complete -and $_.contexts -eq 64 -and $_.byte_exact -and $_.stderr_bytes -eq 0)
+  }).Count -ne 0
+if (-not $stackControlFailed) { 'COMPLETE4; old/new original bytes; games0' | Set-Content (Join-Path $d17 'COMPLETE') }
+
+foreach ($source in @('pf-stack375.c','pf-stack375.S','pf-meta375.c')) {
+  $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $src $source)).Hash.ToLower()
+  "$hash  $source" | Add-Content (Join-Path $d16 'source-sha256.txt')
+}
+(Get-FileHash -Algorithm SHA256 $pf375).Hash.ToLower() | Set-Content (Join-Path $d16 'binary-sha256.txt')
+@{ flags=$winctxFlags; libraries=@('-lntdll'); compiler_sha256=(Get-FileHash -Algorithm SHA256 $cc).Hash.ToLower() } |
+  ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d16 'compiler-flags.json')
+@{ current_build=$w.CurrentBuild; ubr=$w.UBR; architecture=$env:PROCESSOR_ARCHITECTURE } |
+  ConvertTo-Json | Set-Content (Join-Path $d16 'OS375.json')
+$pfMetadataQualification = @()
+foreach ($rep in 1..2) {
+  $name = 'all-rep{0}' -f $rep
+  RunOne $pf375 $d16 $name @() 30000
+  $rawPath = Join-Path $d16 ($name + '.txt')
+  $raw = if (Test-Path -LiteralPath $rawPath) { Get-Content -Raw -LiteralPath $rawPath } else { '' }
+  $outcome = @(Get-Content -LiteralPath (Join-Path $d16 'outcomes.txt') |
+    Where-Object { $_ -match ('^' + [regex]::Escape($name) + ' ') })
+  $rc0 = $outcome.Count -eq 1 -and $outcome[0] -eq ($name + ' rc=0')
+  $contexts = [regex]::Matches($raw, '(?m)^STACK_CONTEXT path=').Count
+  $returns = [regex]::Matches($raw, '(?m)^STACK_RETURN path=').Count
+  $contextComplete = [regex]::Matches($raw, '(?m)^PF354_CONTEXT_COMPLETE rows=96 failures=0\r?$').Count -eq 1
+  $returnComplete = [regex]::Matches($raw, '(?m)^PF354_RETURN_COMPLETE rows=128 failures=0\r?$').Count -eq 1
+  $metadataComplete = [regex]::Matches($raw, '(?m)^PF375_METADATA_COMPLETE modules=3 length_rows=8\r?$').Count -eq 1
+  $moduleLines = [regex]::Matches($raw, '(?m)^PF375_MODULE ').Count
+  $modules = @()
+  foreach ($match in [regex]::Matches($raw, '(?m)^PF375_MODULE name=(\S+) state=PRESENT path_hex=([0-9a-f]+)\r?$')) {
+    $hex = $match.Groups[2].Value
+    if ($hex.Length % 2 -ne 0) { throw 'odd module path hex length' }
+    $bytes = New-Object byte[] ($hex.Length / 2)
+    for ($i=0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($hex.Substring(2*$i,2),16) }
+    $modulePath = [Text.Encoding]::Default.GetString($bytes)
+    $item = Get-Item -LiteralPath $modulePath
+    $modules += [pscustomobject]@{
+      name=$match.Groups[1].Value; state='PRESENT'; bytes=$item.Length
+      file_version=$item.VersionInfo.FileVersion; product_version=$item.VersionInfo.ProductVersion
+      sha256=(Get-FileHash -LiteralPath $modulePath -Algorithm SHA256).Hash.ToLower()
+    }
+  }
+  $modules | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d16 ($name + '-loaded-modules.json'))
+  $moduleNames = @($modules | ForEach-Object { $_.name } | Sort-Object -Unique)
+  $modulesPresent = $moduleLines -eq 3 -and $modules.Count -eq 3 -and
+    ($moduleNames -join ',') -eq 'kernel32.dll,kernelbase.dll,ntdll.dll'
+  $lengthRows = [regex]::Matches($raw, '(?m)^PF375_LENGTH api=\S+ state=PRESENT ').Count
+  $xstate = [regex]::Matches($raw, '(?m)^PF375_XSTATE state=PRESENT enabled=[0-9a-f]{16}\r?$').Count -eq 1
+  $cpuRows = [regex]::Matches($raw, '(?m)^PF375_CPU ').Count
+  $stderrBytes = (Get-Item -LiteralPath (Join-Path $d16 ($name + '.err.txt'))).Length
+  $pfMetadataQualification += [pscustomobject]@{
+    name=$name; repeat=$rep; rc0=$rc0; contexts=$contexts; returns=$returns
+    complete=($contextComplete -and $returnComplete -and $metadataComplete)
+    modules_present=$modulesPresent; length_rows=$lengthRows; xstate_present=$xstate
+    cpu_rows=$cpuRows; stderr_bytes=$stderrBytes
+    stdout_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $rawPath).Hash.ToLower()
+  }
+  $pfMetadataQualification | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $d16 'qualification.json')
+}
+$pfMetadataFailed = $pfMetadataQualification.Count -ne 2 -or
+  @($pfMetadataQualification | Where-Object {
+    -not ($_.rc0 -and $_.complete -and $_.contexts -eq 96 -and $_.returns -eq 128 -and
+          $_.modules_present -and $_.length_rows -eq 8 -and $_.xstate_present -and
+          $_.cpu_rows -eq 3 -and $_.stderr_bytes -eq 0)
+  }).Count -ne 0
+if (-not $pfMetadataFailed) { 'COMPLETE2; DLL/XSTATE/PF reference only; games0' | Set-Content (Join-Path $d16 'COMPLETE') }
+$ErrorActionPreference = 'Continue'
 
 Get-Content $m
-foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10, $d11, $d12, $d13, $d14, $d15) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
-if ($pinnedFailed -or $marshalFailed -or $continueFailed -or $pfFailed -or $nvFailed) { exit 1 }
+foreach ($d in $d1, $d3, $d4, $d5, $d6, $d7, $d8, $d9, $d10, $d11, $d12, $d13, $d14, $d15, $d16, $d17) { $f = Join-Path $d 'outcomes.txt'; ('--- ' + $d + ': ' + (Get-Content $f | Measure-Object).Count + ' runs, timeouts ' + (Select-String -Path $f -Pattern 'TIMEOUT' | Measure-Object).Count) }
+if ($pinnedFailed -or $marshalFailed -or $continueFailed -or $pfFailed -or $nvFailed -or $pfMetadataFailed -or $stackControlFailed) { exit 1 }
 exit 0
