@@ -492,18 +492,25 @@ def compiler_environment(llvm, clang, clangxx, tool):
 def configured_compilers(makefile, selected):
     """Check actual configure output, including whether cross CXX is emitted."""
     required = {'CC', 'CXX', 'aarch64_CC', 'arm64ec_CC', 'x86_64_CC', 'i386_CC'}
+    # Observed Wine configure addition; every other compiler/token stays exact.
+    allowed_additions = {'CC': ['-std=gnu23']}
     rows = []
     for name, command_line in selected.items():
+        requested = shlex.split(command_line)
         values = re.findall(r'^' + re.escape(name) + r'[ \t]*=[ \t]*([^\n]*)$', makefile, re.M)
         if not values and name not in required:
             rows.append(dict(name=name, state='NOT_EMITTED', requested_argv=shlex.split(command_line)))
             continue
-        if len(values) != 1 or shlex.split(values[0]) != shlex.split(command_line):
+        configured = shlex.split(values[0]) if len(values) == 1 else None
+        added = configured[len(requested):] if configured is not None and configured[:len(requested)] == requested else None
+        permitted = (added == [] or (added == allowed_additions.get(name) and
+                                     added is not None and not any(flag in requested for flag in added)))
+        if len(values) != 1 or not permitted:
             raise ValueError('Configured compiler command differs: ' + name +
                              '; requested=' + repr(shlex.split(command_line))[:1500] +
                              '; actual=' + repr(values)[:1500])
         rows.append(dict(name=name, state='PRESENT', requested_argv=shlex.split(command_line),
-                         configured_argv=shlex.split(values[0])))
+                         configured_argv=configured, configure_added_argv=added))
     return rows
 
 

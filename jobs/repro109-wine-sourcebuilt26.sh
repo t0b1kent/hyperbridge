@@ -26,10 +26,11 @@ for part in reports deps/reports moltenvk/reports wine/reports; do
     cp -R "$work/$part/." "$out/$part/"
   fi
 done
-for part in wine/engine/wine/dlls/win32u wine/engine/wine/build/dlls/win32u; do
+for part in wine/engine/wine/dlls/win32u wine/engine/wine/build/dlls/win32u wine/engine/wine/build/include; do
   case "$part" in
     wine/engine/wine/dlls/win32u) name=win32u-source ;;
     wine/engine/wine/build/dlls/win32u) name=win32u-build-inputs ;;
+    wine/engine/wine/build/include) name=wine-build-include ;;
   esac
   if [ -d "$work/$part" ]; then
     size_kib=$(du -sk "$work/$part" | cut -f1)
