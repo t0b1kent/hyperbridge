@@ -19,6 +19,9 @@ if ($LASTEXITCODE -ne 0) { throw 'build failed: excdump' }
 $exe2 = Join-Path $bin 'excdump2.exe'
 & $cc '-O1' '-g0' '-static' '-fno-stack-protector' '-Wl,--no-insert-timestamp' (Join-Path $src 'excdump2.c') -o $exe2
 if ($LASTEXITCODE -ne 0) { throw 'build failed: excdump2' }
+$exe3 = Join-Path $bin 'excdump3.exe'
+& $cc '-O1' '-g0' '-static' '-fno-stack-protector' '-Wl,--no-insert-timestamp' (Join-Path $src 'excdump3.c') -o $exe3
+if ($LASTEXITCODE -ne 0) { throw 'build failed: excdump3' }
 
 # machine description
 $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
@@ -28,7 +31,8 @@ $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
   "cpu_id=" + $cpu.ProcessorId,
   "logical=" + $env:NUMBER_OF_PROCESSORS,
   "exe_sha256=" + (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower(),
-  "exe2_sha256=" + (Get-FileHash -Algorithm SHA256 $exe2).Hash.ToLower()
+  "exe2_sha256=" + (Get-FileHash -Algorithm SHA256 $exe2).Hash.ToLower(),
+  "exe3_sha256=" + (Get-FileHash -Algorithm SHA256 $exe3).Hash.ToLower()
 ) | Set-Content -Encoding ascii (Join-Path $Out 'machine.txt')
 
 function RunLimited($arguments, $outFile, $errFile, $limit, $program = $exe) {
@@ -78,4 +82,22 @@ foreach ($line in $tsv2) {
   $name = $parts[0]
   $rc = RunLimited $parts[1] (Join-Path $cells2 "$name.txt") (Join-Path $cells2 "$name.err.txt") 30 $exe2
   Set-Content -Encoding ascii (Join-Path $cells2 "$name.rc.txt") $rc
+}
+
+# excdump3: excdump2 with the direction flag cleared before returning to C code (the combined run no longer stops after cell 68)
+$all3 = Join-Path $Out 'all3'
+New-Item -ItemType Directory -Force $all3 | Out-Null
+foreach ($n in 1, 2) {
+  $rc = RunLimited 'all' (Join-Path $all3 "all-$n.txt") (Join-Path $all3 "all-$n.err.txt") 90 $exe3
+  Set-Content -Encoding ascii (Join-Path $all3 "all-$n.rc.txt") $rc
+}
+$cells3 = Join-Path $Out 'cells3'
+New-Item -ItemType Directory -Force $cells3 | Out-Null
+$tsv3 = & $exe3 'tsv'
+foreach ($line in $tsv3) {
+  $parts = $line -split "`t"
+  if ($parts.Count -lt 2) { continue }
+  $name = $parts[0]
+  $rc = RunLimited $parts[1] (Join-Path $cells3 "$name.txt") (Join-Path $cells3 "$name.err.txt") 30 $exe3
+  Set-Content -Encoding ascii (Join-Path $cells3 "$name.rc.txt") $rc
 }
