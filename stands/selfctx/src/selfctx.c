@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
-/* selfctx: Get/SetThreadContext, NtGetContextThread/NtSetContextThread and NtContinue applied to the CALLING thread.
+/* selfctx2 (11.10.2026) = selfctx + cells 75..: CONTEXT_EXCEPTION_REQUEST (own and other thread), set -> back to the Get point; load cells no longer hash uninitialised stack bytes.
+ * selfctx: Get/SetThreadContext, NtGetContextThread/NtSetContextThread and NtContinue applied to the CALLING thread.
  * What the program sees when it reads its own context, and whether writing a context back leaves the rest of the thread state exactly as it was.
  *
  *   selfctx list            cell names (tsv: "name<TAB>cell N")
@@ -28,6 +29,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <intrin.h>
+#include <emmintrin.h>
 
 /* ---------------------------------------------------------------- state records */
 typedef struct {
@@ -145,7 +147,7 @@ static int cmp_regs(const SS *s, const SS *k, int gpr, int fp, int strict, char 
 }
 
 /* ---------------------------------------------------------------- cells */
-enum { OP_GET, OP_SET_SAME, OP_SET_DR, OP_CONT };
+enum { OP_GET, OP_SET_SAME, OP_SET_DR, OP_CONT, OP_GET_OTHER = 50, OP_TT = 51 };
 typedef struct { const char *name; int op; DWORD flags; int api; int efl; } Cell;   /* api: 0 Win32 wrapper, 1 Nt* direct */
 #define M_CTRL 1u
 #define M_INT 2u
@@ -183,6 +185,17 @@ static void build_cells(void) {
     add("load_debug", 100, F_DR, 0);          /* ids >= 100 are load cells (special) */
     add("load_all_but_control", 101, F_INT | F_SEG | F_FP | F_DR, 0);
     add("load_nt_debug", 102, F_DR, 1);
+    /* --- selfctx2: cells 75.. --- CONTEXT_EXCEPTION_REQUEST 0x40000000 */
+    for (int api = 0; api < 2; api++) {
+        static const struct { const char *n; DWORD f; } RQ[] = {{"control", F_CTRL}, {"full", F_FULL}, {"all", F_ALL}, {"integer", F_INT}};
+        for (int i = 0; i < 4; i++) { snprintf(b, 48, "get_%s_%s_req", api ? "nt" : "w32", RQ[i].n); add(b, OP_GET, RQ[i].f | 0x40000000u, api); }
+    }
+    add("get_other_full", OP_GET_OTHER, F_FULL, 0);
+    add("get_other_full_req", OP_GET_OTHER, F_FULL | 0x40000000u, 0);
+    add("get_other_all_req", OP_GET_OTHER, F_ALL | 0x40000000u, 0);
+    add("get_other_nt_all_req", OP_GET_OTHER, F_ALL | 0x40000000u, 1);
+    add("set_back_to_get_w32", OP_TT, F_CTRL | F_INT, 0);
+    add("set_back_to_get_nt", OP_TT, F_CTRL | F_INT, 1);
 }
 
 typedef struct { CONTEXT *c; void *raw; } Ctx;
@@ -230,6 +243,34 @@ static int run_cell(int id) {
         int good = (a == b) && (a == a2);
         printf("CELL %d %s ok=%d plain=%016llx withctx=%016llx plain2=%016llx\n", id, c->name, good, (unsigned long long)a, (unsigned long long)b, (unsigned long long)a2);
         return !good;
+    }
+    if (c->op == OP_GET_OTHER) {
+        /* другой поток: крутится в цикле, приостановлен, контекст читается (с CONTEXT_EXCEPTION_REQUEST и без) */
+        extern DWORD WINAPI spinner(LPVOID);
+        static volatile LONG stopflag; stopflag = 0;
+        HANDLE th = CreateThread(NULL, 0, spinner, (LPVOID)&stopflag, 0, NULL);
+        Sleep(30); DWORD sc = SuspendThread(th);
+        Ctx xo = new_ctx(c->flags); CONTEXT *cx = xo.c; cx->ContextFlags = c->flags | 0x100000u;
+        LONG st2 = c->api ? pNtGet(th, cx) : GetThreadContext(th, cx);
+        snprintf(extra, sizeof extra, "suspend_prev=%lu st=%lx cfo=%lx rip_in_image=%d mx=%x fcw=%x efl=%lx seg=%x:%x:%x:%x:%x:%x", (unsigned long)sc, (unsigned long)st2, (unsigned long)cx->ContextFlags,
+                 (cx->Rip >= (DWORD64)(uintptr_t)GetModuleHandleA(NULL) && cx->Rip < (DWORD64)(uintptr_t)GetModuleHandleA(NULL) + 0x100000), cx->MxCsr, cx->FltSave.ControlWord, (unsigned long)cx->EFlags,
+                 cx->SegCs, cx->SegDs, cx->SegEs, cx->SegFs, cx->SegGs, cx->SegSs);
+        stopflag = 1; ResumeThread(th); WaitForSingleObject(th, 3000); CloseHandle(th); free_ctx(xo);
+        printf("CELL %d %s ok=1 %s\n", id, c->name, extra);
+        return 0;
+    }
+    if (c->op == OP_TT) {
+        /* Get своего потока, затем Set ТЕМ ЖЕ контекстом без правки Rip: исполнение продолжается там, где Get вернулся (Rip контекста); счётчик останавливает цикл */
+        static volatile int n; n = 0;
+        Ctx xt = new_ctx(c->flags); CONTEXT *ct = xt.c;
+        ct->ContextFlags = c->flags | 0x100000u;
+        volatile int hops = 0;
+        LONG g = c->api ? pNtGet(HSELF, ct) : GetThreadContext(GetCurrentThread(), ct);
+        n++;
+        if (n < 3) { hops = 1; if (c->api) pNtSet(HSELF, ct); else SetThreadContext(GetCurrentThread(), ct); }
+        printf("CELL %d %s ok=%d n=%d hops=%d get_status=%lx rip_cmp=%d\n", id, c->name, n == 3, n, hops, (unsigned long)g, ct->Rip != 0);
+        free_ctx(xt);
+        return n != 3;
     }
     int ctrl = (c->flags & M_CTRL) != 0, dr = (c->flags & M_DR) != 0;
     Ctx x = new_ctx(c->flags); CONTEXT *ctx = x.c;
@@ -297,6 +338,9 @@ static int run_cell(int id) {
     return !ok;
 }
 
+/* ---------------------------------------------------------------- spinner */
+DWORD WINAPI spinner(LPVOID p) { volatile LONG *f = (volatile LONG *)p; while (!*f) { _mm_pause(); } return 0; }
+
 /* ---------------------------------------------------------------- load cells */
 static volatile uint64_t g_sink;
 uint64_t checksum_work(int pairs, DWORD flags, int api) {
@@ -316,6 +360,7 @@ uint64_t checksum_work(int pairs, DWORD flags, int api) {
         ld = ld * 1.0000001L + (long double)(it & 3) * 0.25L;           /* x87, rounding per FCW 0x0c7f */
         for (int k = 0; k < 96; k++) buf[k] = (unsigned char)(acc >> ((k & 7) * 8)) ^ (unsigned char)k;
         /* backward copy: std; rep movsb */
+        memset(dst, 0, sizeof dst);
         { unsigned char *s = buf + 63, *t = dst + 70; size_t n = 64;
           __asm__ volatile("std\n rep movsb\n cld" : "+S"(s), "+D"(t), "+c"(n) : : "memory"); }
         uint64_t m = 0; for (int k = 0; k < 96; k++) m = m * 131 + dst[k];
