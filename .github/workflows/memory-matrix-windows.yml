@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: memory-matrix-windows
+
+on:
+  push:
+    paths: ['stands/memory-matrix/**', '.github/workflows/memory-matrix-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-matrix-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinned llvm-mingw
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-x86_64.zip'
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
+          $hash = (Get-FileHash -Algorithm SHA256 llvm-mingw.zip).Hash.ToLower()
+          if ($hash -ne '3e6919b3da2b6bfc05d8caf0ab10d5c0be4ddbb873b3c33790a71fe43c09c51f') { throw "toolchain hash mismatch: $hash" }
+          Expand-Archive llvm-mingw.zip -DestinationPath toolchain
+      - name: Build the memory probe
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD 'build\memory-matrix'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $cc = Join-Path $PWD 'toolchain\llvm-mingw-20260505-ucrt-x86_64\bin\x86_64-w64-mingw32-gcc.exe'
+          $src = Join-Path $PWD 'stands\memory-matrix\memory_probe.c'
+          $ErrorActionPreference = 'Continue'
+          & $cc --version *> (Join-Path $out 'compiler.txt')
+          '"' + $cc + '" -O1 -fms-extensions memory_probe.c -o memory_probe-llvm.exe' | Set-Content (Join-Path $out 'build-command.txt')
+          & $cc -O1 -fms-extensions $src -o (Join-Path $out 'memory_probe-llvm.exe') *> (Join-Path $out 'build-output.txt')
+          $rc = $LASTEXITCODE
+          "build rc=$rc" | Set-Content (Join-Path $out 'build-rc.txt')
+          if ($rc -ne 0) { throw "build failed: rc=$rc" }
+          (Get-FileHash -Algorithm SHA256 $src).Hash.ToLower() + '  memory_probe.c' | Set-Content (Join-Path $out 'sha256.txt')
+          (Get-FileHash -Algorithm SHA256 (Join-Path $out 'memory_probe-llvm.exe')).Hash.ToLower() + '  memory_probe-llvm.exe' | Add-Content (Join-Path $out 'sha256.txt')
+          $m = Join-Path $out 'machine.txt'
+          (Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name) | Set-Content $m
+          ('cores=' + (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum) | Add-Content $m
+          ('arch=' + $env:PROCESSOR_ARCHITECTURE + ' id=' + $env:PROCESSOR_IDENTIFIER) | Add-Content $m
+          $w = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          ('windows=' + $w.ProductName + ' ' + $w.DisplayVersion + ' build ' + $w.CurrentBuild + '.' + $w.UBR) | Add-Content $m
+      - name: Run list, cell 0 and all
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD 'build\memory-matrix'
+          $exe = Join-Path $out 'memory_probe-llvm.exe'
+          $ErrorActionPreference = 'Continue'
+          function RunOne($name, $argText, $limitSec) {
+            $o = Join-Path $out ($name + '.txt'); $e = Join-Path $out ($name + '.stderr.txt')
+            $line = '/s /c ""' + $exe + '" ' + $argText + ' > "' + $o + '" 2> "' + $e + '""'
+            $t0 = Get-Date
+            $p = Start-Process -FilePath 'cmd.exe' -ArgumentList $line -NoNewWindow -PassThru
+            $null = $p.Handle
+            if (-not $p.WaitForExit($limitSec * 1000)) {
+              & taskkill.exe /T /F /PID $p.Id | Out-Null
+              $null = $p.WaitForExit(10000)
+              $rc = 'TIMEOUT'
+            } else { $rc = $p.ExitCode }
+            $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
+            ($name + ' rc=' + $rc + ' seconds=' + $secs) | Add-Content (Join-Path $out 'outcomes.txt')
+          }
+          RunOne 'list' 'list' 120
+          RunOne 'cell0' 'cell 0' 120
+          RunOne 'all' 'all' 1800
+          Get-Content (Join-Path $out 'outcomes.txt')
+          Get-ChildItem $out -Filter '*.txt' | ForEach-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower() + '  ' + $_.Name } | Set-Content (Join-Path $out 'outputs-sha256.txt')
+      - name: Keep outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-matrix-${{ matrix.os }}
+          path: build/memory-matrix/
+          if-no-files-found: warn
