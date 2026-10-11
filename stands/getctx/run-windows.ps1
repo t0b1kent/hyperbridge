@@ -36,3 +36,12 @@ for ($i = 0; $i -lt 32; $i++) {
   $rc = RunLimited "cell $i" (Join-Path $cells "$name.txt") (Join-Path $cells "$name.err.txt") 30
   Set-Content -Encoding ascii (Join-Path $cells "$name.rc.txt") $rc
 }
+
+# getctx_tail: values of the CONTEXT tail fields after a debug-register request (one run, 30 s limit)
+$exe2 = Join-Path $bin 'getctx_tail.exe'
+& $cc '-O1' '-g0' '-fno-stack-protector' '-Wl,--no-insert-timestamp' (Join-Path $src 'getctx_tail.c') -o $exe2
+if ($LASTEXITCODE -ne 0) { throw 'build failed: getctx_tail' }
+$p = Start-Process -FilePath $exe2 -RedirectStandardOutput (Join-Path $Out 'tail.txt') -RedirectStandardError (Join-Path $Out 'tail.err.txt') -PassThru -NoNewWindow
+$null = $p.Handle
+if (-not $p.WaitForExit(30000)) { try { $p.Kill() } catch {}; $p.WaitForExit(); $rc = 'TIMEOUT' } else { $rc = [string]$p.ExitCode }
+Set-Content -Encoding ascii (Join-Path $Out 'tail.rc.txt') $rc
