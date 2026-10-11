@@ -1,0 +1,681 @@
+{
+  "schema": 1,
+  "wine_commit": "a15ee2ccf20e2fc9f470badd916855801933d31f",
+  "groups": [
+    {
+      "name": "ProcessBasicInformation",
+      "api": "NtQueryInformationProcess",
+      "class": 0,
+      "kind": "fixed",
+      "layout": "PROCESS_BASIC_INFORMATION",
+      "sizes": {
+        "32": 24,
+        "64": 48
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessBasicInformation",
+        "value": 0,
+        "layout": "PROCESS_BASIC_INFORMATION",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1115-L1158",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L1850-L1885",
+        "note": ""
+      }
+    },
+    {
+      "name": "ProcessQuotaLimits",
+      "api": "NtQueryInformationProcess",
+      "class": 1,
+      "kind": "fixed",
+      "layout": "QUOTA_LIMITS",
+      "sizes": {
+        "32": 32,
+        "64": 48
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessQuotaLimits",
+        "value": 1,
+        "layout": "QUOTA_LIMITS",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1560-L1589",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2803-L2854",
+        "note": "Wine has a success-producing stub with default quota values; this is an ABI observation, not full semantic conformance."
+      }
+    },
+    {
+      "name": "ProcessIoCounters",
+      "api": "NtQueryInformationProcess",
+      "class": 2,
+      "kind": "fixed",
+      "layout": "IO_COUNTERS",
+      "sizes": {
+        "32": 48,
+        "64": 48
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessIoCounters",
+        "value": 2,
+        "layout": "IO_COUNTERS",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1160-L1183",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2008-L2034",
+        "note": "Wine has a success-producing zero-data stub."
+      }
+    },
+    {
+      "name": "ProcessVmCounters",
+      "api": "NtQueryInformationProcess",
+      "class": 3,
+      "kind": "vm_dual",
+      "layout": "VM_COUNTERS",
+      "sizes": {
+        "32": 44,
+        "64": 88
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessVmCounters",
+        "value": 3,
+        "layout": "VM_COUNTERS and VM_COUNTERS_EX",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1185-L1230",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L1906-L1964",
+        "note": "Two separate public fixed layouts, each with its own sizeof N; do not collapse them."
+      }
+    },
+    {
+      "name": "ProcessTimes",
+      "api": "NtQueryInformationProcess",
+      "class": 4,
+      "kind": "fixed",
+      "layout": "KERNEL_USER_TIMES",
+      "sizes": {
+        "32": 32,
+        "64": 32
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessTimes",
+        "value": 4,
+        "layout": "KERNEL_USER_TIMES",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1232-L1274",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2039-L2093",
+        "note": ""
+      }
+    },
+    {
+      "name": "ProcessDebugPort",
+      "api": "NtQueryInformationProcess",
+      "class": 7,
+      "kind": "fixed",
+      "layout": "ULONG_PTR",
+      "sizes": {
+        "32": 4,
+        "64": 8
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessDebugPort",
+        "value": 7,
+        "layout": "ULONG_PTR",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1276-L1303",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2103-L2150",
+        "note": "Scalar query only; no debugger attach or debugged child fixture."
+      }
+    },
+    {
+      "name": "ProcessDefaultHardErrorMode",
+      "api": "NtQueryInformationProcess",
+      "class": 12,
+      "kind": "fixed",
+      "layout": "ULONG",
+      "sizes": {
+        "32": 4,
+        "64": 4
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessDefaultHardErrorMode",
+        "value": 12,
+        "layout": "ULONG",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1346-L1350",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/kernel32/tests/process.c#L4244-L4409",
+        "note": ""
+      }
+    },
+    {
+      "name": "ProcessPriorityClass",
+      "api": "NtQueryInformationProcess",
+      "class": 18,
+      "kind": "fixed",
+      "layout": "COMPAT_PROCESS_PRIORITY_CLASS",
+      "sizes": {
+        "32": 2,
+        "64": 2
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessPriorityClass",
+        "value": 18,
+        "layout": "PROCESS_PRIORITY_CLASS",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1484-L1507",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2298-L2329",
+        "note": ""
+      }
+    },
+    {
+      "name": "ProcessHandleCount",
+      "api": "NtQueryInformationProcess",
+      "class": 20,
+      "kind": "fixed",
+      "layout": "ULONG",
+      "sizes": {
+        "32": 4,
+        "64": 4
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessHandleCount",
+        "value": 20,
+        "layout": "ULONG",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1368-L1386",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2332-L2374",
+        "note": "Wine has a success-producing zero-count stub."
+      }
+    },
+    {
+      "name": "ProcessAffinityMask",
+      "api": "NtQueryInformationProcess",
+      "class": 21,
+      "kind": "fixed",
+      "layout": "ULONG_PTR",
+      "sizes": {
+        "32": 4,
+        "64": 8
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessAffinityMask",
+        "value": 21,
+        "layout": "ULONG_PTR",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1393-L1408",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/kernel32/tests/process.c#L4244-L4409",
+        "note": ""
+      }
+    },
+    {
+      "name": "ProcessPriorityBoost",
+      "api": "NtQueryInformationProcess",
+      "class": 22,
+      "kind": "fixed",
+      "layout": "ULONG",
+      "sizes": {
+        "32": 4,
+        "64": 4
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessPriorityBoost",
+        "value": 22,
+        "layout": "ULONG",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1305-L1320",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/kernel32/tests/process.c#L4244-L4409",
+        "note": ""
+      }
+    },
+    {
+      "name": "ProcessSessionInformation_partial_zero",
+      "api": "NtQueryInformationProcess",
+      "class": 24,
+      "kind": "partial_zero",
+      "layout": "unknown_no_N",
+      "sizes": {
+        "32": 0,
+        "64": 0
+      },
+      "capacity": 0,
+      "provenance": {
+        "note": "PARTIAL: only length0 from the existing kernel32 test. No N is asserted.",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1410-L1423",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/kernel32/tests/process.c#L4273",
+        "dispatch": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/kernel32/tests/process.c#L4331-L4340"
+      }
+    },
+    {
+      "name": "ProcessWow64Information",
+      "api": "NtQueryInformationProcess",
+      "class": 26,
+      "kind": "fixed",
+      "layout": "ULONG_PTR",
+      "sizes": {
+        "32": 4,
+        "64": 8
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessWow64Information",
+        "value": 26,
+        "layout": "ULONG_PTR",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1425-L1444",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L1763-L1848",
+        "note": ""
+      }
+    },
+    {
+      "name": "ProcessImageFileName",
+      "api": "NtQueryInformationProcess",
+      "class": 27,
+      "kind": "variable",
+      "layout": "UNICODE_STRING_header",
+      "sizes": {
+        "32": 8,
+        "64": 16
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessImageFileName",
+        "value": 27,
+        "layout": "UNICODE_STRING header + variable UTF-16 tail",
+        "length_kind": "variable",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1446-L1470",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2377-L2402",
+        "note": "N is not a full response size. Only header H and existing bounded test capacity are named."
+      }
+    },
+    {
+      "name": "ProcessDebugFlags",
+      "api": "NtQueryInformationProcess",
+      "class": 31,
+      "kind": "fixed",
+      "layout": "ULONG",
+      "sizes": {
+        "32": 4,
+        "64": 4
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessDebugFlags",
+        "value": 31,
+        "layout": "ULONG",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1322-L1344",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2653-L2700",
+        "note": "Scalar query only; no changes to flags or debugger state."
+      }
+    },
+    {
+      "name": "ProcessExecuteFlags",
+      "api": "NtQueryInformationProcess",
+      "class": 34,
+      "kind": "fixed",
+      "layout": "ULONG",
+      "sizes": {
+        "32": 4,
+        "64": 4
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessExecuteFlags",
+        "value": 34,
+        "layout": "ULONG",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1472-L1482",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2907-L2924",
+        "note": "Query only; the setters elsewhere in this test are explicitly excluded."
+      }
+    },
+    {
+      "name": "ProcessCookie",
+      "api": "NtQueryInformationProcess",
+      "class": 36,
+      "kind": "fixed",
+      "layout": "ULONG",
+      "sizes": {
+        "32": 4,
+        "64": 4
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessCookie",
+        "value": 36,
+        "layout": "ULONG",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1509-L1517",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/kernel32/tests/process.c#L4244-L4409",
+        "note": "No cookie value is emitted; only changed-byte count. Own current-process pseudo-handle is the baseline."
+      }
+    },
+    {
+      "name": "ProcessImageInformation",
+      "api": "NtQueryInformationProcess",
+      "class": 37,
+      "kind": "fixed",
+      "layout": "COMPAT_SECTION_IMAGE_INFORMATION",
+      "sizes": {
+        "32": 48,
+        "64": 64
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessImageInformation",
+        "value": 37,
+        "layout": "SECTION_IMAGE_INFORMATION",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1519-L1539",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2432-L2467",
+        "note": ""
+      }
+    },
+    {
+      "name": "ProcessCycleTime",
+      "api": "NtQueryInformationProcess",
+      "class": 38,
+      "kind": "fixed",
+      "layout": "COMPAT_PROCESS_CYCLE_TIME",
+      "sizes": {
+        "32": 16,
+        "64": 16
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessCycleTime",
+        "value": 38,
+        "layout": "PROCESS_CYCLE_TIME_INFORMATION",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1541-L1558",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/kernel32/tests/process.c#L4244-L4409",
+        "note": "Wine has a success-producing zero-cycle stub."
+      }
+    },
+    {
+      "name": "ProcessImageFileNameWin32",
+      "api": "NtQueryInformationProcess",
+      "class": 43,
+      "kind": "variable",
+      "layout": "UNICODE_STRING_header",
+      "sizes": {
+        "32": 8,
+        "64": 16
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ProcessImageFileNameWin32",
+        "value": 43,
+        "layout": "UNICODE_STRING header + variable UTF-16 tail",
+        "length_kind": "variable",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/process.c#L1446-L1470",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/info.c#L2406-L2429",
+        "note": "N is not a full response size. Only header H and existing bounded test capacity are named."
+      }
+    },
+    {
+      "name": "ObjectBasicInformation_event",
+      "api": "NtQueryObject",
+      "class": 0,
+      "kind": "fixed",
+      "layout": "OBJECT_BASIC_INFORMATION",
+      "sizes": {
+        "32": 56,
+        "64": 56
+      },
+      "capacity": 4096,
+      "provenance": {
+        "name": "ObjectBasicInformation",
+        "value": 0,
+        "layout": "OBJECT_BASIC_INFORMATION",
+        "length_kind": "fixed",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/file.c#L7819-L7841",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L1680-L1708",
+        "object_evidence": [
+          "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L1693-L1757"
+        ],
+        "allowed_objects": [
+          "owned event"
+        ],
+        "coverage_gap": "No tempfile or self-process Basic row: no exact corresponding test form was established in the reviewed tests."
+      }
+    },
+    {
+      "name": "ObjectNameInformation",
+      "api": "NtQueryObject",
+      "class": 1,
+      "kind": "variable",
+      "layout": "OBJECT_NAME_INFORMATION_header",
+      "sizes": {
+        "32": 8,
+        "64": 16
+      },
+      "capacity": 1024,
+      "provenance": {
+        "name": "ObjectNameInformation",
+        "value": 1,
+        "layout": "OBJECT_NAME_INFORMATION header + variable UTF-16 tail",
+        "length_kind": "variable",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/file.c#L7843-L7879",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L1647-L1675",
+        "object_evidence": [
+          "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L1693-L1757",
+          "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L1811-L1817",
+          "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L2000-L2002"
+        ],
+        "allowed_objects": [
+          "owned named event",
+          "owned temporary file",
+          "own current process"
+        ]
+      }
+    },
+    {
+      "name": "ObjectTypeInformation",
+      "api": "NtQueryObject",
+      "class": 2,
+      "kind": "variable",
+      "layout": "OBJECT_TYPE_INFORMATION_header",
+      "sizes": {
+        "32": 96,
+        "64": 104
+      },
+      "capacity": 1024,
+      "provenance": {
+        "name": "ObjectTypeInformation",
+        "value": 2,
+        "layout": "OBJECT_TYPE_INFORMATION header + variable UTF-16 tail",
+        "length_kind": "variable",
+        "implementation": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/unix/file.c#L7881-L7907",
+        "test": "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L1627-L1645",
+        "object_evidence": [
+          "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L1693-L1757",
+          "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L1811-L1817",
+          "https://github.com/wine-mirror/wine/blob/a15ee2ccf20e2fc9f470badd916855801933d31f/dlls/ntdll/tests/om.c#L2000-L2002"
+        ],
+        "allowed_objects": [
+          "owned named event",
+          "owned temporary file",
+          "own current process"
+        ]
+      }
+    },
+    {
+      "name": "ProcessSentinel_minus_one",
+      "api": "NtQueryInformationProcess",
+      "class": 4294967295,
+      "kind": "sentinel",
+      "layout": "none",
+      "sizes": {
+        "32": 0,
+        "64": 0
+      },
+      "capacity": 0
+    },
+    {
+      "name": "ProcessSentinel_int_max",
+      "api": "NtQueryInformationProcess",
+      "class": 2147483647,
+      "kind": "sentinel",
+      "layout": "none",
+      "sizes": {
+        "32": 0,
+        "64": 0
+      },
+      "capacity": 0
+    },
+    {
+      "name": "ObjectSentinel_minus_one",
+      "api": "NtQueryObject",
+      "class": 4294967295,
+      "kind": "sentinel",
+      "layout": "none",
+      "sizes": {
+        "32": 0,
+        "64": 0
+      },
+      "capacity": 0
+    },
+    {
+      "name": "ObjectSentinel_int_max",
+      "api": "NtQueryObject",
+      "class": 2147483647,
+      "kind": "sentinel",
+      "layout": "none",
+      "sizes": {
+        "32": 0,
+        "64": 0
+      },
+      "capacity": 0
+    },
+    {
+      "name": "ThreadPerformanceCount_reserved_R_len8",
+      "api": "NtQueryInformationThread",
+      "class": 11,
+      "kind": "residual",
+      "layout": "LARGE_INTEGER",
+      "sizes": {
+        "32": 8,
+        "64": 8
+      },
+      "capacity": 0,
+      "length": 8,
+      "return_length_mode": "reserved_uncommitted",
+      "provenance": {
+        "note": "Exactly one of the four user-requested residual cells. Separate exception to the process/object implemented-and-tested rule. Own thread handle access THREAD_QUERY_LIMITED_INFORMATION (0x0800)."
+      }
+    },
+    {
+      "name": "ThreadPerformanceCount_valid_R_len0",
+      "api": "NtQueryInformationThread",
+      "class": 11,
+      "kind": "residual",
+      "layout": "LARGE_INTEGER",
+      "sizes": {
+        "32": 0,
+        "64": 0
+      },
+      "capacity": 0,
+      "length": 0,
+      "return_length_mode": "valid_aligned",
+      "provenance": {
+        "note": "Exactly one of the four user-requested residual cells. Separate exception to the process/object implemented-and-tested rule. Own thread handle access THREAD_QUERY_LIMITED_INFORMATION (0x0800)."
+      }
+    },
+    {
+      "name": "ThreadPerformanceCount_valid_R_len7",
+      "api": "NtQueryInformationThread",
+      "class": 11,
+      "kind": "residual",
+      "layout": "LARGE_INTEGER",
+      "sizes": {
+        "32": 7,
+        "64": 7
+      },
+      "capacity": 0,
+      "length": 7,
+      "return_length_mode": "valid_aligned",
+      "provenance": {
+        "note": "Exactly one of the four user-requested residual cells. Separate exception to the process/object implemented-and-tested rule. Own thread handle access THREAD_QUERY_LIMITED_INFORMATION (0x0800)."
+      }
+    },
+    {
+      "name": "ThreadPerformanceCount_valid_R_len9",
+      "api": "NtQueryInformationThread",
+      "class": 11,
+      "kind": "residual",
+      "layout": "LARGE_INTEGER",
+      "sizes": {
+        "32": 9,
+        "64": 9
+      },
+      "capacity": 0,
+      "length": 9,
+      "return_length_mode": "valid_aligned",
+      "provenance": {
+        "note": "Exactly one of the four user-requested residual cells. Separate exception to the process/object implemented-and-tested rule. Own thread handle access THREAD_QUERY_LIMITED_INFORMATION (0x0800)."
+      }
+    }
+  ],
+  "boundary_sentinels": {
+    "runtime_label": "omitted_pending_user_decision",
+    "process118": "OMITTED: enum-boundary status/read-only contract not established",
+    "object7": "OMITTED: newer public enum names ObjectSetRefTraceInformation; invalid/read-only contract not established",
+    "replacement": null
+  },
+  "scope": {
+    "fixed_lengths": "0, N-1, N, N+1, max(4096,4*N), each N from its cited typed public layout; VM has two Ns",
+    "variable_lengths": "0, H-1, H, H+1, 1024 (object helper) or 4096 (pinned kernel32 process test). H is header_size, never valid_size or complete N. No adaptive probing.",
+    "data": "Aligned, fully committed owned allocation, two deterministic byte patterns. No guard pages. No actual payload values, bytes, pointer values, paths, cookie or debug state output.",
+    "return_length": "valid aligned ULONG initialized to a sentinel, or NULL, only. Report whether its observed bytes changed, not proof of every store.",
+    "process_handles": "GetCurrentProcess pseudo-handle; NULL invalid handle; handles opened only to GetCurrentProcessId with PROCESS_QUERY_LIMITED_INFORMATION and SYNCHRONIZE access, explicitly labeled separately. No other process is queried.",
+    "object_handles": "ObjectBasicInformation: owned event and NULL only. ObjectNameInformation/ObjectTypeInformation: owned event, owned delete-on-close temporary file, own-process pseudo-handle, and NULL. These are valid object variants, not a universal wrong-type test. See object_form_notes for exact evidence and the explicit temporary-file name substitution.",
+    "isolation": "Separate child for each named class or sentinel, with four separate one-cell thread residual children. 15-second group deadline; up to 5 seconds bounded termination cleanup. Flushed pre-call/result JSONL, separate stderr, complete/partial/fault/timeout/setup-failure outcomes. Record missing observations without claiming parity; abort further work if a child remains unresolved.",
+    "repetitions": "Exactly two independent full runs, pattern A then pattern B."
+  },
+  "exclusions": [
+    "NtQuerySystemInformation (all classes)",
+    "Every NtSet* or Set* mutation",
+    "ProcessDebugObjectHandle (can return/create a handle)",
+    "ProcessHandleTable (stub, zero length, no concrete tested layout)",
+    "ObjectTypesInformation (global type enumeration outside owned-object scope)",
+    "ObjectHandleFlagInformation (no direct existing query test found in reviewed sources)",
+    "ObjectSessionInformation",
+    "ObjectSessionObjectInformation",
+    "ProcessThreadStackAllocation",
+    "ProcessImageFileMapping",
+    "ProcessDynamicFunctionTableInformation",
+    "ProcessRevokeFileHandles",
+    "ProcessWorkingSetControl",
+    "ProcessMemoryExhaustion",
+    "ProcessCommitReleaseInformation",
+    "ProcessIumChallengeResponse",
+    "ProcessCaptureTrustletLiveDump",
+    "ProcessImageSection",
+    "ProcessLoaderDetour",
+    "ProcessCombineSecurityDomainsInformation",
+    "ProcessFiberShadowStackAllocation",
+    "ProcessFreeFiberShadowStackAllocation",
+    "ProcessCreateStateChange",
+    "ProcessApplyStateChange",
+    "ProcessManageWritesToExecutableMemory",
+    "ProcessEnableReadWriteVmLogging",
+    "ProcessEnableLogging",
+    "ProcessEnclaveInformation",
+    "ProcessEnclaveAddressSpaceRestriction",
+    "ProcessAssignCpuPartitions",
+    "Every other class absent from the explicit allowlist"
+  ],
+  "source_manifest": "source-manifest.json",
+  "object_form_notes": {
+    "ObjectBasicInformation": "Owned event only; file and self-process Basic forms deliberately omitted for exact-test-evidence coverage.",
+    "ObjectNameInformation": "Owned named-event and own-process helper forms. Owned temporary file substitutes for the same File-type name helper used on a directory in Wine; no system directory is opened.",
+    "ObjectTypeInformation": "Owned event, owned temporary file and self-process helper forms."
+  }
+}

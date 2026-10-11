@@ -1,0 +1,3 @@
+# Keep these files byte-identical on every platform so that the recorded source fingerprint is the same everywhere.
+*.c -text
+*.ps1 -text
