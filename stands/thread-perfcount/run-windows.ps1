@@ -26,5 +26,5 @@ foreach ($arch in @(@{ tag = 'x64'; target = 'x86_64-w64-mingw32' }, @{ tag = 'x
   & $cc '-std=c11' '-O1' '-Wall' '-Wextra' '-Werror' '-Wl,--no-insert-timestamp' '-include' $defs $src -o $exe 2> (Join-Path $Out ($arch.tag + '.build.txt'))
   if ($LASTEXITCODE -ne 0) { throw "build failed: $($arch.tag)" }
   & $runner -Exe $exe -OutDir (Join-Path $Out $arch.tag)
-  Remove-Item -Force $exe
+  # Schema 3: retain this Windows-built EXE in -Out for independent artifact hashing.
 }

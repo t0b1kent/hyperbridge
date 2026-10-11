@@ -10,4 +10,7 @@ the output.
 
 The probe source was prepared with AI assistance as a diagnostic. Schema 2 (74 cases) adds buffer offsets 0-7, protected
 buffers combined with missing or unusable handles, return-length pointers on inaccessible and page-boundary memory, and
-return-length pointers that overlap the buffer.
+return-length pointers that overlap the buffer. Schema 3 (119 cases) adds a misaligned buffer combined with wrong lengths,
+invalid or limited handles and unusable return-length pointers, and unusable return-length pointers combined with wrong
+lengths and invalid handles. From schema 3 on the programs built on the runner are kept next to the outputs, so their
+hashes can be recomputed from the files.

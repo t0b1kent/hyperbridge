@@ -2,8 +2,8 @@
 // Copyright (c) 2026 HyperBridge contributors
 /* AI-generated diagnostic preparation, not an upstream Wine contribution.
  * No Windows observations are encoded as expected results.
- * Expanded diagnostic schema 2. Run each case in a separate process with run-cases.ps1.
- * Additional schema 2 code is AI-generated local diagnostic preparation.
+ * Expanded diagnostic schema 3. Run each case in a separate process with run-cases.ps1.
+ * Additional schema 2/3 code is AI-generated local diagnostic preparation.
  */
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0601
@@ -123,7 +123,53 @@ static const struct test_case cases[] = {
     C("exact8_alias_return_plus_4",8,CURRENT,WRITABLE,RETURN_ALIAS,NORMAL,1,0,4,0),
     C("exact8_alias_return_plus_8",8,CURRENT,WRITABLE,RETURN_ALIAS,NORMAL,1,0,8,0),
     C("length0_reserved_return_length",0,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,0,0,0),
-    C("length9_reserved_return_length",9,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,0,0,0)
+    C("length9_reserved_return_length",9,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,0,0,0),
+    /* Schema 3: bounded precedence crosses; no expected statuses. */
+    C("align1_length0_handle_current_return_valid",0,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,1,0,0),
+    C("align1_length0_handle_current_return_reserved",0,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,1,0,0),
+    C("align1_length0_handle_current_return_null",0,CURRENT,WRITABLE,RETURN_NULL,NORMAL,1,1,0,0),
+    C("align1_length7_handle_current_return_valid",7,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,1,0,0),
+    C("align1_length7_handle_current_return_reserved",7,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,1,0,0),
+    C("align1_length7_handle_current_return_null",7,CURRENT,WRITABLE,RETURN_NULL,NORMAL,1,1,0,0),
+    C("align1_length8_handle_current_return_reserved",8,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,1,0,0),
+    C("align1_length8_handle_current_return_null",8,CURRENT,WRITABLE,RETURN_NULL,NORMAL,1,1,0,0),
+    C("align1_length9_handle_current_return_valid",9,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,1,0,0),
+    C("align1_length9_handle_current_return_reserved",9,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,1,0,0),
+    C("align1_length9_handle_current_return_null",9,CURRENT,WRITABLE,RETURN_NULL,NORMAL,1,1,0,0),
+    C("align1_length8_handle_invalid_return_valid",8,INVALID_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1,1,0,0),
+    C("align1_length8_handle_invalid_return_reserved",8,INVALID_HANDLE,WRITABLE,RETURN_RESERVED,NORMAL,1,1,0,0),
+    C("align1_length8_handle_invalid_return_null",8,INVALID_HANDLE,WRITABLE,RETURN_NULL,NORMAL,1,1,0,0),
+    C("align1_length8_handle_limited_return_valid",8,LIMITED,WRITABLE,RETURN_VALID,NORMAL,1,1,0,0),
+    C("align1_length8_handle_limited_return_reserved",8,LIMITED,WRITABLE,RETURN_RESERVED,NORMAL,1,1,0,0),
+    C("align1_length8_handle_limited_return_null",8,LIMITED,WRITABLE,RETURN_NULL,NORMAL,1,1,0,0),
+    C("return_noaccess_length0_handle_current",0,CURRENT,WRITABLE,RETURN_NOACCESS,NORMAL,1,0,0,0),
+    C("return_noaccess_length0_handle_invalid",0,INVALID_HANDLE,WRITABLE,RETURN_NOACCESS,NORMAL,1,0,0,0),
+    C("return_noaccess_length7_handle_current",7,CURRENT,WRITABLE,RETURN_NOACCESS,NORMAL,1,0,0,0),
+    C("return_noaccess_length7_handle_invalid",7,INVALID_HANDLE,WRITABLE,RETURN_NOACCESS,NORMAL,1,0,0,0),
+    C("return_noaccess_length8_handle_invalid",8,INVALID_HANDLE,WRITABLE,RETURN_NOACCESS,NORMAL,1,0,0,0),
+    C("return_noaccess_length9_handle_current",9,CURRENT,WRITABLE,RETURN_NOACCESS,NORMAL,1,0,0,0),
+    C("return_noaccess_length9_handle_invalid",9,INVALID_HANDLE,WRITABLE,RETURN_NOACCESS,NORMAL,1,0,0,0),
+    C("return_boundary1_length0_handle_current",0,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,1),
+    C("return_boundary1_length0_handle_invalid",0,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,1),
+    C("return_boundary1_length7_handle_current",7,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,1),
+    C("return_boundary1_length7_handle_invalid",7,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,1),
+    C("return_boundary1_length8_handle_invalid",8,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,1),
+    C("return_boundary1_length9_handle_current",9,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,1),
+    C("return_boundary1_length9_handle_invalid",9,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,1),
+    C("return_boundary2_length0_handle_current",0,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,2),
+    C("return_boundary2_length0_handle_invalid",0,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,2),
+    C("return_boundary2_length7_handle_current",7,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,2),
+    C("return_boundary2_length7_handle_invalid",7,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,2),
+    C("return_boundary2_length8_handle_invalid",8,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,2),
+    C("return_boundary2_length9_handle_current",9,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,2),
+    C("return_boundary2_length9_handle_invalid",9,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,2),
+    C("return_boundary3_length0_handle_current",0,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,3),
+    C("return_boundary3_length0_handle_invalid",0,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,3),
+    C("return_boundary3_length7_handle_current",7,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,3),
+    C("return_boundary3_length7_handle_invalid",7,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,3),
+    C("return_boundary3_length8_handle_invalid",8,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,3),
+    C("return_boundary3_length9_handle_current",9,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,3),
+    C("return_boundary3_length9_handle_invalid",9,INVALID_HANDLE,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,3)
 };
 #undef C
 
@@ -214,7 +260,7 @@ static int run_case(const struct test_case *c)
            "\"os_minor\":%lu,\"os_build\":%lu,\"version_status\":\"0x%08lx\","
            "\"native_processor_architecture\":%u,\"is_wow64_query_ok\":%s,"
            "\"is_wow64\":%s,\"wine_export_present\":%s,"
-           "\"probe_schema\":2,\"page_size\":%lu,\"source_sha256\":\"%s\",\"build_target\":\"%s\"}\n",
+           "\"probe_schema\":3,\"page_size\":%lu,\"source_sha256\":\"%s\",\"build_target\":\"%s\"}\n",
            c->name, (unsigned)(8 * sizeof(void *)), (unsigned)sizeof(LARGE_INTEGER),
            (unsigned)sizeof(ULONG), version.dwMajorVersion, version.dwMinorVersion,
            version.dwBuildNumber, (ULONG)version_status, (unsigned)si.wProcessorArchitecture,
