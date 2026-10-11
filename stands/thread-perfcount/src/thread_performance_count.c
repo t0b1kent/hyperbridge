@@ -2,7 +2,8 @@
 // Copyright (c) 2026 HyperBridge contributors
 /* AI-generated diagnostic preparation, not an upstream Wine contribution.
  * No Windows observations are encoded as expected results.
- * Run each case in a separate process with run.ps1.
+ * Expanded diagnostic schema 2. Run each case in a separate process with run-cases.ps1.
+ * Additional schema 2 code is AI-generated local diagnostic preparation.
  */
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0601
@@ -10,6 +11,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stddef.h>
+
+#ifndef PROBE_SOURCE_SHA256
+#define PROBE_SOURCE_SHA256 "not-recorded"
+#endif
+#ifndef PROBE_BUILD_TARGET
+#define PROBE_BUILD_TARGET "not-recorded"
+#endif
 
 #ifndef THREAD_QUERY_LIMITED_INFORMATION
 #define THREAD_QUERY_LIMITED_INFORMATION 0x0800
@@ -25,8 +33,8 @@ enum handle_mode { CURRENT, QUERY, LIMITED, ZERO_ACCESS, SYNC_ONLY,
                    WORKER_IDLE, WORKER_BUSY, WORKER_SUSPENDED, WORKER_EXITED };
 enum buffer_mode { WRITABLE, NULL_BUFFER, UNALIGNED_BUFFER, READONLY_BUFFER,
                    NOACCESS_BUFFER, CROSS_PAGE };
-enum return_mode { RETURN_VALID, RETURN_NULL, RETURN_INVALID, RETURN_UNALIGNED,
-                   RETURN_READONLY, RETURN_ALIAS };
+enum return_mode { RETURN_VALID, RETURN_NULL, RETURN_RESERVED, RETURN_UNALIGNED,
+                   RETURN_READONLY, RETURN_ALIAS, RETURN_NOACCESS, RETURN_BOUNDARY };
 enum phase_mode { NORMAL, AFTER_SLEEP, AFTER_BURN };
 struct test_case {
     const char *name;
@@ -36,50 +44,86 @@ struct test_case {
     enum return_mode ret;
     enum phase_mode phase;
     unsigned repeat;
+    unsigned data_extra_offset;
+    unsigned alias_offset;
+    unsigned return_accessible_prefix;
 };
-#define C(n,l,h,b,r,p,k) { n,l,h,b,r,p,k }
+#define C(n,l,h,b,r,p,k,d,a,f) { n,l,h,b,r,p,k,d,a,f }
 static const struct test_case cases[] = {
-    C("exact8_current",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_query_handle",8,QUERY,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_limited_handle",8,LIMITED,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_zero_access_handle",8,ZERO_ACCESS,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_sync_only_handle",8,SYNC_ONLY,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length0",0,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length1",1,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length4",4,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length7",7,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length9",9,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length16",16,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_no_return_length",8,CURRENT,WRITABLE,RETURN_NULL,NORMAL,1),
-    C("exact8_null_buffer",8,CURRENT,NULL_BUFFER,RETURN_VALID,NORMAL,1),
-    C("exact8_unaligned_buffer",8,CURRENT,UNALIGNED_BUFFER,RETURN_VALID,NORMAL,1),
-    C("exact8_readonly_buffer",8,CURRENT,READONLY_BUFFER,RETURN_VALID,NORMAL,1),
-    C("exact8_noaccess_buffer",8,CURRENT,NOACCESS_BUFFER,RETURN_VALID,NORMAL,1),
-    C("exact8_cross_page_buffer",8,CURRENT,CROSS_PAGE,RETURN_VALID,NORMAL,1),
-    C("exact8_invalid_return_length",8,CURRENT,WRITABLE,RETURN_INVALID,NORMAL,1),
-    C("exact8_unaligned_return_length",8,CURRENT,WRITABLE,RETURN_UNALIGNED,NORMAL,1),
-    C("exact8_readonly_return_length",8,CURRENT,WRITABLE,RETURN_READONLY,NORMAL,1),
-    C("exact8_alias_return_length",8,CURRENT,WRITABLE,RETURN_ALIAS,NORMAL,1),
-    C("exact8_null_handle",8,NULL_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_invalid_handle",8,INVALID_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_process_handle",8,PROCESS_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_event_handle",8,EVENT_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length0_null_buffer",0,CURRENT,NULL_BUFFER,RETURN_VALID,NORMAL,1),
-    C("length7_null_buffer",7,CURRENT,NULL_BUFFER,RETURN_VALID,NORMAL,1),
-    C("length0_invalid_handle",0,INVALID_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length7_invalid_handle",7,INVALID_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("length7_invalid_return_length",7,CURRENT,WRITABLE,RETURN_INVALID,NORMAL,1),
-    C("exact8_invalid_handle_null_buffer",8,INVALID_HANDLE,NULL_BUFFER,RETURN_VALID,NORMAL,1),
-    C("exact8_invalid_handle_invalid_return_length",8,INVALID_HANDLE,WRITABLE,RETURN_INVALID,NORMAL,1),
-    C("exact8_null_buffer_invalid_return_length",8,CURRENT,NULL_BUFFER,RETURN_INVALID,NORMAL,1),
-    C("exact8_limited_handle_null_buffer",8,LIMITED,NULL_BUFFER,RETURN_VALID,NORMAL,1),
-    C("repeat8_current",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,5),
-    C("repeat8_after_sleep",8,CURRENT,WRITABLE,RETURN_VALID,AFTER_SLEEP,5),
-    C("repeat8_after_burn",8,CURRENT,WRITABLE,RETURN_VALID,AFTER_BURN,5),
-    C("exact8_worker_idle",8,WORKER_IDLE,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_worker_busy",8,WORKER_BUSY,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_worker_suspended",8,WORKER_SUSPENDED,WRITABLE,RETURN_VALID,NORMAL,1),
-    C("exact8_worker_exited",8,WORKER_EXITED,WRITABLE,RETURN_VALID,NORMAL,1)
+    C("exact8_current",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_query_handle",8,QUERY,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_limited_handle",8,LIMITED,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_zero_access_handle",8,ZERO_ACCESS,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_sync_only_handle",8,SYNC_ONLY,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length0",0,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length1",1,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length4",4,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length7",7,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length9",9,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length16",16,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_no_return_length",8,CURRENT,WRITABLE,RETURN_NULL,NORMAL,1,0,0,0),
+    C("exact8_null_buffer",8,CURRENT,NULL_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_unaligned_buffer",8,CURRENT,UNALIGNED_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_readonly_buffer",8,CURRENT,READONLY_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_noaccess_buffer",8,CURRENT,NOACCESS_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_cross_page_buffer",8,CURRENT,CROSS_PAGE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_reserved_return_length",8,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,0,0,0),
+    C("exact8_unaligned_return_length",8,CURRENT,WRITABLE,RETURN_UNALIGNED,NORMAL,1,0,0,0),
+    C("exact8_readonly_return_length",8,CURRENT,WRITABLE,RETURN_READONLY,NORMAL,1,0,0,0),
+    C("exact8_alias_return_length",8,CURRENT,WRITABLE,RETURN_ALIAS,NORMAL,1,0,0,0),
+    C("exact8_null_handle",8,NULL_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_invalid_handle",8,INVALID_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_process_handle",8,PROCESS_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_event_handle",8,EVENT_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length0_null_buffer",0,CURRENT,NULL_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length7_null_buffer",7,CURRENT,NULL_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length0_invalid_handle",0,INVALID_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length7_invalid_handle",7,INVALID_HANDLE,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("length7_reserved_return_length",7,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,0,0,0),
+    C("exact8_invalid_handle_null_buffer",8,INVALID_HANDLE,NULL_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_invalid_handle_reserved_return_length",8,INVALID_HANDLE,WRITABLE,RETURN_RESERVED,NORMAL,1,0,0,0),
+    C("exact8_null_buffer_reserved_return_length",8,CURRENT,NULL_BUFFER,RETURN_RESERVED,NORMAL,1,0,0,0),
+    C("exact8_limited_handle_null_buffer",8,LIMITED,NULL_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("repeat8_current",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,5,0,0,0),
+    C("repeat8_after_sleep",8,CURRENT,WRITABLE,RETURN_VALID,AFTER_SLEEP,5,0,0,0),
+    C("repeat8_after_burn",8,CURRENT,WRITABLE,RETURN_VALID,AFTER_BURN,5,0,0,0),
+    C("exact8_worker_idle",8,WORKER_IDLE,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_worker_busy",8,WORKER_BUSY,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_worker_suspended",8,WORKER_SUSPENDED,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("exact8_worker_exited",8,WORKER_EXITED,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("data_offset_0",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("data_offset_1",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,1,0,0),
+    C("data_offset_2",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,2,0,0),
+    C("data_offset_3",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,3,0,0),
+    C("data_offset_4",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,4,0,0),
+    C("data_offset_5",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,5,0,0),
+    C("data_offset_6",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,6,0,0),
+    C("data_offset_7",8,CURRENT,WRITABLE,RETURN_VALID,NORMAL,1,7,0,0),
+    C("protected_readonly_handle_current_return_null",8,CURRENT,READONLY_BUFFER,RETURN_NULL,NORMAL,1,0,0,0),
+    C("protected_readonly_handle_invalid_return_valid",8,INVALID_HANDLE,READONLY_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("protected_readonly_handle_invalid_return_null",8,INVALID_HANDLE,READONLY_BUFFER,RETURN_NULL,NORMAL,1,0,0,0),
+    C("protected_readonly_handle_limited_return_valid",8,LIMITED,READONLY_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("protected_readonly_handle_limited_return_null",8,LIMITED,READONLY_BUFFER,RETURN_NULL,NORMAL,1,0,0,0),
+    C("protected_noaccess_handle_current_return_null",8,CURRENT,NOACCESS_BUFFER,RETURN_NULL,NORMAL,1,0,0,0),
+    C("protected_noaccess_handle_invalid_return_valid",8,INVALID_HANDLE,NOACCESS_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("protected_noaccess_handle_invalid_return_null",8,INVALID_HANDLE,NOACCESS_BUFFER,RETURN_NULL,NORMAL,1,0,0,0),
+    C("protected_noaccess_handle_limited_return_valid",8,LIMITED,NOACCESS_BUFFER,RETURN_VALID,NORMAL,1,0,0,0),
+    C("protected_noaccess_handle_limited_return_null",8,LIMITED,NOACCESS_BUFFER,RETURN_NULL,NORMAL,1,0,0,0),
+    C("protected_cross_page_handle_current_return_null",8,CURRENT,CROSS_PAGE,RETURN_NULL,NORMAL,1,0,0,0),
+    C("protected_cross_page_handle_invalid_return_valid",8,INVALID_HANDLE,CROSS_PAGE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("protected_cross_page_handle_invalid_return_null",8,INVALID_HANDLE,CROSS_PAGE,RETURN_NULL,NORMAL,1,0,0,0),
+    C("protected_cross_page_handle_limited_return_valid",8,LIMITED,CROSS_PAGE,RETURN_VALID,NORMAL,1,0,0,0),
+    C("protected_cross_page_handle_limited_return_null",8,LIMITED,CROSS_PAGE,RETURN_NULL,NORMAL,1,0,0,0),
+    C("writable_handle_invalid_return_null",8,INVALID_HANDLE,WRITABLE,RETURN_NULL,NORMAL,1,0,0,0),
+    C("writable_handle_limited_return_null",8,LIMITED,WRITABLE,RETURN_NULL,NORMAL,1,0,0,0),
+    C("exact8_noaccess_return_length",8,CURRENT,WRITABLE,RETURN_NOACCESS,NORMAL,1,0,0,0),
+    C("exact8_boundary_return_prefix_1",8,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,1),
+    C("exact8_boundary_return_prefix_2",8,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,2),
+    C("exact8_boundary_return_prefix_3",8,CURRENT,WRITABLE,RETURN_BOUNDARY,NORMAL,1,0,0,3),
+    C("exact8_alias_return_plus_4",8,CURRENT,WRITABLE,RETURN_ALIAS,NORMAL,1,0,4,0),
+    C("exact8_alias_return_plus_8",8,CURRENT,WRITABLE,RETURN_ALIAS,NORMAL,1,0,8,0),
+    C("length0_reserved_return_length",0,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,0,0,0),
+    C("length9_reserved_return_length",9,CURRENT,WRITABLE,RETURN_RESERVED,NORMAL,1,0,0,0)
 };
 #undef C
 
@@ -137,7 +181,7 @@ static int run_case(const struct test_case *c)
     SYSTEM_INFO si;
     HANDLE handle = GetCurrentThread(), owned_handle = NULL, thread = NULL;
     DWORD previous, wait_result, tid = 0;
-    union { LARGE_INTEGER align; BYTE bytes[64]; } data_store, ret_store;
+    DECLSPEC_ALIGN(16) union { LARGE_INTEGER align; BYTE bytes[64]; } data_store, ret_store;
     BYTE *data_page = NULL, *ret_page = NULL, *data_snapshot = data_store.bytes;
     BYTE *ret_snapshot = ret_store.bytes;
     PVOID data;
@@ -147,7 +191,7 @@ static int run_case(const struct test_case *c)
     BOOL wow64 = FALSE;
     BOOL wow64_ok;
     unsigned i;
-    size_t data_offset = 16, ret_offset = 16;
+    size_t data_offset = 16 + c->data_extra_offset, ret_offset = 16;
 
     if (!ntdll) return setup_error("GetModuleHandle_ntdll");
     query = (query_fn)GetProcAddress(ntdll, "NtQueryInformationThread");
@@ -158,17 +202,25 @@ static int run_case(const struct test_case *c)
     version.dwOSVersionInfoSize = sizeof(version);
     version_status = get_version(&version);
     GetNativeSystemInfo(&si);
+    if (si.dwPageSize < 128 || c->data_extra_offset > 7 || c->alias_offset > 8 ||
+        c->return_accessible_prefix > 3 ||
+        (c->ret == RETURN_BOUNDARY && !c->return_accessible_prefix)) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return setup_error("invalid_case_layout");
+    }
     wow64_ok = IsWow64Process(GetCurrentProcess(), &wow64);
     printf("{\"record\":\"environment\",\"case\":\"%s\",\"pointer_bits\":%u,"
            "\"large_integer_size\":%u,\"ulong_size\":%u,\"os_major\":%lu,"
            "\"os_minor\":%lu,\"os_build\":%lu,\"version_status\":\"0x%08lx\","
            "\"native_processor_architecture\":%u,\"is_wow64_query_ok\":%s,"
-           "\"is_wow64\":%s,\"wine_export_present\":%s}\n",
+           "\"is_wow64\":%s,\"wine_export_present\":%s,"
+           "\"probe_schema\":2,\"page_size\":%lu,\"source_sha256\":\"%s\",\"build_target\":\"%s\"}\n",
            c->name, (unsigned)(8 * sizeof(void *)), (unsigned)sizeof(LARGE_INTEGER),
            (unsigned)sizeof(ULONG), version.dwMajorVersion, version.dwMinorVersion,
            version.dwBuildNumber, (ULONG)version_status, (unsigned)si.wProcessorArchitecture,
            wow64_ok ? "true" : "false", wow64 ? "true" : "false",
-           GetProcAddress(ntdll, "wine_get_version") ? "true" : "false");
+           GetProcAddress(ntdll, "wine_get_version") ? "true" : "false",
+           si.dwPageSize, PROBE_SOURCE_SHA256, PROBE_BUILD_TARGET);
 
     if (c->handle >= QUERY && c->handle <= SYNC_ONLY) {
         DWORD access = c->handle == QUERY ? THREAD_QUERY_INFORMATION :
@@ -213,33 +265,51 @@ static int run_case(const struct test_case *c)
         if (!data_page) return setup_error("VirtualAlloc_data");
         data_snapshot = c->buffer == CROSS_PAGE ? data_page + si.dwPageSize - 20 : data_page;
     }
-    if (c->ret == RETURN_READONLY) {
-        ret_page = (BYTE *)VirtualAlloc(NULL, si.dwPageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (c->ret == RETURN_READONLY || c->ret == RETURN_NOACCESS || c->ret == RETURN_BOUNDARY) {
+        ret_page = (BYTE *)VirtualAlloc(NULL, 2 * si.dwPageSize,
+                                      MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
         if (!ret_page) return setup_error("VirtualAlloc_return");
-        ret_snapshot = ret_page;
+        ret_snapshot = c->ret == RETURN_BOUNDARY ?
+            ret_page + si.dwPageSize - 16 - c->return_accessible_prefix : ret_page;
+    } else if (c->ret == RETURN_RESERVED) {
+        /* Owned address, deliberately not committed. Never read or write it
+         * in this harness. Unlike schema 1 this is not the literal address 1. */
+        ret_page = (BYTE *)VirtualAlloc(NULL, 2 * si.dwPageSize, MEM_RESERVE, PAGE_NOACCESS);
+        if (!ret_page) return setup_error("VirtualAlloc_return_reserved");
     }
     if (c->buffer == UNALIGNED_BUFFER) data_offset++;
     if (c->ret == RETURN_UNALIGNED) ret_offset++;
     data = c->buffer == NULL_BUFFER ? NULL : data_snapshot + data_offset;
     ret = (PULONG)(ret_snapshot + ret_offset);
     if (c->ret == RETURN_NULL) ret = NULL;
-    if (c->ret == RETURN_INVALID) ret = (PULONG)(ULONG_PTR)1;
-    if (c->ret == RETURN_ALIAS) ret = (PULONG)data;
+    if (c->ret == RETURN_RESERVED) ret = (PULONG)(ret_page + 16);
+    if (c->ret == RETURN_ALIAS) ret = (PULONG)((BYTE *)data + c->alias_offset);
 
     for (i = 0; i < c->repeat; ++i) {
         memset(data_snapshot, 0xa5, 64);
         memset(ret_snapshot, 0x5a, 64);
         memcpy(ret_snapshot + ret_offset, &sentinel, sizeof(sentinel));
-        if (c->ret == RETURN_ALIAS) memcpy(data, &sentinel, sizeof(sentinel));
+        if (c->ret == RETURN_ALIAS) memcpy(ret, &sentinel, sizeof(sentinel));
         if (c->phase == AFTER_SLEEP) Sleep(50);
         if (c->phase == AFTER_BURN) burn(50);
         printf("{\"record\":\"call_begin\",\"case\":\"%s\",\"sample\":%u,"
                "\"class\":%lu,\"length\":%lu,\"handle_mode\":%u,\"buffer_mode\":%u,"
                "\"return_mode\":%u,\"phase\":%u,\"data_offset\":%u,\"return_offset\":%u,"
-               "\"return_pointer_aliases_data\":%s,\"data_before\":\"", c->name, i, class_value, c->length,
+               "\"return_pointer_aliases_data\":%s,\"data_extra_offset\":%u,"
+               "\"alias_offset\":%u,\"return_accessible_prefix\":%u,"
+               "\"data_alignment_mod8\":%u,\"return_alignment_mod4\":%u,"
+               "\"return_pointer_kind\":\"%s\",\"data_before\":\"", c->name, i, class_value, c->length,
                (unsigned)c->handle, (unsigned)c->buffer, (unsigned)c->ret,
                (unsigned)c->phase, (unsigned)data_offset, (unsigned)ret_offset,
-               c->ret == RETURN_ALIAS ? "true" : "false");
+               c->ret == RETURN_ALIAS ? "true" : "false", c->data_extra_offset,
+               c->alias_offset, c->return_accessible_prefix,
+               (unsigned)((ULONG_PTR)data % 8), (unsigned)((ULONG_PTR)ret % 4),
+               c->ret == RETURN_RESERVED ? "owned_reserved_uncommitted" :
+               c->ret == RETURN_NOACCESS ? "owned_committed_noaccess" :
+               c->ret == RETURN_BOUNDARY ? "owned_page_boundary" :
+               c->ret == RETURN_READONLY ? "owned_readonly" :
+               c->ret == RETURN_NULL ? "null" :
+               c->ret == RETURN_ALIAS ? "owned_data_offset" : "owned_writable");
         hex(data_snapshot, 64);
         printf("\",\"return_before\":\""); hex(ret_snapshot, 64); printf("\"}\n");
         if (data_page) {
@@ -247,10 +317,14 @@ static int run_case(const struct test_case *c)
             DWORD protect = c->buffer == READONLY_BUFFER ? PAGE_READONLY : PAGE_NOACCESS;
             if (!VirtualProtect(p, si.dwPageSize, protect, &previous)) return setup_error("protect_data");
         }
-        if (ret_page && !VirtualProtect(ret_page, si.dwPageSize, PAGE_READONLY, &previous))
-            return setup_error("protect_return");
+        if (ret_page && c->ret != RETURN_RESERVED) {
+            PVOID p = c->ret == RETURN_BOUNDARY ? ret_page + si.dwPageSize : ret_page;
+            DWORD protect = c->ret == RETURN_READONLY ? PAGE_READONLY : PAGE_NOACCESS;
+            if (!VirtualProtect(p, si.dwPageSize, protect, &previous))
+                return setup_error("protect_return");
+        }
         fflush(stdout);
-        /* No exception handler: run.ps1 records an escaped exception as a process
+        /* No exception handler: run-cases.ps1 records an escaped exception as a process
          * exit, never as a returned NTSTATUS. No NtSetInformationThread is called. */
         status = query(handle, class_value, data, c->length, ret);
         printf("{\"record\":\"call_returned\",\"case\":\"%s\",\"sample\":%u,"
@@ -258,7 +332,8 @@ static int run_case(const struct test_case *c)
         fflush(stdout);
         if (data_page && !VirtualProtect(data_page, 2 * si.dwPageSize, PAGE_READWRITE, &previous))
             return setup_error("unprotect_data");
-        if (ret_page && !VirtualProtect(ret_page, si.dwPageSize, PAGE_READWRITE, &previous))
+        if (ret_page && c->ret != RETURN_RESERVED &&
+            !VirtualProtect(ret_page, 2 * si.dwPageSize, PAGE_READWRITE, &previous))
             return setup_error("unprotect_return");
         memcpy(&ret_value, ret_snapshot + ret_offset, sizeof(ret_value));
         printf("{\"record\":\"call_result\",\"case\":\"%s\",\"sample\":%u,"
@@ -267,7 +342,7 @@ static int run_case(const struct test_case *c)
         /* The separate storage is only a canary for NULL, invalid and alias
          * pointers. Report the actual destination too, without dereferencing
          * an invalid or NULL pointer or performing an unaligned C load. */
-        if (c->ret == RETURN_NULL || c->ret == RETURN_INVALID) printf("null");
+        if (c->ret == RETURN_NULL || c->ret == RETURN_RESERVED) printf("null");
         else {
             memcpy(&ret_value, ret, sizeof(ret_value));
             printf("\"0x%08lx\"", ret_value);
