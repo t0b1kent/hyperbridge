@@ -16,7 +16,9 @@ static const struct { DWORD v; const char *n; } base[] = {
     { PAGE_EXECUTE_WRITECOPY, "EXECUTE_WRITECOPY" } };
 static const struct { DWORD v; const char *n; } mod[] = {
     { 0, "none" }, { PAGE_GUARD, "GUARD" }, { PAGE_NOCACHE, "NOCACHE" }, { PAGE_WRITECOMBINE, "WRITECOMBINE" },
-    { PAGE_GUARD | PAGE_NOCACHE, "GUARD|NOCACHE" } };
+    { PAGE_GUARD | PAGE_NOCACHE, "GUARD|NOCACHE" }, { PAGE_GUARD | PAGE_WRITECOMBINE, "GUARD|WRITECOMBINE" },
+    { PAGE_NOCACHE | PAGE_WRITECOMBINE, "NOCACHE|WRITECOMBINE" },
+    { PAGE_GUARD | PAGE_NOCACHE | PAGE_WRITECOMBINE, "GUARD|NOCACHE|WRITECOMBINE" } };
 
 int main(void)
 {
@@ -29,7 +31,7 @@ int main(void)
     unsigned b, m;
 
     GetSystemInfo(&si);
-    printf("PROTFLAGS version=1 page=%lu\n", (unsigned long)si.dwPageSize);
+    printf("PROTFLAGS version=2 page=%lu\n", (unsigned long)si.dwPageSize);
     for (b = 0; b < sizeof(base) / sizeof(base[0]); b++)
     for (m = 0; m < sizeof(mod) / sizeof(mod[0]); m++)
     {
