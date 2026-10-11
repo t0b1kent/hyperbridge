@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: thread-priority-windows
+
+on:
+  push:
+    paths: ['stands/thread-priority/**', '.github/workflows/thread-priority-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: thread-priority-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinned llvm-mingw
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-x86_64.zip'
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
+          $hash = (Get-FileHash -Algorithm SHA256 llvm-mingw.zip).Hash.ToLower()
+          if ($hash -ne '3e6919b3da2b6bfc05d8caf0ab10d5c0be4ddbb873b3c33790a71fe43c09c51f') { throw "toolchain hash mismatch: $hash" }
+          Expand-Archive llvm-mingw.zip -DestinationPath toolchain
+      - name: Build and run the probe three times
+        shell: pwsh
+        run: |
+          $out = "$PWD\build\thread-priority"
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          $cc = "$PWD\toolchain\llvm-mingw-20260505-ucrt-x86_64\bin\x86_64-w64-mingw32-clang.exe"
+          & $cc -std=c11 -O1 -Wall -Wextra -Werror stands/thread-priority/src/idle_prio.c -o "$out\idle_prio.exe"
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          foreach ($n in 1, 2, 3) { & "$out\idle_prio.exe" 3 | Out-File -Encoding utf8 "$out\run$n.txt"; Get-Content "$out\run$n.txt" }
+          "processors: $([Environment]::ProcessorCount)" | Out-File -Encoding utf8 "$out\machine.txt"
+          exit 0
+      - name: Keep outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: thread-priority-${{ matrix.os }}
+          path: build/thread-priority/
+          if-no-files-found: warn
