@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: thread-priority-sweep-windows
+
+on:
+  push:
+    paths: ['stands/thread-priority-sweep/**', '.github/workflows/thread-priority-sweep-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: thread-priority-sweep-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinned llvm-mingw
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-x86_64.zip'
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
+          $hash = (Get-FileHash -Algorithm SHA256 llvm-mingw.zip).Hash.ToLower()
+          if ($hash -ne '3e6919b3da2b6bfc05d8caf0ab10d5c0be4ddbb873b3c33790a71fe43c09c51f') { throw "toolchain hash mismatch: $hash" }
+          Expand-Archive llvm-mingw.zip -DestinationPath toolchain
+      - name: Build and run the default sweep
+        shell: pwsh
+        run: |
+          $cc = "$PWD\toolchain\llvm-mingw-20260505-ucrt-x86_64\bin\x86_64-w64-mingw32-clang.exe"
+          $n = [Environment]::ProcessorCount
+          Write-Host "processors: $n"
+          & "$PWD\stands\thread-priority-sweep\run_windows.ps1" -Compiler $cc -OutputDirectory "$PWD\build\thread-priority-sweep" -ExpectedCpus $n
+      - name: Keep outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: thread-priority-sweep-${{ matrix.os }}
+          path: build/thread-priority-sweep/
+          if-no-files-found: warn
