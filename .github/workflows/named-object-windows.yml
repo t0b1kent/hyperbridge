@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: named-object-windows
+
+on:
+  push:
+    paths: ['stands/named-object/**', '.github/workflows/named-object-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: named-object-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinned llvm-mingw
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-x86_64.zip'
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
+          $hash = (Get-FileHash -Algorithm SHA256 llvm-mingw.zip).Hash.ToLower()
+          if ($hash -ne '3e6919b3da2b6bfc05d8caf0ab10d5c0be4ddbb873b3c33790a71fe43c09c51f') { throw "toolchain hash mismatch: $hash" }
+          Expand-Archive llvm-mingw.zip -DestinationPath toolchain
+      - name: Build the probe
+        shell: pwsh
+        run: ./stands/named-object/build_windows.ps1 -Toolchain "$PWD\toolchain\llvm-mingw-20260505-ucrt-x86_64" -BuildDir "$PWD\build\named-object"
+      - name: Run both patterns as a 64-bit and a 32-bit process
+        shell: pwsh
+        run: |
+          $out = "$PWD\build\named-object\out"
+          ./stands/named-object/run_two.ps1 -Executable "$PWD\build\named-object\named-object-stage1b-x86_64.exe" -Label "${{ matrix.os }}-x64" -OutputDir $out
+          ./stands/named-object/run_two.ps1 -Executable "$PWD\build\named-object\named-object-stage1b-i686.exe" -Label "${{ matrix.os }}-x86" -OutputDir $out
+          Get-ChildItem "$PWD\build\named-object" -Filter *.exe | Get-FileHash -Algorithm SHA256 | Format-List | Out-File "$out\binary-sha256.txt"
+          # Exit code 1 from the probe means "some group ended abnormally" and is data, not a job failure.
+          exit 0
+      - name: Keep outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: named-object-${{ matrix.os }}
+          path: build/named-object/
+          if-no-files-found: warn
