@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: exceptions-observer-v5-windows
+
+on:
+  push:
+    paths: ['stands/exceptions-observer-v5/**', '.github/workflows/exceptions-observer-v5-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exceptions-observer-v5-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinned llvm-mingw
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-x86_64.zip'
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
+          $hash = (Get-FileHash -Algorithm SHA256 llvm-mingw.zip).Hash.ToLower()
+          if ($hash -ne '3e6919b3da2b6bfc05d8caf0ab10d5c0be4ddbb873b3c33790a71fe43c09c51f') { throw "toolchain hash mismatch: $hash" }
+          Expand-Archive llvm-mingw.zip -DestinationPath toolchain
+      - name: Build and run the observer probe
+        shell: pwsh
+        run: |
+          $cc = "$PWD\toolchain\llvm-mingw-20260505-ucrt-x86_64\bin\x86_64-w64-mingw32-clang.exe"
+          $out = Join-Path $env:RUNNER_TEMP 'exceptions-observer-v5'
+          & "$PWD\stands\exceptions-observer-v5\run_windows.ps1" -Clang $cc -OutputDirectory $out
+      - name: Record the processor
+        if: always()
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'exceptions-observer-v5'
+          if (Test-Path $out) {
+            Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, NumberOfLogicalProcessors |
+              ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $out 'processor.json')
+          }
+      - name: Keep outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exceptions-observer-v5-${{ matrix.os }}
+          path: ${{ runner.temp }}/exceptions-observer-v5/
+          if-no-files-found: warn
