@@ -16,6 +16,7 @@ the new bytes, and does the program see the memory protections it set itself?
 | S3  | one thread keeps calling a function; another repeats 2000 times: make writable, change an operand, make read+execute |
 | S4  | writing into executed code with `NtWriteVirtualMemory`, `NtReadVirtualMemory` and `WriteProcessMemory` |
 | S5  | one instruction writes into the page it is executed from: `adc`, `sbb`, `pop`, `rep movsb` |
+| S6  | how long one store into an already executed page takes, against the same store into a page whose code never ran (timings only, `#` lines) |
 
 Output lines that do not start with `#` contain no addresses and no timings,
 so runs on different systems can be compared byte for byte. Lines starting

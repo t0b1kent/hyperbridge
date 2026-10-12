@@ -18,6 +18,7 @@
  *   S3   one thread keeps calling a function; another repeats: RWX, write operand, RX
  *   S4   writing into executed code with NtWriteVirtualMemory / NtReadVirtualMemory / WriteProcessMemory
  *   S5   one instruction writes into the page it is executed from: adc, sbb, pop, rep movsb
+ *   S6   how long one store into an already executed page takes (timings only, '#' lines)
  *
  * Build: x86_64-w64-mingw32-clang -std=c11 -O1 -Wall -Wextra smc_scenarios.c -o smc-scenarios.exe
  * Run:   smc-scenarios.exe [--only S1A,S3]
@@ -26,8 +27,10 @@
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <intrin.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef uint32_t (*fn0)(void);
@@ -403,6 +406,59 @@ static void s5(void)
     }
 }
 
+/* ---------- S6 ---------- */
+static int cmp_u64(const void *a, const void *b)
+{
+    uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+    return x < y ? -1 : x > y;
+}
+static void s6_report(const char *what, uint64_t *ns, uint64_t *tsc, int n)
+{
+    qsort(ns, (size_t)n, sizeof *ns, cmp_u64);
+    qsort(tsc, (size_t)n, sizeof *tsc, cmp_u64);
+    printf("# S6 %s stores=%d ns_min=%llu ns_median=%llu ns_p90=%llu ns_max=%llu tsc_min=%llu tsc_median=%llu tsc_p90=%llu tsc_max=%llu\n", what, n,
+           (unsigned long long)ns[0], (unsigned long long)ns[n / 2], (unsigned long long)ns[n * 9 / 10], (unsigned long long)ns[n - 1],
+           (unsigned long long)tsc[0], (unsigned long long)tsc[n / 2], (unsigned long long)tsc[n * 9 / 10], (unsigned long long)tsc[n - 1]);
+}
+static void s6(void)
+{
+    enum { N = 300 };
+    static uint64_t ns[N], tsc[N];
+    LARGE_INTEGER f, a, b;
+    QueryPerformanceFrequency(&f);
+    /* the function on the page is called before every store, so the page holds executed code each time */
+    uint8_t *page = rwx(0x1000);
+    emit_ret_const(page, 0); flush(page, 0x1000);
+    int seen = 0;
+    for (int i = 0; i < N; i++) {
+        (void)((fn0)page)();
+        QueryPerformanceCounter(&a);
+        uint64_t t0 = __rdtsc();
+        *(volatile uint32_t *)(page + 1) = (uint32_t)(i + 1);
+        uint64_t t1 = __rdtsc();
+        QueryPerformanceCounter(&b);
+        ns[i] = (uint64_t)((b.QuadPart - a.QuadPart) * 1000000000LL / f.QuadPart);
+        tsc[i] = t1 - t0;
+        if (((fn0)page)() == (uint32_t)(i + 1)) seen++;
+    }
+    printf("S6 store_into_executed_page stores=%d new_value_returned=%d\n", N, seen);
+    s6_report("store_into_executed_page", ns, tsc, N);
+    /* control: the same store into a page of the same kind whose code was never executed */
+    uint8_t *cold = rwx(0x1000);
+    emit_ret_const(cold, 0);
+    for (int i = 0; i < N; i++) {
+        QueryPerformanceCounter(&a);
+        uint64_t t0 = __rdtsc();
+        *(volatile uint32_t *)(cold + 1) = (uint32_t)(i + 1);
+        uint64_t t1 = __rdtsc();
+        QueryPerformanceCounter(&b);
+        ns[i] = (uint64_t)((b.QuadPart - a.QuadPart) * 1000000000LL / f.QuadPart);
+        tsc[i] = t1 - t0;
+    }
+    s6_report("store_into_never_executed_page", ns, tsc, N);
+    printf("# S6 qpc_frequency=%lld\n", (long long)f.QuadPart);
+}
+
 static int wanted(const char *only, const char *name)
 {
     if (!only) return 1;
@@ -418,7 +474,7 @@ int main(int argc, char **argv)
     const char *only = NULL;
     for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--only")) only = argv[i + 1];
     setvbuf(stdout, NULL, _IONBF, 0);
-    printf("SMC-SCENARIOS v1\n");
+    printf("SMC-SCENARIOS v2\n");
     AddVectoredExceptionHandler(1, veh);
     if (wanted(only, "S2")) s2();
     if (wanted(only, "S4")) s4();
@@ -426,6 +482,7 @@ int main(int argc, char **argv)
     if (wanted(only, "S1A")) { s1a(2, 10); s1a(1, 10); s1a(0, 20); }
     if (wanted(only, "S1B")) s1b(5);
     if (wanted(only, "S3")) s3(2000);
+    if (wanted(only, "S6")) s6();
     printf("END\n");
     return 0;
 }
