@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: int2d-matrix-windows
+
+on:
+  push:
+    paths: ['stands/exceptions-context/**', '.github/workflows/int2d-matrix-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: int2d-matrix-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the INT 2D matrix
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'int2d-matrix'
+          & "$PWD\stands\exceptions-context\run-int2d-windows.ps1" -OutputDirectory $out
+      - name: Record the processor
+        if: always()
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'int2d-matrix'
+          if (Test-Path $out) {
+            Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, NumberOfLogicalProcessors |
+              ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $out 'processor.json')
+          }
+      - name: Keep outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: int2d-matrix-${{ matrix.os }}
+          path: ${{ runner.temp }}/int2d-matrix/
+          if-no-files-found: warn
