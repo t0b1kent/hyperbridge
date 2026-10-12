@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: time-counter-windows
+
+on:
+  push:
+    paths: ['stands/time-counter/**', '.github/workflows/time-counter-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: time-counter-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the time-counter probe
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'time-counter'
+          & "$PWD\stands\time-counter\run-windows.ps1" -OutputDirectory $out
+      - name: Record the processor
+        if: always()
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'time-counter'
+          if (Test-Path $out) {
+            Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, NumberOfLogicalProcessors |
+              ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $out 'processor.json')
+          }
+      - name: Keep outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: time-counter-${{ matrix.os }}
+          path: ${{ runner.temp }}/time-counter/
+          if-no-files-found: warn
