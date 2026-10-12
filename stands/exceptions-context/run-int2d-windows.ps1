@@ -74,7 +74,7 @@ if (-not $finished) {
 }
 $watch.Stop()
 $process.Refresh()
-$complete = @(Select-String -LiteralPath $stdout -Pattern '^CONTEXT_PROBE COMPLETE mode=int2d-matrix cases=000001a4 ' | ForEach-Object { $_.Line })
+$complete = @(Select-String -LiteralPath $stdout -Pattern '^CONTEXT_PROBE COMPLETE mode=int2d-matrix cases=000001e0 ' | ForEach-Object { $_.Line })
 $state = if (-not $finished) { "FAILED_TIMEOUT" } elseif ($complete.Count -ne 1) { "FAILED_INCOMPLETE" } else { "PRESENT" }
 $result = [ordered]@{
     state = $state

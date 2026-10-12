@@ -345,11 +345,11 @@ int main(int argc,char** argv) {
     printf("CONTEXT_PROBE phase=identity-hold milliseconds=3000\n");fflush(stdout);Sleep(3000);
     int failures=0;const char* mode=argc>1?argv[1]:"smoke";
     if(!strcmp(mode,"int2d-matrix")) {
-        const uint64_t values[]={0,1,2,3,4,5,0x10};
+        const uint64_t values[]={0,1,2,3,4,5,0x10,0x6249071e4f40ULL};
         LPTOP_LEVEL_EXCEPTION_FILTER old_filter=SetUnhandledExceptionFilter(uef_entry);
         UINT old_mode=SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
         pattern_history(64,0x55);
-        for(unsigned h=0;h<3;h++)for(unsigned n=0;n<7;n++)for(unsigned repeat=0;repeat<20;repeat++) {
+        for(unsigned h=0;h<3;h++)for(unsigned n=0;n<sizeof(values)/sizeof(values[0]);n++)for(unsigned repeat=0;repeat<20;repeat++) {
             unsigned char pattern=(unsigned char)(0x11*(1+repeat%14));
             g_pattern_iteration=repeat;g_pattern_word=0x0101010101010101ULL*pattern;
             pattern_history(8+(repeat%8)*8,pattern);
@@ -368,7 +368,15 @@ int main(int argc,char** argv) {
                 (unsigned long long)g_int2d_matrix_after_rax,(unsigned long)g_caught,(unsigned long long)g_int2d_matrix_reached,
                 (unsigned long long)g_pre.gpr[7],(unsigned long long)g_int2d_matrix_after_rsp,
                 pushed?"I_PLUS_2_PUSH_EXECUTED":skipped?"I_PLUS_3_PUSH_SKIPPED":"FAILED_UNEXPECTED_RSP");
-            if(!g_resumed||!g_int2d_matrix_reached||(!pushed&&!skipped)||g_caught>1||(values[n]==1&&g_caught!=0))failures++;
+            int service=values[n]==1||values[n]==3||values[n]==4||values[n]==5;
+            int caught_ok=g_caught==(service?0:1);
+            int continuation_ok=service?skipped:pushed;
+            int rax_ok=g_int2d_matrix_after_rax==values[n];
+            int flags_ok=g_post.flags==g_pre.flags;
+            printf("INT2D_EXPECT case=%08x caught_ok=%u continuation_ok=%u rax_ok=%u flags_ok=%u pointer_reference=%s\n",
+                   g_case,caught_ok,continuation_ok,rax_ok,flags_ok,
+                   n==7?"ORACLE_REQUIRED_POINTER":"DIRECT_WINDOWS_2022_2025");
+            if(!g_resumed||!g_int2d_matrix_reached||!caught_ok||!continuation_ok||!rax_ok||!flags_ok)failures++;
         }
         SetUnhandledExceptionFilter(old_filter);SetErrorMode(old_mode);
     } else if(!strcmp(mode,"pattern20")) {
