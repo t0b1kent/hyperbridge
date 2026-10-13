@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: env-read-windows
+
+on:
+  push:
+    paths: ['stands/env-read/**', '.github/workflows/env-read-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: env-read-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the env-read probe three times
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'env-read'
+          & "$PWD\stands\env-read\run-windows.ps1" -OutputDirectory $out -Runs 3
+      - name: Record the processor
+        if: always()
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'env-read'
+          if (Test-Path $out) {
+            Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, NumberOfLogicalProcessors |
+              ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $out 'processor.json')
+          }
+      - name: Keep outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: env-read-${{ matrix.os }}
+          path: ${{ runner.temp }}/env-read/
+          if-no-files-found: warn
