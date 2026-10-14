@@ -1,0 +1,105 @@
+name: REPRO-110 FEX c12 from pinned sources
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Empty builds the c12 translator for both architectures; select one for diagnostics"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - fex64
+          - fex32
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repro110-fex-c12-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fex:
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - name: Checkout component recipe
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Select pinned driver Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13.7'
+          architecture: arm64
+      - name: Select Xcode 16.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          selected=0
+          for xcode_app in /Applications/Xcode*.app; do
+            [ -d "$xcode_app/Contents/Developer" ] || continue
+            actual=$(DEVELOPER_DIR="$xcode_app/Contents/Developer" xcodebuild -version)
+            if [ "$actual" = $'Xcode 16.4\nBuild version 16F6' ]; then
+              printf 'DEVELOPER_DIR=%s/Contents/Developer\n' "$xcode_app" >> "$GITHUB_ENV"
+              selected=1
+              break
+            fi
+          done
+          [ "$selected" = 1 ] || { printf 'Pinned Xcode 16.4/16F6 missing\n'; exit 1; }
+      - name: Check inputs without downloads
+        run: python3 -I -B build/repro110fex/build.py --check-inputs
+      - name: Offline recipe tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export REPRO109_TEST_TMP="$RUNNER_TEMP/repro110-recipe-tests"
+          mkdir "$REPRO109_TEST_TMP"
+          python3 -I -B build/repro110fex/test_release_bytes.py
+          python3 -I -B build/repro110fex/test_recipe.py
+      - name: Build unsigned source components
+        shell: bash
+        env:
+          REPRO110_ONLY: ${{ inputs.only }}
+        run: |
+          set -uo pipefail
+          set --
+          case "$REPRO110_ONLY" in
+            '') ;;
+            fex64|fex32) set -- --only "$REPRO110_ONLY" ;;
+            *) printf 'Invalid architecture selector\n'; exit 2 ;;
+          esac
+          python3 -I -B build/repro110fex/build.py --out "$RUNNER_TEMP/repro110-fex-c12" "$@" \
+            > "$RUNNER_TEMP/repro110-fex-c12-driver.log" 2>&1
+          build_rc=$?
+          printf '%s\n' "$build_rc" > "$RUNNER_TEMP/repro110-fex-c12-rc.txt"
+          printf 'FEX build rc=%s; full logs are in the artifact; install skipped\n' "$build_rc"
+          exit "$build_rc"
+      - name: Print the report-only byte comparison with the accepted c12 DLLs
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          for report in "$RUNNER_TEMP"/repro110-fex-c12/*/release-bytes-report.json; do
+            [ -f "$report" ] || continue
+            python3 -I -B - "$report" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          print(r['variant'], r['status'], 'expected', r['expected_sha256'][:16], 'actual', r['actual_sha256'][:16],
+                'runner-path strings', r['runner_path_occurrences'], 'sections', len(r['sections']))
+          PY
+          done
+          exit 0
+      - name: Preserve complete bounded component reports and unsigned outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repro110-fex-c12-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/repro110-fex-c12/
+            ${{ runner.temp }}/repro110-fex-c12-driver.log
+            ${{ runner.temp }}/repro110-fex-c12-rc.txt
+          if-no-files-found: error
+          retention-days: 30
