@@ -160,6 +160,22 @@ class PreparedSources(unittest.TestCase):
                                   env=env, capture_output=True, text=True)
             self.assertNotEqual(done.returncode, 0, str(bad))
 
+    def test_job_script_refuses_a_missing_or_linked_compiler_bundle(self):
+        import subprocess
+        stub = self.root / 'python-stub'
+        stub.write_text('#!/bin/sh\nexit 0\n'); stub.chmod(0o755)
+        real = self.root / 'real.tar.gz'; real.write_bytes(b'x')
+        link = self.root / 'link.tar.gz'; link.symlink_to(real)
+        script = HERE.parents[1] / 'jobs/repro110-wine-b-c12.sh'
+        for number, bad in enumerate((self.root / 'absent.tar.gz', link)):
+            temp = self.root / ('b%d' % number); temp.mkdir()
+            env = dict(os.environ, GITHUB_ACTIONS='true', GITHUB_REPOSITORY='t0b1kent/hyperbridge', GITHUB_RUN_ID='1',
+                       RUNNER_TEMP=str(temp), REPRO109_PYTHON=str(stub))
+            done = subprocess.run(['/bin/bash', str(script), str(self.root / ('ob%d' % number)), str(bad)],
+                                  env=env, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 2, str(bad) + done.stderr)
+            self.assertIn('compiler bundle must be a regular file', done.stderr)
+
     def test_workflow_prepares_the_sources_in_the_cheap_job_and_hands_them_to_the_build(self):
         text = (HERE.parents[1] / '.github/workflows/repro110-wine-b-c12.yml').read_text()
         inputs_job, wine_job = text.split('\n  wine:\n')

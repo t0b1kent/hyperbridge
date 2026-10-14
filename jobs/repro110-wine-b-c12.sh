@@ -9,7 +9,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 python=${REPRO109_PYTHON:-python3}
 [ "${GITHUB_ACTIONS:-}" = true ]
 [ "${GITHUB_REPOSITORY:-}" = t0b1kent/hyperbridge ]
-[ -f "$bundle" ] && [ ! -L "$bundle" ]
+if [ ! -f "$bundle" ] || [ -L "$bundle" ]; then printf 'compiler bundle must be a regular file: %s\n' "$bundle" >&2; exit 2; fi
 [ ! -e "$out" ]
 run_id=${GITHUB_RUN_ID:?cloud run identifier required}
 attempt=${GITHUB_RUN_ATTEMPT:-1}
