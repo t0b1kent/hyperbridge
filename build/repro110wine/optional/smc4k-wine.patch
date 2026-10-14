@@ -1,0 +1,74 @@
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -6671,6 +6671,12 @@
+     host_page_size = sysconf( _SC_PAGESIZE );
+     host_page_mask = host_page_size - 1;
+ #if defined(__APPLE__) && defined(__aarch64__) && defined(_WIN64)
++    if (host_page_size != 4096)
++    {
++        fprintf( stderr, "MacRunner: 4 KiB page mode is required, but the process uses %zu-byte pages. Windows program was not started.\n",
++                 host_page_size );
++        _exit( 86 );
++    }
+     if (macrunner_vm_page4k_enabled())
+         fprintf( stderr, "macrunner-vm-page4k: pid=%d gate=1 getpagesize=%d host_page=%zu guest_page=%zu\n",
+                  getpid(), getpagesize(), host_page_size, page_size );
+@@ -11471,6 +11477,30 @@
+ }
+ #endif
+ 
++/* Do not consume a real guest guard fault or promote readonly permissions
++ * while preparing the host mapping for a self write. */
++static BOOL prepare_self_write( void *addr, SIZE_T size )
++{
++    size_t idx, end;
++    sigset_t sigset;
++    BOOL valid = TRUE;
++    if (!size) return TRUE;
++    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
++    if (!get_page_range( addr, size, &idx, &end )) valid = FALSE;
++    else for (; idx < end; ++idx)
++    {
++        BYTE vprot = get_page_vprot( (void *)(idx << page_shift) );
++        if (!(vprot & VPROT_COMMITTED) || (vprot & VPROT_GUARD) ||
++            !(vprot & (VPROT_WRITE | VPROT_WRITECOPY)))
++        {
++            valid = FALSE;
++            break;
++        }
++    }
++    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
++    return valid && virtual_check_buffer_for_write( addr, size );
++}
++
+ /***********************************************************************
+  *             NtWriteVirtualMemory   (NTDLL.@)
+  *             ZwWriteVirtualMemory   (NTDLL.@)
+@@ -11482,6 +11512,15 @@
+ 
+     if (virtual_check_buffer_for_read( buffer, size ))
+     {
++        /* Darwin may hold a guest-writable executable page physically RX.
++         * A remote server write cannot take the local write fault which
++         * switches that mapping to writable. Prepare self writes locally,
++         * just as the NtReadVirtualMemory destination path already does. */
++        if (process == NtCurrentProcess() && !prepare_self_write( addr, size ))
++        {
++            if (bytes_written) *bytes_written = 0;
++            return STATUS_ACCESS_DENIED;
++        }
+         SERVER_START_REQ( write_process_memory )
+         {
+             req->handle     = wine_server_obj_handle( process );
+--- a/dlls/ntdll/unix/macrunner_vm_arena.h
++++ b/dlls/ntdll/unix/macrunner_vm_arena.h
+@@ -194,6 +194,9 @@
+         view_bytes + range_bytes > ~(SIZE_T)0 - table_bytes ||
+         view_bytes + range_bytes + table_bytes > ~(SIZE_T)0 - prot_bytes) goto failed;
+     total = view_bytes + range_bytes + table_bytes + prot_bytes;
++    /* The reserved-area ledger uses Windows allocation granularity (64 KiB),
++     * even when the native process and individual metadata arrays use 4 KiB. */
++    if (!round_size_checked( 0, total, granularity_mask, &total )) goto failed;
+     if (!mr_vm_contains( mr_vm_base, total )) goto failed;
+     pool = MR_VM_CALL( MR_VM_INIT,
+            anon_mmap_fixed( mr_vm_base, total, PROT_READ | PROT_WRITE, MAP_NORESERVE ) );
