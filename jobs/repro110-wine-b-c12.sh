@@ -4,6 +4,7 @@
 set -euo pipefail
 out=${1:?fresh results directory required}
 bundle=${2:?pinned llvm22-macos-results.tar.gz required}
+inputs=${3:-}   # optional: the verified source set prepared by the first job (build/repro110wine/prepare_sources.py)
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
 python=${REPRO109_PYTHON:-python3}
 [ "${GITHUB_ACTIONS:-}" = true ]
@@ -20,6 +21,11 @@ rc=0
 # macOS /bin/bash is 3.2: an empty array under `set -u` is an error unless it is expanded as ${extra[@]+"${extra[@]}"}.
 extra=()
 if [ "${REPRO110_Q_RESTORES:-}" = 1 ]; then extra=(--arm64ec-q-restores); fi
+if [ -n "$inputs" ]; then
+  # Not `[ -d x ] && [ ! -L x ]`: under set -e a false first test in an AND list does not stop the script.
+  if [ ! -d "$inputs" ] || [ -L "$inputs" ]; then printf 'prepared source set must be a real directory: %s\n' "$inputs" >&2; exit 2; fi
+  extra=(${extra[@]+"${extra[@]}"} --source-inputs "$inputs")
+fi
 "$python" -B -I "$repo/build/repro110wine/build_full.py" \
   --profile github-macos26-arm64 --compiler-bundle "$bundle" ${extra[@]+"${extra[@]}"} \
   --build --work "$work" --jobs 2 > "$out/full-driver.log" 2>&1 || rc=$?

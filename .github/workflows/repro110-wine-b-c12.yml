@@ -26,6 +26,28 @@ jobs:
           python-version: '3.13.7'
       - name: Check exact recipe files without source downloads or compilation
         run: python -I -B build/repro110wine/build_full.py --check-inputs
+      # The 47 library sources are fetched here, in minutes, and not inside the three-hour build: a mirror that is down
+      # (38518009827 and 38518013267 each lost about 80 minutes to one) now costs this job and nothing else.
+      - name: Acquire and verify all 47 source components without building
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I -B build/repro110wine/prepare_sources.py --profile github-macos26-arm64 \
+            --work "$RUNNER_TEMP/repro110-wine-b-c12-inputs" --workers 8 --minutes 10 \
+            > "$RUNNER_TEMP/repro110-wine-b-c12-inputs.log" 2>&1
+          tar -czf "$RUNNER_TEMP/repro110-wine-b-c12-inputs.tar.gz" \
+            -C "$RUNNER_TEMP/repro110-wine-b-c12-inputs" .
+      - name: Preserve every input status and verified source set
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repro110-wine-b-c12-inputs-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/repro110-wine-b-c12-inputs/reports/
+            ${{ runner.temp }}/repro110-wine-b-c12-inputs.tar.gz
+            ${{ runner.temp }}/repro110-wine-b-c12-inputs.log
+          if-no-files-found: error
+          retention-days: 30
   wine:
     needs: inputs
     if: github.repository == 't0b1kent/hyperbridge'
@@ -40,6 +62,16 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.13.7'
+      - name: Receive the verified source set from the first job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: repro110-wine-b-c12-inputs-${{ github.sha }}
+          path: ${{ runner.temp }}/repro110-wine-b-c12-prepared
+      - name: Unpack the source set and rehash every archive before any compiler
+        run: >-
+          python -I -B build/repro110wine/prepare_sources.py --profile github-macos26-arm64
+          --extract "${{ runner.temp }}/repro110-wine-b-c12-prepared/repro110-wine-b-c12-inputs.tar.gz"
+          --work "${{ runner.temp }}/repro110-wine-b-c12-prepared-inputs"
       - name: Retrieve the existing compiler artifact from this repository
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -55,7 +87,8 @@ jobs:
         run: |
           bash jobs/repro110-wine-b-c12.sh \
             "$RUNNER_TEMP/sourcebuilt26-results" \
-            "$RUNNER_TEMP/compiler-input/llvm22-macos-results.tar.gz"
+            "$RUNNER_TEMP/compiler-input/llvm22-macos-results.tar.gz" \
+            "$RUNNER_TEMP/repro110-wine-b-c12-prepared-inputs"
       - name: Preserve complete bounded results even on build or publisher failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
