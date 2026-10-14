@@ -17,10 +17,11 @@ work="${RUNNER_TEMP:?disposable cloud work required}/repro110-wine-b-c12-$run_id
 export DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer
 mkdir -p "$out"
 rc=0
+# macOS /bin/bash is 3.2: an empty array under `set -u` is an error unless it is expanded as ${extra[@]+"${extra[@]}"}.
 extra=()
 if [ "${REPRO110_Q_RESTORES:-}" = 1 ]; then extra=(--arm64ec-q-restores); fi
 "$python" -B -I "$repo/build/repro110wine/build_full.py" \
-  --profile github-macos26-arm64 --compiler-bundle "$bundle" "${extra[@]}" \
+  --profile github-macos26-arm64 --compiler-bundle "$bundle" ${extra[@]+"${extra[@]}"} \
   --build --work "$work" --jobs 2 > "$out/full-driver.log" 2>&1 || rc=$?
 printf '%s\n' "$rc" > "$out/build-rc.txt"
 for part in reports deps/reports moltenvk/reports wine/reports; do

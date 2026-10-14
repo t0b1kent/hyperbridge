@@ -57,5 +57,15 @@ class ChainBC12(unittest.TestCase):
             self.assertEqual(flagged, ['arm64ec_CC', 'arm64ec_CXX'] if enabled else [])
 
 
+    def test_job_script_survives_an_empty_option_array_on_macos_bash(self):
+        # Run 38501119332 (B0) died with "extra[@]: unbound variable": macOS /bin/bash 3.2 under `set -u`.
+        script = (HERE.parents[1] / 'jobs/repro110-wine-b-c12.sh').read_text()
+        self.assertNotIn('"${extra[@]}"', script.replace('${extra[@]+"${extra[@]}"}', ''))
+        self.assertIn('${extra[@]+"${extra[@]}"}', script)
+        import subprocess
+        probe = 'set -euo pipefail; extra=(); printf "[%s]" ${extra[@]+"${extra[@]}"}; extra=(--arm64ec-q-restores); printf "[%s]" ${extra[@]+"${extra[@]}"}'
+        done = subprocess.run(['/bin/bash', '-c', probe], capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stdout), (0, '[][--arm64ec-q-restores]'), done.stderr)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
