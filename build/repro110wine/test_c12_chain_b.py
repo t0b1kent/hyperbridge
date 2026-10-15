@@ -87,8 +87,10 @@ class PreparedSources(unittest.TestCase):
         deps = SimpleNamespace(read_lock=lambda: dict(toolchain={}),
                                build=mock.Mock(side_effect=lambda *a: (order.append('deps'), 1 / 0)))
         wine = SimpleNamespace(inputs=lambda: dict(toolchain={}))
+        self.policy_install = mock.Mock()
+        policy = SimpleNamespace(install=self.policy_install, summary=lambda out: dict(policy='fixture', components=[]))
         drivers = {'repro109_full_source_check': check, 'repro109_full_deps': deps, 'repro109_full_wine': wine,
-                   'repro109_full_moltenvk': SimpleNamespace()}
+                   'repro110_deps_test_policy': policy, 'repro109_full_moltenvk': SimpleNamespace()}
         with mock.patch.object(self.full, 'cloud_guard'), \
              mock.patch.object(self.full, 'apply_profile', side_effect=lambda lock, profile: lock), \
              mock.patch.object(self.full, 'load_driver', side_effect=lambda name, path: drivers[name]):
@@ -103,6 +105,12 @@ class PreparedSources(unittest.TestCase):
         self.assertEqual(order, ['validate', 'deps'])
         check.validate.assert_called_once_with(prepared.resolve(), dict(raw=True))
         self.assertEqual(deps.build.call_args.args[0].source_inputs, prepared.resolve())
+        # The upstream test policy wraps the dependency driver before it builds, and the stage budget leaves room to recheck.
+        self.policy_install.assert_called_once()
+        self.assertIs(self.policy_install.call_args.args[0], deps)
+        self.assertEqual(self.policy_install.call_args.args[1].name, 'upstream-test-allowlist.lock.json')
+        self.assertEqual(deps.build.call_args.args[0].minutes, self.full.DEPS_MINUTES)
+        self.assertGreaterEqual(self.full.DEPS_MINUTES, 150)
 
     def test_without_a_prepared_set_the_build_downloads_as_before(self):
         check, deps, order = self.run_build(None)

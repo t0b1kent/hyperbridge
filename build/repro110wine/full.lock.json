@@ -24,7 +24,7 @@
   "repro110wine/keyboard109.lock.json": "b4bceac3e1d4cbb2a078010166693aba830c05748f09865a42c6535485b58ec4",
   "repro110wine/late_source.py": "5607463287e8f493ca3c6cb871dfbb11aec75a09a2717e971d45e424af3fa669",
   "repro110wine/late/0097-winemac-keyboard-ascii.patch": "0d5ea043c78fd408cb85d6688a98df28600ba929eb7d22cc92ab201dafe39a12",
-  "repro110wine/build_full.py": "99c16b793527ec068225bcc281818a443dd3a0066f4bdb38736010926fd41336",
+  "repro110wine/build_full.py": "0adf55a9b910a0bde5085081e9c2a8fbeec8a13a94bf8c7eeed17ce161ec4e5a",
   "repro110wine/github-xcode27.lock.json": "18a3db51d5f3f601b59e6226186ce6011d0e94b75d29b2dbe38a3d1ef60f22a9",
   "repro110wine/matrix.py": "38c4a5efd09476b65ddcb9dc167eba1ae2858bf9d409b611f17de4a5c881bafb",
   "repro110wine/github-macos15.lock.json": "eb29cff86b28659b42ee404887510874f42ce239c6d65ed84473fdc101171bcf",
@@ -38,7 +38,9 @@
   "repro109deps/published-archives.lock.json": "02b54b9aa586008312ac9166250e7b506c41d4fea6144d515b11e873d2397f6d",
   "repro110wine/github-macos26.lock.json": "b8111cb708ffd86898a352bad05faf8bf8d6008b159a253421ae73b41f0f207b",
   "repro110wine/source_transport.py": "c7c8ffc0d7d58f9555653e33c06588d204473eafbdb5bf7ba06a864ad7fe136d",
-  "repro110wine/prepare_sources.py": "b21b0480564589fc36b0a21e7f0ea0298a89b74842d1715b4a2cd4816da05797"
+  "repro110wine/prepare_sources.py": "b21b0480564589fc36b0a21e7f0ea0298a89b74842d1715b4a2cd4816da05797",
+  "repro110wine/deps_test_policy.py": "d65be773da10d96e1def6d3ab08fbb4438bda9414a86e67b31c74f22327bc43b",
+  "repro110wine/upstream-test-allowlist.lock.json": "b00c382fa41c0b3119f7025d960d5a6a00b34052aa4d22549bd1af8abf3a8b8d"
  },
  "compiler": {
   "name": "macrunner-llvm22",
