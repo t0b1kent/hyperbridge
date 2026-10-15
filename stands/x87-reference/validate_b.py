@@ -74,10 +74,14 @@ for r in csv.DictReader(path.open()):
             checks['condition_codes'] += 1
             if got != (exp_c3, exp_c2, exp_c0):
                 bad.append({'row': r['row'], 'why': 'C3/C2/C0', 'op': r['op'], 'a': r['a_name'], 'b': r['b_name'], 'got': got, 'expected': (exp_c3, exp_c2, exp_c0)})
-        # 4. C1 is not sticky: compares clear it.
-        checks['c1_cleared'] += 1
-        if post & C1:
-            bad.append({'row': r['row'], 'why': 'C1 not cleared by compare', 'op': r['op'], 'post_sw': r['post_sw']})
+        # 4. C1 is not sticky: FCOM/FCOMP/FUCOM/FUCOMP/FTST clear it. The FCOMI family leaves C1 as it was, like C3/C2/C0:
+        #    the run of 2026-10-15 (one Intel and seven AMD runners, byte-identical tables) kept a seeded C1 in every row.
+        if r['op'] in ('fcomi', 'fcomip', 'fucomi', 'fucomip'):
+            fcomi_cc['%s/C1_%s' % (r['case'], 'kept' if (post & C1) == (pre & C1) else 'changed')] += 1
+        else:
+            checks['c1_cleared'] += 1
+            if post & C1:
+                bad.append({'row': r['row'], 'why': 'C1 not cleared by compare', 'op': r['op'], 'post_sw': r['post_sw']})
     if r['group'] == 'seeded-store':
         # Invalid integer stores (NaN, infinity, out of range) must set IE; in-range exact stores must not add IE.
         ka = kind(r['a_ext80']); va = value(r['a_ext80']); bits = int(r['op'].rsplit('_m', 1)[1])
