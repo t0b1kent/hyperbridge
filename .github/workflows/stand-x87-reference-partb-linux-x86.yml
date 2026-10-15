@@ -30,7 +30,10 @@ jobs:
           cat output-b/hardware.txt output-b/SUMMARY.txt output-b/raw.sha256
           rm -f output-b/probe_b output-b/raw.csv
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: x87-reference-partb-${{ matrix.os }}-${{ matrix.attempt }}
           path: stands/x87-reference/output-b
           if-no-files-found: error
+      - name: Validation verdict (after the upload, so a failed rule never loses the table)
+        run: grep -q 'validation=PASS' stands/x87-reference/output-b/SUMMARY.txt
