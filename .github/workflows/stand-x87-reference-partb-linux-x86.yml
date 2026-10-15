@@ -1,0 +1,36 @@
+name: x87 reference stand, Part B (sticky flags; Linux x86-64 hardware)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-b:
+    name: ${{ matrix.os }} attempt ${{ matrix.attempt }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        attempt: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Processor
+        run: |
+          grep -m1 'vendor_id' /proc/cpuinfo
+          grep -m1 'model name' /proc/cpuinfo
+          grep -m1 -E '^flags' /proc/cpuinfo | tr ' ' '\n' | grep -c -x hypervisor || true
+      - name: Run Part B (the script runs it twice and compares)
+        working-directory: stands/x87-reference
+        run: |
+          bash run_b.sh
+          cat output-b/hardware.txt output-b/SUMMARY.txt output-b/raw.sha256
+          rm -f output-b/probe_b output-b/raw.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x87-reference-partb-${{ matrix.os }}-${{ matrix.attempt }}
+          path: stands/x87-reference/output-b
+          if-no-files-found: error
