@@ -14,10 +14,12 @@ timeout 900 ./output-b/probe_b > output-b/raw.csv 2> output-b/run.log
 timeout 900 ./output-b/probe_b > output-b/repeat.csv 2> output-b/repeat.log
 cmp output-b/raw.csv output-b/repeat.csv
 sha256sum output-b/raw.csv > output-b/raw.sha256
+# The validator never discards the data: the table is the deliverable, the verdict is recorded next to it.
+validation=skipped
 if [[ -f validate_b.py ]] && command -v python3 >/dev/null; then
-    timeout 900 python3 validate_b.py output-b/raw.csv > output-b/validation.json
+    if timeout 900 python3 validate_b.py output-b/raw.csv > output-b/validation.json; then validation=PASS; else validation=FAIL; fi
 fi
 # No timestamps, machine names, environment variables, credentials or addresses.
 gzip -n -9 -c output-b/raw.csv > output-b/raw.csv.gz
 rm output-b/repeat.csv
-printf 'SUMMARY: Part B rows=%s byte-identical-repeat=PASS\n' "$(($(wc -l < output-b/raw.csv)-1))" | tee output-b/SUMMARY.txt
+printf 'SUMMARY: Part B rows=%s byte-identical-repeat=PASS validation=%s\n' "$(($(wc -l < output-b/raw.csv)-1))" "$validation" | tee output-b/SUMMARY.txt

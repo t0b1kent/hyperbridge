@@ -69,13 +69,16 @@ Part A seeds the status word only for one `FADD` (group `seeded-status`): all si
 processor measured. Part B (`probe_b.c`, `run_b.sh`, `validate_b.py`) asks the same question for the instructions
 that translators handle by hand: `FCOM FCOMP FUCOM FUCOMP FCOMI FCOMIP FUCOMI FUCOMIP FTST` on 14 × 14 operand
 pairs (zeros, ±1, 1.5, 2, `DBL_MAX`, 2^53, infinities, quiet and signalling NaN, two integer-overflow values) and
-`FIST/FISTP m16/m32/m64`, `FISTTP` on the same 14 values, each under five status-word seeds: none, `IE` alone, all six
-sticky flags, `C1` alone, `C1` plus all six. The seed is written into an `FXSAVE` image and reloaded with `FXRSTOR`,
+`FIST/FISTP m16/m32/m64`, `FISTTP` on the same 14 values, each under seven status-word seeds: none, `IE` alone, all six
+sticky flags, `C1` alone, `C1` plus all six, `C3 C2 C0`, and `C3 C2 C1 C0` plus all six. The seed is written into an `FXSAVE` image and reloaded with `FXRSTOR`,
 exactly as Part A does. Rows carry the same columns as Part A; for `FCOMI*` `memory_bits` holds the low 32 bits of
 `RFLAGS` after the compare (`ZF PF CF`), for `FIST*` the stored integer. `validate_b.py` checks four architectural
 rules without touching the raw data: seeded exception flags are still set afterwards (stickiness); ordered compares
-raise `IE` on any NaN and unordered ones only on a signalling NaN; `C3 C2 C0` and `ZF PF CF` follow the ordering
-(all three set when unordered); `C1` is cleared by compares; invalid integer stores set `IE`, exact in-range stores do not.
+raise `IE` on any NaN and unordered ones only on a signalling NaN; `FCOM*`/`FTST` report the ordering through `C3 C2 C0` and
+`FCOMI*` through `ZF PF CF` (all three set when unordered); `C1` is cleared by compares;
+invalid integer stores set `IE`, exact in-range stores do not. What `FCOMI*` leaves in `C3 C2 C0` is recorded per seed
+(`fcomi_family_c3_c2_c0` in `validation.json`) rather than judged, so each vendor is measured instead of assumed. The verdict goes to `validation.json` and `SUMMARY.txt`
+(`validation=PASS|FAIL|skipped`); a failed rule never discards the table, the workflow uploads it first and judges afterwards.
 About 12,000 rows per run; `run_b.sh` runs the probe twice and requires byte-identical tables, like Part A.
 
 ```

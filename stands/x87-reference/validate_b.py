@@ -8,7 +8,8 @@ import csv, collections, json, sys
 from pathlib import Path
 root = Path(__file__).resolve().parent
 path = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'output-b/raw.csv'
-SEEDS = {'seed_none': 0x0000, 'seed_IE': 0x0001, 'seed_sticky_IE_DE_ZE_OE_UE_PE': 0x003f, 'seed_C1': 0x0200, 'seed_C1_and_sticky': 0x023f}
+SEEDS = {'seed_none': 0x0000, 'seed_IE': 0x0001, 'seed_sticky_IE_DE_ZE_OE_UE_PE': 0x003f, 'seed_C1': 0x0200, 'seed_C1_and_sticky': 0x023f,
+         'seed_C3_C2_C0': 0x4500, 'seed_C3_C2_C1_C0_and_sticky': 0x473f}
 IE, STICKY, C0, C1, C2, C3 = 0x1, 0x3f, 0x100, 0x200, 0x400, 0x4000
 CF, PF, ZF = 0x1, 0x4, 0x40
 
@@ -27,6 +28,7 @@ def value(ext80):
     return sign * sig * 2.0 ** ((exp or 1) - 16383 - 63)
 
 counts = collections.Counter(); violations = []; checks = collections.Counter(); bad = []
+fcomi_cc = collections.Counter(); fcomi_cc_changed = []
 for r in csv.DictReader(path.open()):
     counts[(r['group'], r['op'])] += 1
     seed = SEEDS[r['case']]; pre = int(r['pre_sw'], 16); post = int(r['post_sw'], 16)
@@ -48,20 +50,30 @@ for r in csv.DictReader(path.open()):
         if new_ie != expect_ie and not (seed & IE):
             bad.append({'row': r['row'], 'why': 'IE rule', 'op': r['op'], 'a': r['a_name'], 'b': r['b_name'], 'post_sw': r['post_sw'], 'expected_ie': expect_ie})
         # 3. Condition codes / EFLAGS: unordered -> C3=C2=C0=1 (ZF=PF=CF=1); otherwise the usual ordering.
+        # FCOM/FCOMP/FUCOM/FUCOMP/FTST report through C3 C2 C0. FCOMI/FCOMIP/FUCOMI/FUCOMIP report through ZF PF CF
+        # and leave C0, C2, C3 unchanged (Intel SDM vol. 2A FCOMI: "C0, C2, C3: not affected"; AMD APM vol. 5 FCOMI);
+        # the first Part B run (2026-10-15, four Intel and four AMD runners) confirmed this: C3 stayed 0 for equal operands.
         va = value(a); vb = value(b) if b else 0.0
         if r['op'] == 'ftst': vb = 0.0
         if unordered: exp_c3, exp_c2, exp_c0 = 1, 1, 1
         else: exp_c3, exp_c2, exp_c0 = int(va == vb), 0, int(va < vb)
         got = (int(bool(post & C3)), int(bool(post & C2)), int(bool(post & C0)))
-        checks['condition_codes'] += 1
-        if got != (exp_c3, exp_c2, exp_c0):
-            bad.append({'row': r['row'], 'why': 'C3/C2/C0', 'op': r['op'], 'a': r['a_name'], 'b': r['b_name'], 'got': got, 'expected': (exp_c3, exp_c2, exp_c0)})
         if r['op'] in ('fcomi', 'fcomip', 'fucomi', 'fucomip'):
+            # What happens to C3/C2/C0 is recorded, not judged: Intel documents them as not affected, and the seeds with
+            # C3/C2/C0 set are there to measure each vendor rather than assume. Ordering is judged through EFLAGS below.
+            kept = (int(bool(pre & C3)), int(bool(pre & C2)), int(bool(pre & C0)))
+            fcomi_cc['%s/%s' % (r['case'], 'kept' if got == kept else 'changed')] += 1
+            if got != kept and len(fcomi_cc_changed) < 50:
+                fcomi_cc_changed.append({'row': r['row'], 'op': r['op'], 'case': r['case'], 'a': r['a_name'], 'b': r['b_name'], 'before': kept, 'after': got})
             fl = int(r['memory_bits'], 16)
             gotf = (int(bool(fl & ZF)), int(bool(fl & PF)), int(bool(fl & CF)))
             checks['eflags'] += 1
             if gotf != (exp_c3, exp_c2, exp_c0):
                 bad.append({'row': r['row'], 'why': 'ZF/PF/CF', 'op': r['op'], 'a': r['a_name'], 'b': r['b_name'], 'got': gotf, 'expected': (exp_c3, exp_c2, exp_c0)})
+        else:
+            checks['condition_codes'] += 1
+            if got != (exp_c3, exp_c2, exp_c0):
+                bad.append({'row': r['row'], 'why': 'C3/C2/C0', 'op': r['op'], 'a': r['a_name'], 'b': r['b_name'], 'got': got, 'expected': (exp_c3, exp_c2, exp_c0)})
         # 4. C1 is not sticky: compares clear it.
         checks['c1_cleared'] += 1
         if post & C1:
@@ -85,6 +97,8 @@ for r in csv.DictReader(path.open()):
             bad.append({'row': r['row'], 'why': 'control fadd changed sticky flags or kept C1', 'pre_sw': r['pre_sw'], 'post_sw': r['post_sw']})
 result = {'rows': sum(counts.values()), 'by_group_op': {'%s/%s' % k: v for k, v in sorted(counts.items())}, 'checks': dict(checks),
           'sticky_violations': len(violations), 'sticky_violation_rows': violations[:50], 'rule_failures': len(bad), 'rule_failure_rows': bad[:50]}
+result['fcomi_family_c3_c2_c0'] = dict(sorted(fcomi_cc.items())); result['fcomi_family_c3_c2_c0_changed_rows'] = fcomi_cc_changed
+result['verdict'] = 'PASS' if not violations and not bad else 'FAIL'
 print(json.dumps(result, indent=2))
-assert not violations, 'sticky exception flags were cleared: %r' % violations[:5]
-assert not bad, bad[:5]
+# Exit status 1 on any violation; the caller decides whether that stops a pipeline (run_b.sh records it and keeps the data).
+sys.exit(0 if result['verdict'] == 'PASS' else 1)

@@ -38,10 +38,12 @@ static void values(void) {
     D("i16_above",0x40e0000000000000);D("i32_above",0x41e0000000000000);
 #undef D
 }
-/* Status-word seeds. Bits 0..5 are the sticky exception flags IE DE ZE OE UE PE, bit 9 is C1 (not sticky). */
-static const uint16_t seeds[]={0x0000,0x0001,0x003f,0x0200,0x023f};
-static const char *seed_names[]={"seed_none","seed_IE","seed_sticky_IE_DE_ZE_OE_UE_PE","seed_C1","seed_C1_and_sticky"};
-#define NSEED 5
+/* Status-word seeds. Bits 0..5 are the sticky exception flags IE DE ZE OE UE PE, bit 9 is C1 (not sticky);
+   bits 8, 10 and 14 are C0, C2, C3: seeding them shows whether FCOMI-family compares keep or clear them. */
+static const uint16_t seeds[]={0x0000,0x0001,0x003f,0x0200,0x023f,0x4500,0x473f};
+static const char *seed_names[]={"seed_none","seed_IE","seed_sticky_IE_DE_ZE_OE_UE_PE","seed_C1","seed_C1_and_sticky",
+                                 "seed_C3_C2_C0","seed_C3_C2_C1_C0_and_sticky"};
+#define NSEED 7
 static void init(uint16_t cw) {
     __asm__ volatile("fninit\n\tfldz\n\tfldz\n\tfldz\n\tfldz\n\tfldz\n\tfldz\n\tfldz\n\tfldz\n\tfninit\n\tfldcw %0"::"m"(cw):"memory");
 }
