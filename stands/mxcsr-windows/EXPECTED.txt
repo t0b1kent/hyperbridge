@@ -1,0 +1,28 @@
+# mxwin64/mxwin32: expected values on x86 Windows (architectural contract, NOT measured on hardware yet).
+# Source of each expectation: Intel SDM (DIVSS 1/0 -> ZE only; 1/3 -> PE), Windows CONTEXT.MxCsr / XSAVE_FORMAT.MxCsr
+# carry MXCSR, NtContinue / SetThreadContext restore it, the kernel does not touch user MXCSR across syscalls,
+# a new thread starts from the default context MXCSR 0x1f80.
+# "info" = OS/CRT-specific, recorded but not judged (needs a run on real Windows: GitHub windows-2022/2025 via curator).
+start                0x1f80   info (CRT startup normally raises nothing)
+same                 0x1f84
+syscall.yield        0x1f84
+syscall.sleep        0x1f84
+api.tick             0x1f84
+crt.printf_fp        info     (0x1f84 or 0x1fa4 depending on the CRT formatter)
+exc0.ctx             0x1f84
+exc0.fltsave         0x1f84
+exc0.inhandler       info
+exc0.after           0x1f84
+exc1.ctx             0x1f84
+exc1.after           0x1f80   (handler cleared the status in the context)
+exc2.ctx             0x1f84
+exc2.after           0x1fa0   (handler wrote 0x1fa0)
+thread.first         0x1f80
+thread.parent_after  0x1f84
+getctx.worker        0x1f84
+setctx.ok            0x1
+setctx.worker_after  0x1f80   (status cleared through SetThreadContext)
+crt.statusfp         info     (_statusfp: SW_ZERODIVIDE=0x8 must be set; x87 part may add bits)
+crt.after_clearfp    0x1f80
+compiled.div         0x1fa0
+x87.noeffect         0x1f80
