@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: stand-x87ctx-windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinned llvm-mingw
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/llvm-mingw-20260505-ucrt-x86_64.zip'
+          Invoke-WebRequest -Uri $url -OutFile llvm-mingw.zip
+          $hash = (Get-FileHash -Algorithm SHA256 llvm-mingw.zip).Hash.ToLower()
+          if ($hash -ne '3e6919b3da2b6bfc05d8caf0ab10d5c0be4ddbb873b3c33790a71fe43c09c51f') { throw "toolchain hash mismatch: $hash" }
+          Expand-Archive llvm-mingw.zip -DestinationPath toolchain
+      - name: Build and run (64-bit and 32-bit)
+        shell: pwsh
+        working-directory: stands/x87ctx-windows
+        run: |
+          $bin = (Resolve-Path ../../toolchain/llvm-mingw-20260505-ucrt-x86_64/bin).Path
+          New-Item -ItemType Directory -Force out | Out-Null
+          (Get-CimInstance Win32_Processor | Select-Object -First 1 | ForEach-Object { "$($_.Manufacturer) | $($_.Name)" }) | Out-File out/cpu.txt
+          (Get-CimInstance Win32_OperatingSystem | ForEach-Object { "$($_.Caption) $($_.Version)" }) | Out-File -Append out/cpu.txt
+          & "$bin/x86_64-w64-mingw32-clang.exe" -O1 x87ctx.c -o out/x87ctx64.exe
+          & "$bin/i686-w64-mingw32-clang.exe" -O1 -msse2 -mfpmath=sse x87ctx.c -o out/x87ctx32.exe
+          ./out/x87ctx64.exe | Out-File -Encoding ascii out/x87ctx64.txt
+          ./out/x87ctx32.exe | Out-File -Encoding ascii out/x87ctx32.txt
+          Get-Content out/cpu.txt
+          Remove-Item out/*.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: x87ctx-windows-${{ matrix.os }}
+          path: stands/x87ctx-windows/out
+          if-no-files-found: error
