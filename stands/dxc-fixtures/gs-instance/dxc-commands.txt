@@ -1,0 +1,8 @@
+# dxc (Windows SDK, DirectX Shader Compiler), run in this directory; no -Qstrip_reflect (the layer reads the signatures).
+dxc -T vs_6_0 -E main -Fo gs_instance_vs.dxil gs_instance_vs.hlsl
+dxc -T gs_6_0 -E main -Fo gs_instance_gs.dxil gs_instance_gs.hlsl
+dxc -T ps_6_0 -E main -Fo gs_instance_ps.dxil gs_instance_ps.hlsl
+# optional, for the DXBC control arm (fxc, SM 5.0):
+fxc /T vs_5_0 /E main /Fo gs_instance_vs.dxbc gs_instance_vs.hlsl
+fxc /T gs_5_0 /E main /Fo gs_instance_gs.dxbc gs_instance_gs.hlsl
+fxc /T ps_5_0 /E main /Fo gs_instance_ps.dxbc gs_instance_ps.hlsl
