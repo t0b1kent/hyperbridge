@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: dxc-fixtures
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile fixtures with the Windows SDK compilers
+        shell: pwsh
+        run: |
+          $kits = 'C:\Program Files (x86)\Windows Kits\10\bin'
+          $dxc = Get-ChildItem $kits -Recurse -Filter dxc.exe | Where-Object { $_.FullName -like '*\x64\*' } | Sort-Object FullName -Descending | Select-Object -First 1
+          $fxc = Get-ChildItem $kits -Recurse -Filter fxc.exe | Where-Object { $_.FullName -like '*\x64\*' } | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $dxc -or -not $fxc) { throw 'dxc.exe or fxc.exe not found in the Windows SDK' }
+          & $dxc.FullName --version
+          New-Item -ItemType Directory -Force out | Out-Null
+          foreach ($dir in Get-ChildItem stands/dxc-fixtures -Directory) {
+            Push-Location $dir.FullName
+            foreach ($line in Get-Content dxc-commands.txt) {
+              $t = $line.Trim()
+              if ($t -eq '' -or $t.StartsWith('#')) { continue }
+              $parts = $t -split '\s+'
+              $tool = if ($parts[0] -eq 'dxc') { $dxc.FullName } elseif ($parts[0] -eq 'fxc') { $fxc.FullName } else { throw "unknown tool $($parts[0])" }
+              & $tool @($parts[1..($parts.Length-1)])
+              if ($LASTEXITCODE -ne 0) { throw "failed: $t" }
+            }
+            $dest = Join-Path $env:GITHUB_WORKSPACE "out/$($dir.Name)"
+            New-Item -ItemType Directory -Force $dest | Out-Null
+            Copy-Item *.dxil, *.dxbc $dest
+            Pop-Location
+          }
+          Get-ChildItem -Recurse out | Format-Table FullName, Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dxc-fixtures
+          path: out
+          if-no-files-found: error
