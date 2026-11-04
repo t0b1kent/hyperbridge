@@ -149,8 +149,11 @@ def runner_for_product(fork, source, build_dir):
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open('xb') as stream:
         stream.write(text.encode())
+    header = Path(fork) / 'stands/synthetic/MacHostFeatures.h'
+    shutil.copy2(header, target.parent / header.name)
     return target, dict(shld16_counter='NOT_ENABLED_REMOVED_FROM_PRODUCT_SOURCE',
-                        source_sha256=digest(original), adapter_sha256=digest(target.read_bytes()))
+                        source_sha256=digest(original), adapter_sha256=digest(target.read_bytes()),
+                        adjacent_header_sha256=digest(header.read_bytes()))
 
 
 def build(fork, source, lock, build_dir, out, env, fex, clang, clangxx):
