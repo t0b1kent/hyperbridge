@@ -155,6 +155,6 @@ def apply(source, tail_root, pin, product, recipe_root, out, run):
                   order_file=pin['candidate_order_file'], manifest_sha256=pin['candidate_manifest_sha256'],
                   public_patch_count=len(rows), supplement_files=pin['supplement_files'],
                   supplement_source_sha256=pin['supplement_source_sha256'],
-                  supplement_sha256=sha(path), post_tail=[r['file'] for r in post_tail], order=order)
+                  supplement_sha256=hashlib.sha256(raw).hexdigest(), post_tail=[r['file'] for r in post_tail], order=order)
     (out / 'c9-source-apply.json').write_text(json.dumps(result, indent=2) + '\n')
     return result

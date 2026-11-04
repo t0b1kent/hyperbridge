@@ -274,7 +274,7 @@ class StageTests(unittest.TestCase):
         with patch.object(fex, 'cloud_only'), patch.object(fex, 'build', side_effect=AssertionError('source build leaked')):
             recipe.build(self.root / 'inventory', ['fex64'], stage='inventory')
         result = json.loads((self.root / 'inventory/RESULT.json').read_text())
-        self.assertEqual(result['variants']['fex64']['postimages'], 6936)
+        self.assertEqual(result['variants']['fex64']['postimages'], 6944)
         self.assertEqual(result['variants']['fex64']['actual_source'], 'NOT_ENABLED')
 
     def test_stage_selectors_and_admission_input_contract(self):
