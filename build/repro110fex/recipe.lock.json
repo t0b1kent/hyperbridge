@@ -1,61 +1,65 @@
 {
- "schema": 1,
- "repository": "https://github.com/t0b1kent/hyperbridge.git",
- "base_revision": "4d489f182db3b05bb7465d9705483c490f718114",
- "base_manifest_sha256": "374d388b93db2c950ede5ea4a9e67236ca1821e9374996d5e01467e96e288406",
- "candidate_revision": "94bc17c974eba1633c1f15fe227a883a765e1fd5",
- "candidate_directory": "stands/hardware/candidates/c9-release-defaults-aa-20261007",
- "candidate_order_file": "candidate.json",
- "candidate_manifest_sha256": "955394673fcd6f3eb83f4330435f516dc884280b1755ab6fcb8d6a31db5bed48",
- "candidate_patch_count": 34,
- "product_manifest_sha256": "25999079fd68921829a5787849fa435356f6fce41330121c10a0e79bac2fb1bd",
- "engine_sha256": "777a37a827fabbd45f5135bcb3c1f7190437256d27f36e775db8320ac7785a58",
- "supplement_source": "c9/patches/0162-0163-guarded-region.patch",
- "supplement_source_sha256": "47b714cf2a861000a79d77397a64b00d1fcc15b35be81985f1463d8b643c39d9",
- "supplement_files": [
-  "unittests/Native/X87Region.cpp",
-  "unittests/Native/X87Region.md"
- ],
- "platform": {
-  "profile": "github-macos15-arm64",
-  "runner_label": "macos-15",
-  "python": "3.13.7",
-  "xcode": "16.4",
-  "xcode_build": "16F6",
-  "sdk": "15.5",
-  "apple_clang_build": "Apple clang version 17.0.0",
-  "linker_lc": "1167.5.0",
-  "deployment_target": "14.0",
-  "jobs": 3,
-  "minutes": 330
- },
- "variants": {
-  "fex64": "r5 FEX64 series (55) plus pinned c9 tail, two source tests and the c12 delta; arm64ec triple",
-  "fex32": "the same patched tree as fex64 (INTEGRATE builds both PE modules from one tree); aarch64 triple; NOT the 1.0.9 r5 six-patch WoW64 series"
- },
- "classification": "SOURCE_RECIPE_C12_NOT_ACCEPTED_NOT_GOLDEN",
- "signing": "OWNER_ONLY",
- "install": "skipped",
- "recipe": "c12",
- "product_manifest": "c12/PRODUCT-MANIFEST.json",
- "engine": "c12/ENGINE.json",
- "product_postimage_count": 6936,
- "environment_count": 80,
- "post_tail": [
-  {
-   "file": "c12/c12-delta.patch",
-   "sha256": "f0aaea2875c007dbc15de417eb9d99d533630ba4b3f03a336e34e3cdc7e06292"
+  "base_manifest_sha256": "374d388b93db2c950ede5ea4a9e67236ca1821e9374996d5e01467e96e288406",
+  "base_revision": "4d489f182db3b05bb7465d9705483c490f718114",
+  "candidate_directory": "stands/hardware/candidates/c9-release-defaults-aa-20261007",
+  "candidate_manifest_sha256": "955394673fcd6f3eb83f4330435f516dc884280b1755ab6fcb8d6a31db5bed48",
+  "candidate_order_file": "candidate.json",
+  "candidate_patch_count": 34,
+  "candidate_revision": "94bc17c974eba1633c1f15fe227a883a765e1fd5",
+  "classification": "RELEASE110_C32R_SOURCE_RECIPE_NOT_ACCEPTED",
+  "comparison": "REPORT_ONLY",
+  "engine": "c32/ENGINE.json",
+  "engine_sha256": "653ef8f6c01144719ba424f0816498bc4397d04a54cdcc6c287d4fe90b32fbd3",
+  "environment_count": 206,
+  "extra_cflags": "-DMACRUNNER_PROT_4K=1",
+  "install": "skipped",
+  "override_hash": "ee193b1a6b7bbc43549cddf3ba49e4de4a5715b5",
+  "pe_link_timestamp": {
+    "fex32": 1788779471,
+    "fex64": 1788779472
+  },
+  "platform": {
+    "apple_clang_build": "Apple clang version 17.0.0",
+    "deployment_target": "14.0",
+    "jobs": 2,
+    "linker_lc": "1167.5.0",
+    "minutes": 330,
+    "profile": "github-macos15-arm64",
+    "python": "3.13.7",
+    "runner_label": "macos-15",
+    "sdk": "15.5",
+    "xcode": "16.4",
+    "xcode_build": "16F6"
+  },
+  "post_tail": [
+    {
+      "file": "c12/c12-delta.patch",
+      "sha256": "f0aaea2875c007dbc15de417eb9d99d533630ba4b3f03a336e34e3cdc7e06292"
+    },
+    {
+      "file": "c32/c32-delta.patch",
+      "sha256": "68ee5f2b516d6db85522f5f395d1c0e6e7acd15458064c90928cd24617f3816f"
+    }
+  ],
+  "product_manifest": "c32/PRODUCT-MANIFEST.json",
+  "product_manifest_sha256": "283b7a64e23e68befaff1141eb652543f02d164785429b98c2f9d0d2b00e6c21",
+  "product_postimage_count": 6944,
+  "recipe": "c12",
+  "reference_pe_sha256": {
+    "fex32": "2a48b5cec0e48f46b5f1086cdf1d8831138cb9468438e33341acc850a737b9c7",
+    "fex64": "721cc325e3c42a06f6638b3d5f49b2261e82baa0a13d4789e9b340579048dc84"
+  },
+  "repository": "https://github.com/t0b1kent/hyperbridge.git",
+  "schema": 1,
+  "signing": "OWNER_ONLY",
+  "supplement_files": [
+    "unittests/Native/X87Region.cpp",
+    "unittests/Native/X87Region.md"
+  ],
+  "supplement_source": "c9/patches/0162-0163-guarded-region.patch",
+  "supplement_source_sha256": "47b714cf2a861000a79d77397a64b00d1fcc15b35be81985f1463d8b643c39d9",
+  "variants": {
+    "fex32": "same source with AArch64 MinGW target; new experimental switches default off",
+    "fex64": "r5 + c9 + c12 + c32 cumulative source delta; ARM64EC; new experimental switches default off"
   }
- ],
- "override_hash": "ee193b1a6b7bbc43549cddf3ba49e4de4a5715b5",
- "extra_cflags": "-DMACRUNNER_PROT_4K=1",
- "pe_link_timestamp": {
-  "fex64": 1788779472,
-  "fex32": 1788779471
- },
- "reference_pe_sha256": {
-  "fex64": "a975855f10862f756bdbf58371d5610ac4b413b048bc65138df9985806d285e7",
-  "fex32": "ff968541ea9d8dd9f81a118b01d1f4a2b7e111fcba6dd75e2227e7e97cb5e6ba"
- },
- "comparison": "REPORT_ONLY"
 }

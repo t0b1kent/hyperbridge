@@ -54,9 +54,10 @@ def inputs():
     source.require(len(product['product_source_postimages']) == pin['product_postimage_count'],
                    'Product postimage count differs from the recipe pin')
     delta = source.post_tail_rows(HERE, pin)
-    source.require([r['file'] for r in delta] == [product['c12_delta']['patch']] and
-                   [r['sha256'] for r in delta] == [product['c12_delta']['sha256']],
-                   'c12 delta differs between recipe pin and product manifest')
+    product_deltas = [product['c12_delta'], product['release110_delta']]
+    source.require([r['file'] for r in delta] == [r['patch'] for r in product_deltas] and
+                   [r['sha256'] for r in delta] == [r['sha256'] for r in product_deltas],
+                   'Release source deltas differ between recipe pin and product manifest')
     for key in ('fex64', 'fex32'):
         source.require(re.fullmatch('[a-f0-9]{64}', pin['reference_pe_sha256'][key] or '') is not None and
                        type(pin['pe_link_timestamp'][key]) is int, 'Variant reference pin differs')

@@ -151,7 +151,7 @@ class CandidateTests(unittest.TestCase):
                         actual[p] = '0' * 64
                     with patch.object(source, 'inventory', return_value=actual):
                         with self.assertRaisesRegex(ValueError, 'postimages differ'):
-                            source.verify_product(self.root, product, 6936)
+                            source.verify_product(self.root, product, 6944)
 
     def test_archive_preserves_licenses_and_excludes_compile_logs(self):
         for name in ['fex64/engine/own.dll', 'fex64/licenses/FEX/LICENSE',
@@ -171,8 +171,8 @@ class CandidateTests(unittest.TestCase):
     def test_recipe_plan_without_network(self):
         with patch.object(subprocess, 'Popen', side_effect=AssertionError('unexpected command')):
             pin, product, engine, locks, tools = recipe.inputs()
-        self.assertEqual(len(product['product_source_postimages']), 6936)
-        self.assertEqual(len(engine['environment']), 80)
+        self.assertEqual(len(product['product_source_postimages']), 6944)
+        self.assertEqual(len(engine['environment']), 206)
         self.assertEqual(len(locks['fex32']['patches']), 61)
         self.assertEqual(pin['recipe'], 'c12')
 
@@ -247,6 +247,7 @@ class CandidateTests(unittest.TestCase):
 
     def test_c12_delta_pins_and_new_file_postimages_match_the_manifest(self):
         pin, product, _, _, _ = recipe.inputs()
+        product = json.loads((HERE / 'c12/PRODUCT-MANIFEST.json').read_bytes())
         patch = (HERE / 'c12/c12-delta.patch').read_bytes()
         self.assertEqual(source.sha(HERE / 'c12/c12-delta.patch'), product['c12_delta']['sha256'])
         sections = [c for c in re.split(rb'(?=^diff --git )', patch, flags=re.M) if c]
@@ -263,13 +264,13 @@ class CandidateTests(unittest.TestCase):
             created += 1
         self.assertEqual(created, product['c12_delta']['added_files'])
 
-    def test_both_architectures_share_one_tree_and_the_c12_flags(self):
+    def test_both_architectures_share_one_tree_and_the_c32_flags(self):
         pin, product, _, locks, _ = recipe.inputs()
-        self.assertEqual(pin['override_hash'], product['recipe_flags_c12']['override_hash'])
+        self.assertEqual(pin['override_hash'], 'ee193b1a6b7bbc43549cddf3ba49e4de4a5715b5')
         self.assertEqual(pin['pe_link_timestamp'], dict(fex64=1788779472, fex32=1788779471))
         self.assertEqual(pin['extra_cflags'], '-DMACRUNNER_PROT_4K=1')
-        self.assertEqual(pin['reference_pe_sha256']['fex64'][:8], 'a975855f')
-        self.assertEqual(pin['reference_pe_sha256']['fex32'][:8], 'ff968541')
+        self.assertEqual(pin['reference_pe_sha256']['fex64'][:8], '721cc325')
+        self.assertEqual(pin['reference_pe_sha256']['fex32'][:8], '2a48b5ce')
         self.assertEqual(len(locks['fex64']['patches']), 55)
 
     def builder_refusal(self, refusal_stage):
