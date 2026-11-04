@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import tempfile
 from pathlib import Path
 from unittest import TestCase, mock
@@ -40,6 +41,9 @@ class ReleaseSource(TestCase):
 
     def test_matrix_has_independent_stage_cells_and_bounded_parallelism(self):
         text = (HERE.parents[1] / '.github/workflows/repro110-fex-c32-stages-macos15-arm64.yml').read_text()
-        for item in ['fail-fast: false', 'max-parallel: 2', 'stage: inventory', 'stage: patches',
-                     'stage: configure', 'stage: compile', 'stage: native-stand', 'nice -n 20', 'build/repro110fex/build.py']:
+        for item in ['fail-fast: false', 'max-parallel: 2', 'nice -n 20', 'build/repro110fex/build.py']:
             self.assertIn(item, text)
+        native, full = [json.loads(value) for value in re.findall(r"'(\[\{[^\n']+\}\])'", text)]
+        self.assertEqual(native, [dict(slot='fex64-native-stand', architecture='fex64', stage='native-stand')])
+        self.assertEqual([row['stage'] for row in full], ['inventory', 'patches', 'configure', 'compile', 'native-stand', 'full'])
+        self.assertIn("if: always() && inputs.only != 'native-stand'", text)

@@ -145,7 +145,7 @@ def runner_for_product(fork, source, build_dir):
         require(text.count(before) == 1, 'Pinned runner counter adapter anchor differs')
         text = text.replace(before, after, 1)
     require('MacRunnerShld16CfApplied' not in text, 'Removed product counter still referenced')
-    target = Path(build_dir) / 'runner.cpp'
+    target = Path(build_dir) / 'cmake/runner.cpp'
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open('xb') as stream:
         stream.write(text.encode())
