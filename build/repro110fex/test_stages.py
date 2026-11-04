@@ -406,5 +406,24 @@ class StageTests(unittest.TestCase):
         self.assertEqual(len([a for a in commands if a[:2] == ['cmake', '--build']]), 1)
 
 
+class ReleaseStageContracts(unittest.TestCase):
+    def test_recipe_enables_native_only_for_the_explicit_native_stage(self):
+        scratch = os.environ['REPRO109_TEST_TMP']
+        with tempfile.TemporaryDirectory(dir=scratch) as directory:
+            for stage, enabled in [('native-stand', True), ('compile', False)]:
+                with self.subTest(stage=stage), patch.object(fex, 'cloud_only'), \
+                     patch.object(fex, 'build', return_value={'stage': stage}) as build:
+                    recipe.build(Path(directory) / stage, ['fex64'], stage=stage)
+                    self.assertEqual(build.call_args.args[1]['build_native_stand'], enabled)
+                    self.assertEqual(build.call_args.kwargs['stage'], stage)
+
+    def test_admission_downloads_the_artifact_produced_by_the_compile_cell(self):
+        workflow = (HERE.parents[1] / '.github/workflows/repro110-fex-c32-stages-macos15-arm64.yml').read_text()
+        upload = re.search(r'^\s+name: (repro109-\$\{\{ matrix.slot \}\}.*)$', workflow, re.M).group(1)
+        section = workflow.split('Retrieve bytes from the compile cell of this run', 1)[1].split('- name: Admit', 1)[0]
+        download = re.search(r'^\s+name: (.+)$', section, re.M).group(1)
+        self.assertEqual(download, upload.replace('${{ matrix.slot }}', 'fex64-compile'))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

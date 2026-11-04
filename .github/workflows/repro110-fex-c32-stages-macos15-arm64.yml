@@ -111,7 +111,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release110-fex-c3264-compile-${{ github.sha }}
+          name: repro109-fex64-compile-${{ github.sha }}
           path: ${{ runner.temp }}/release110-fex-c32-compiled
       - name: Admit previously compiled bytes without rebuilding
         env:

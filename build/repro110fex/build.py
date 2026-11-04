@@ -158,8 +158,8 @@ def build(out, variants, stage='full', from_outputs=None):
                 lock[field] = pin['platform'][field]
             # The existing runner uses this job limit while retaining exact platform checks.
             lock['build_jobs'] = pin['platform']['jobs']
-            # The native stand is a separate stage (--stage native-stand); the first c12 pass returns PE evidence only.
-            lock['build_native_stand'] = False
+            # Only the explicit host-stand stage builds the native runner. PE stages remain separate.
+            lock['build_native_stand'] = stage == 'native-stand' and variant == 'fex64'
             def overlay(stage, src, actual_lock, output, env):
                 if stage == 'prepared':
                     checkout = src.parent / 'public-candidate'
