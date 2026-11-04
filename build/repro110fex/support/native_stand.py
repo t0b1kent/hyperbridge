@@ -124,6 +124,35 @@ def compile_sources(build, native, adapter, out):
                 generated_units=counts[2], foreign_units=0, raw_sha256=digest(raw))
 
 
+def runner_for_product(fork, source, build_dir):
+    runner = Path(fork) / 'stands/synthetic/runner.cpp'
+    original = runner.read_bytes()
+    if b'MacRunnerShld16CfApplied' in (Path(source) / GUARD_FILES[0]).read_bytes():
+        return runner, dict(shld16_counter='PRESENT', source_sha256=digest(original))
+    # c32 removed this old translation-time counter. Preserve semantic outputs;
+    # report the unavailable diagnostic as null, never as a measured zero.
+    text = original.decode()
+    replacements = [
+        ('extern std::atomic<uint64_t> MacRunnerShld16CfApplied;\n', ''),
+        ('  const uint64_t shld0 = MacRunnerShld16CfApplied.load(std::memory_order_relaxed);\n', ''),
+        ('  fprintf(o, ",\\"mr_shld16_cf\\":%" PRIu64, MacRunnerShld16CfApplied.load(std::memory_order_relaxed) - shld0);\n',
+         '  fprintf(o, ",\\"mr_shld16_cf\\":null");\n'),
+        ('" mr_shld16_cf=%" PRIu64', '" mr_shld16_cf=NOT_ENABLED"'),
+        ('          MacRunnerShld16CfApplied.load(std::memory_order_relaxed), MacRunnerNullHostChecks.load',
+         '          MacRunnerNullHostChecks.load'),
+    ]
+    for before, after in replacements:
+        require(text.count(before) == 1, 'Pinned runner counter adapter anchor differs')
+        text = text.replace(before, after, 1)
+    require('MacRunnerShld16CfApplied' not in text, 'Removed product counter still referenced')
+    target = Path(build_dir) / 'runner.cpp'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open('xb') as stream:
+        stream.write(text.encode())
+    return target, dict(shld16_counter='NOT_ENABLED_REMOVED_FROM_PRODUCT_SOURCE',
+                        source_sha256=digest(original), adapter_sha256=digest(target.read_bytes()))
+
+
 def build(fork, source, lock, build_dir, out, env, fex, clang, clangxx):
     fex.cloud_only()  # Before executing even the owned public builder.
     require(lock.get('build_native_stand') is True and lock.get('variant') != 'fex32',
@@ -166,7 +195,9 @@ def build(fork, source, lock, build_dir, out, env, fex, clang, clangxx):
         # the producer file itself lives in this immutable recipe snapshot.
         producer.ROOT = Path(fork).resolve()
         producer.run = command  # Real existing producer; commands use the owned bounded runner.
-        sys.argv = [str(producer.__file__), '--fex-source', str(source), '--build-dir', str(build_dir)]
+        runner, result['runner_adapter'] = runner_for_product(fork, source, build_dir)
+        sys.argv = [str(producer.__file__), '--fex-source', str(source), '--build-dir', str(build_dir),
+                    '--runner-source', str(runner)]
         producer.main()
         result['paired_sources'] = paired_sources(source, native, lock, Path(out) / 'PATCH-ORDER.json')
         executable = Path(build_dir) / 'cmake/Bin/stand_runner'
