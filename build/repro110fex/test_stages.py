@@ -395,6 +395,7 @@ class StageTests(unittest.TestCase):
         fork = self.root / 'public-fork'; (fork / 'stands/synthetic').mkdir(parents=True)
         (fork / 'stands/synthetic/LICENSE').write_text('own license fixture\n')
         (fork / 'stands/synthetic/runner.cpp').write_bytes((HERE.parents[1] / 'stands/synthetic/runner.cpp').read_bytes())
+        (fork / 'stands/synthetic/MacHostFeatures.h').write_bytes((HERE.parents[1] / 'stands/synthetic/MacHostFeatures.h').read_bytes())
         adapter = fork / 'stands/synthetic/own-adapter.cpp'; adapter.write_text('// own adapter fixture\n')
         source = self.root / 'source'; self.source_fixture(source)
         out = self.root / 'out'; out.mkdir()
@@ -431,6 +432,8 @@ class StageTests(unittest.TestCase):
         self.assertNotIn('MacRunnerShld16CfApplied', adapted)
         self.assertIn('mr_shld16_cf=NOT_ENABLED', adapted)
         self.assertIn('mr_shld16_cf\\":null', adapted)
+        self.assertEqual((build / 'cmake/MacHostFeatures.h').read_bytes(),
+                         (fork / 'stands/synthetic/MacHostFeatures.h').read_bytes())
         self.assertEqual(len([a for a in commands if a[:2] == ['cmake', '--build']]), 1)
 
 
