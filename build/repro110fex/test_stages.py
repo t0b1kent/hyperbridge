@@ -407,11 +407,12 @@ class StageTests(unittest.TestCase):
         def run(argv, cwd, report, name, env):
             commands.append(argv)
             if argv[:2] == ['cmake', '-S']:
-                cmake = build / 'cmake'; cmake.mkdir()
+                cmake = build / 'cmake'; cmake.mkdir(exist_ok=True)
                 (cmake / 'CMakeCache.txt').write_text('CMAKE_HOME_DIRECTORY:INTERNAL=' + str(fork / 'stands/synthetic') + '\n')
                 (cmake / 'compile_commands.json').write_text(json.dumps([
                     dict(directory=str(build / 'src'), file=str(build / 'src' / native_stand.GUARD_FILES[0])),
-                    dict(directory=str(adapter.parent), file=str(adapter))]))
+                    dict(directory=str(adapter.parent), file=str(adapter)),
+                    dict(directory=str(cmake), file=str(cmake / 'runner.cpp'))]))
             if argv[:2] == ['cmake', '--build']:
                 binary = build / 'cmake/Bin/stand_runner'; binary.parent.mkdir()
                 binary.write_bytes(struct.pack('<II', 0xfeedfacf, 0x0100000c) + bytes(120))
@@ -424,8 +425,9 @@ class StageTests(unittest.TestCase):
         report = json.loads((out / 'native-stand/RESULT.json').read_text())
         self.assertEqual(report['producer'], selected['producer'])
         self.assertEqual(report['source_built'], True)
+        self.assertEqual(report['source_ownership']['generated_units'], 1)
         self.assertEqual(report['runner_adapter']['shld16_counter'], 'NOT_ENABLED_REMOVED_FROM_PRODUCT_SOURCE')
-        adapted = (build / 'runner.cpp').read_text()
+        adapted = (build / 'cmake/runner.cpp').read_text()
         self.assertNotIn('MacRunnerShld16CfApplied', adapted)
         self.assertIn('mr_shld16_cf=NOT_ENABLED', adapted)
         self.assertIn('mr_shld16_cf\\":null', adapted)
