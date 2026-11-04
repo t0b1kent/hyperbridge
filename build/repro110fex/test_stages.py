@@ -371,9 +371,30 @@ class StageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('ARG=admission', (slot / 'driver.log').read_text())
 
+    def test_native_runner_counter_adapter_keeps_instrumented_source_unchanged(self):
+        fork = self.root / 'public-fork'; (fork / 'stands/synthetic').mkdir(parents=True)
+        original = (HERE.parents[1] / 'stands/synthetic/runner.cpp').read_bytes()
+        runner = fork / 'stands/synthetic/runner.cpp'; runner.write_bytes(original)
+        source = self.root / 'source'; self.source_fixture(source)
+        (source / native_stand.GUARD_FILES[0]).write_text('MacRunnerShld16CfApplied\n')
+        selected, receipt = native_stand.runner_for_product(fork, source, self.root / 'build')
+        self.assertEqual(selected, runner)
+        self.assertEqual(receipt['shld16_counter'], 'PRESENT')
+        self.assertEqual(runner.read_bytes(), original)
+        self.assertFalse((self.root / 'build').exists())
+
+    def test_native_runner_counter_adapter_refuses_changed_anchors(self):
+        fork = self.root / 'public-fork'; (fork / 'stands/synthetic').mkdir(parents=True)
+        (fork / 'stands/synthetic/runner.cpp').write_text('// own changed runner fixture\n')
+        source = self.root / 'source'; self.source_fixture(source)
+        with self.assertRaisesRegex(ValueError, 'anchor differs'):
+            native_stand.runner_for_product(fork, source, self.root / 'build')
+        self.assertFalse((self.root / 'build').exists())
+
     def test_native_wrapper_uses_the_corrected_producer(self):
         fork = self.root / 'public-fork'; (fork / 'stands/synthetic').mkdir(parents=True)
         (fork / 'stands/synthetic/LICENSE').write_text('own license fixture\n')
+        (fork / 'stands/synthetic/runner.cpp').write_bytes((HERE.parents[1] / 'stands/synthetic/runner.cpp').read_bytes())
         adapter = fork / 'stands/synthetic/own-adapter.cpp'; adapter.write_text('// own adapter fixture\n')
         source = self.root / 'source'; self.source_fixture(source)
         out = self.root / 'out'; out.mkdir()
@@ -403,6 +424,11 @@ class StageTests(unittest.TestCase):
         report = json.loads((out / 'native-stand/RESULT.json').read_text())
         self.assertEqual(report['producer'], selected['producer'])
         self.assertEqual(report['source_built'], True)
+        self.assertEqual(report['runner_adapter']['shld16_counter'], 'NOT_ENABLED_REMOVED_FROM_PRODUCT_SOURCE')
+        adapted = (build / 'runner.cpp').read_text()
+        self.assertNotIn('MacRunnerShld16CfApplied', adapted)
+        self.assertIn('mr_shld16_cf=NOT_ENABLED', adapted)
+        self.assertIn('mr_shld16_cf\\":null', adapted)
         self.assertEqual(len([a for a in commands if a[:2] == ['cmake', '--build']]), 1)
 
 
