@@ -8,8 +8,8 @@ import shutil
 import sys
 
 HERE = Path(__file__).resolve().parent
-REPLAY_RUNNER = 'stands/cpu/artifacts/stand-diff-stage5-20261001/stand_runner_fixed.cpp'
-REPLAY_RANGES = 'stands/cpu/artifacts/stand-diff-stage4-20261001/fexmac/OracleRanges.h'
+REPLAY_RUNNER = 'stands/hardware/runner.cpp'
+REPLAY_RANGES = 'stands/hardware/OracleRanges.h'
 GUARD_PATCH_SHA = '830815241bcf4e07781ab845ffd4b68b0ac93eef7d0749e1cbf51758a8140590'
 GUARD_FILES = (
     'FEXCore/Source/Interface/Core/JIT/JIT.cpp',
@@ -133,6 +133,9 @@ def runner_for_product(fork, source, build_dir):
     # c32 removed this old translation-time counter. Preserve semantic outputs;
     # report the unavailable diagnostic as null, never as a measured zero.
     text = original.decode()
+    include = '#include "../synthetic/MacHostFeatures.h"'
+    require(text.count(include) == 1, 'Pinned hardware runner include anchor differs')
+    text = text.replace(include, '#include "MacHostFeatures.h"', 1)
     replacements = [
         ('extern std::atomic<uint64_t> MacRunnerShld16CfApplied;\n', ''),
         ('  const uint64_t shld0 = MacRunnerShld16CfApplied.load(std::memory_order_relaxed);\n', ''),
@@ -156,7 +159,7 @@ def runner_for_product(fork, source, build_dir):
     ranges = Path(fork) / REPLAY_RANGES
     shutil.copy2(ranges, target.parent / ranges.name)
     return target, dict(shld16_counter='PRESENT' if instrumented else 'NOT_ENABLED_REMOVED_FROM_PRODUCT_SOURCE',
-                        input_protocol='SPARSE_PAGES_AND_EXECUTABLE_RANGES',
+                        input_protocol='SPARSE_PAGES_EXECUTABLE_RANGES_AND_HARDWARE_FAULT_CONTEXT',
                         source_sha256=digest(original), adapter_sha256=digest(target.read_bytes()),
                         adjacent_header_sha256=digest(header.read_bytes()), ranges_header_sha256=digest(ranges.read_bytes()))
 
@@ -205,16 +208,22 @@ def build(fork, source, lock, build_dir, out, env, fex, clang, clangxx):
         producer.run = command  # Real existing producer; commands use the owned bounded runner.
         runner, result['runner_adapter'] = runner_for_product(fork, source, build_dir)
         sys.argv = [str(producer.__file__), '--fex-source', str(source), '--build-dir', str(build_dir),
-                    '--runner-source', str(runner)]
+                    '--runner-source', str(runner), '--hardware-tso']
         producer.main()
         result['paired_sources'] = paired_sources(source, native, lock, Path(out) / 'PATCH-ORDER.json')
         executable = Path(build_dir) / 'cmake/Bin/stand_runner'
+        companion = executable.with_name('libmacrunner-hwtso.dylib')
         require(configured and executable.is_file() and not executable.is_symlink() and
                 fex.macho_arm64(executable), 'Native runner output is missing or not ARM64')
+        require(companion.is_file() and not companion.is_symlink() and fex.macho_arm64(companion),
+                'Native hardware-TSO companion is missing or not ARM64')
         shutil.copy2(executable, report / 'stand_runner')
+        shutil.copy2(companion, report / companion.name)
         result.update(status='NATIVE_STAND_SOURCE_BUILT_NOT_RUN', source_built=True,
                       output=dict(path='stand_runner', bytes=executable.stat().st_size,
                                   sha256=digest(executable.read_bytes())), source_execution='CLOUD_BUILD_ONLY')
+        result['companion'] = dict(path=companion.name, bytes=companion.stat().st_size,
+                                   sha256=digest(companion.read_bytes()), runtime_lookup='@loader_path')
     except Exception as error:
         result.update(status='FAILED', first_failure=str(error))
         raise

@@ -389,7 +389,8 @@ class StageTests(unittest.TestCase):
         self.assertEqual(selected, self.root / 'build/cmake/runner.cpp')
         self.assertEqual(receipt['shld16_counter'], 'PRESENT')
         self.assertEqual(runner.read_bytes(), original)
-        self.assertEqual(selected.read_bytes(), original)
+        self.assertEqual(selected.read_bytes(), original.replace(b'#include "../synthetic/MacHostFeatures.h"',
+                                                                b'#include "MacHostFeatures.h"'))
         self.assertEqual((selected.parent / 'OracleRanges.h').read_bytes(),
                          (fork / native_stand.REPLAY_RANGES).read_bytes())
 
@@ -426,6 +427,7 @@ class StageTests(unittest.TestCase):
             if argv[:2] == ['cmake', '--build']:
                 binary = build / 'cmake/Bin/stand_runner'; binary.parent.mkdir()
                 binary.write_bytes(struct.pack('<II', 0xfeedfacf, 0x0100000c) + bytes(120))
+                binary.with_name('libmacrunner-hwtso.dylib').write_bytes(binary.read_bytes())
         with patch.object(fex, 'cloud_only'), patch.object(fex, 'run', side_effect=run), \
              patch.object(native_stand, 'verify_builder', return_value=selected), \
              patch.object(fex.subprocess, 'run', side_effect=AssertionError('unmocked compiler')), \
@@ -436,6 +438,9 @@ class StageTests(unittest.TestCase):
         self.assertEqual(report['producer'], selected['producer'])
         self.assertEqual(report['source_built'], True)
         self.assertEqual(report['source_ownership']['generated_units'], 1)
+        self.assertEqual(report['companion']['path'], 'libmacrunner-hwtso.dylib')
+        self.assertEqual((out / 'native-stand/libmacrunner-hwtso.dylib').read_bytes(),
+                         (build / 'cmake/Bin/libmacrunner-hwtso.dylib').read_bytes())
         self.assertEqual(report['runner_adapter']['shld16_counter'], 'NOT_ENABLED_REMOVED_FROM_PRODUCT_SOURCE')
         adapted = (build / 'cmake/runner.cpp').read_text()
         self.assertNotIn('MacRunnerShld16CfApplied', adapted)
