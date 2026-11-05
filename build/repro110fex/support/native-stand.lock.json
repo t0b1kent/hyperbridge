@@ -4,8 +4,8 @@
   "revision": "4d489f182db3b05bb7465d9705483c490f718114",
   "producer": {"source":"native-builder.py","bytes":3543,"sha256":"a9252c4bb31413250d1b8a009392bbddb8e5df40164aa7dfac5a3da2f7cc603e"},
   "files": [
-    {"path":"stands/cpu/artifacts/stand-diff-stage5-20261001/stand_runner_fixed.cpp","bytes":51946,"sha256":"ecd77b879b37f6f100b57df519a884057c72a97c2598174933be8f652b367e99"},
-    {"path":"stands/cpu/artifacts/stand-diff-stage4-20261001/fexmac/OracleRanges.h","bytes":766,"sha256":"eebeea8c816ade81a2f13ba6ca5f8f851661f10bc2f6379282867017e1374f2c"},
+    {"path":"stands/hardware/runner.cpp","bytes":57351,"sha256":"29ff35e3ee9e1edd54005f7a8c023c87b23674489a1be552ba4730ea90ce362f"},
+    {"path":"stands/hardware/OracleRanges.h","bytes":845,"sha256":"5c2d4fddbe62701084e1abcccb9168701a1b586191cf02f9f1aeb9f045244a72"},
     {"path":"stands/synthetic/CMakeLists.txt","bytes":4486,"sha256":"60f80700b3dc863baf0c9c071ce6b6886715c963c532b9577dc4702fe34ea8a7"},
     {"path":"stands/synthetic/LICENSE","bytes":1081,"sha256":"c8d31b493eb83ed65af7e30fc8ca3f63591aa092a74e1e09f52efad50ba1d95b"},
     {"path":"stands/synthetic/MacAllocatorHooks.cpp","bytes":1005,"sha256":"58dfe43c44a575c829174756f1d72fc6a30fe2bf8aacaaa6d563ee2d83b96f92"},
