@@ -71,6 +71,28 @@ class ReleaseSource(TestCase):
             pin = json.loads((HERE / 'recipe.lock.json').read_text())
             self.assertEqual(row['product_manifest_sha256'], pin['wow64_source']['product_manifest_sha256'])
 
+    def test_full_source_builder_returning_none_still_records_and_archives_outputs(self):
+        pin, _, _, _, _ = producer.inputs()
+        for variant in ['fex32', 'fex64']:
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as directory:
+                out = Path(directory) / 'full'
+                expected = pin['reference_pe_sha256'][variant]
+                def source_build(target, *args, **kwargs):
+                    (target / 'outputs.json').write_text(json.dumps(dict(files={},
+                        ec_modules=2 if variant == 'fex64' else 0,
+                        unique_ec_binaries=1 if variant == 'fex64' else 0)))
+                    return None
+                with mock.patch.object(producer.fex, 'cloud_only'), \
+                     mock.patch.object(producer.fex, 'build', side_effect=source_build), \
+                     mock.patch.object(producer.release_bytes, 'compare_outputs', return_value=dict(
+                         status='REFERENCE_MATCH', expected_sha256=expected, actual_sha256=expected)), \
+                     mock.patch.object(producer, 'archive', return_value={'path': 'kept-source-output.tar'}):
+                    producer.build(out, [variant], stage='full')
+                result = json.loads((out / 'RESULT.json').read_text())
+                self.assertEqual(result['status'], 'BUILT_SOURCE_ONLY_NOT_ACCEPTED')
+                self.assertEqual(result['variants'][variant]['actual_dll_sha256'], expected)
+                self.assertEqual(result['archive']['path'], 'kept-source-output.tar')
+
     def test_supplement_receipt_names_its_own_bytes_after_multiple_tails(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

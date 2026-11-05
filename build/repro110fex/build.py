@@ -209,8 +209,8 @@ def build(out, variants, stage='full', from_outputs=None):
                 return verified
             stage_result = fex.build(target, lock, tools,
                 source_overlay=overlay, stage=stage)
-            stage_result['product_manifest_sha256'] = variant_pin['product_manifest_sha256']
             if stage != 'full':
+                stage_result['product_manifest_sha256'] = variant_pin['product_manifest_sha256']
                 result['variants'][variant] = stage_result
                 continue
             canonical = release_bytes.compare_outputs(target, variant, pin['reference_pe_sha256'][variant])
