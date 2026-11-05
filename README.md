@@ -18,7 +18,7 @@ Since 28 September 2026, HyperBridge has two parts:
 
 ## HyperBridge 1.1.0
 
-[Translator release](https://github.com/t0b1kent/hyperbridge/releases/tag/v1.1.0) · [MacRunner 1.1.0 app](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.1.0) · [English notes](docs/RELEASE-1.1.0-EN.md) · [Что нового по-русски](docs/RELEASE-1.1.0-RU.md).
+[Translator release](https://github.com/t0b1kent/hyperbridge/releases/tag/v1.1.0) · [MacRunner 1.1.0 app](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.1.0) · [English notes](docs/RELEASE-1.1.0-EN.md).
 
 This version includes experimental block headers keyed by PC, comparisons, returns without polling, RIP literals and in-block QPC. **HEADER_BY_PC, RET_NOPOLL, CMP_ZC, RIP_LITERAL and QPC_INLINE are disabled by default.** “On par with Rosetta” describes experimental configuration M on xbench, not the release defaults or average game performance.
 
@@ -33,19 +33,16 @@ M1 Pro, November 3, 2026, cycles per step, median of three rounds; lower is bett
 
 M enables CMP_ZC, RIP_LITERAL, RET_NOPOLL, HEADER_BY_PC, QPC_INLINE=5 and PAUSE=isb. Indirect calls take 18.2% less time than Rosetta in this series. Both x86 paths execute the same code; ARM64 is a separate native reference. [Methodology and limits](docs/RELEASE-1.1.0-EN.md).
 
-В 1.1.0 добавлены экспериментальные пути заголовка блока по PC, сравнений, возвратов без опроса, RIP-литералов и QPC внутри блока. Новые ключи по умолчанию выключены. «Наравне с Rosetta» относится к настройке M на стенде; таблица не описывает среднюю скорость приложений.
 
-### DirectX 12 without Rosetta / без Rosetta
+### DirectX 12 without Rosetta
 
 Elden Ring (DirectX 12) runs on Apple Silicon without Rosetta — our own x86 translator (HyperBridge) and our own DX12 → Metal layer. As far as we know, this is a first: CrossOver Preview (FEX, no Rosetta) does not start Elden Ring. This was checked by the owner; its FEX bottles include only D3D10/11.
 
-Elden Ring (DirectX 12) идёт на Apple Silicon без Rosetta: свой переводчик x86 (HyperBridge) и свой слой DX12 → Metal. Насколько нам известно — первыми: CrossOver Preview (FEX, без Rosetta) Elden Ring не запускает (проверено владельцем), его FEX-бутылки несут только D3D10/11.
 
-### First launch in MacRunner / Первый запуск
+### First launch in MacRunner
 
 On the first game launch, MacRunner prepares the bottle for several minutes. Shader compilation in the first few minutes of play can cause stuttering. On the second launch, preparation is complete and cached shaders allow smoother play; new scenes may still require compilation. MacRunner 1.1.0 does not migrate shader caches between engine versions. For the best frame rates, close demanding background apps and disconnect your second monitor; both remained active in the owner's recordings.
 
-При первом запуске игры приложение готовит бутылку несколько минут; в первые минуты игры компилируются шейдеры и возможны подтормаживания. Со второго запуска подготовка выполнена, а кеш шейдеров делает игру плавнее; новые сцены могут потребовать компиляции. Перенос кеша после обновления движка в MacRunner 1.1.0 не включён. Для лучших к/с закройте тяжёлые фоновые программы и отключите второй монитор; в записях владельца они оставались активны.
 
 ## Historical comparison: October 2026, MacRunner 1.0.9
 

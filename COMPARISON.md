@@ -11,7 +11,7 @@ xbench on M1 Pro; cycles per step, median of three rounds, lower is better. Rose
 | HyperBridge/FEX, new switches off | 5.02 | 6.02 | 3.65 | 6.04 | 4.21 |
 | HyperBridge/FEX, experimental M | 4.01 | 4.53 | 3.01 | 5.02 | 4.21 |
 
-HEADER_BY_PC, RET_NOPOLL, CMP_ZC, RIP_LITERAL and QPC_INLINE are disabled by default in 1.1.0. M enables CMP_ZC, RIP_LITERAL, RET_NOPOLL, HEADER_BY_PC, QPC_INLINE=5 and PAUSE=isb. “On par with Rosetta” applies to this experimental configuration on these microloops, not to release defaults or average game performance. [Full methodology and limits](docs/RELEASE-1.1.0-EN.md) · [Русская версия](docs/RELEASE-1.1.0-RU.md).
+HEADER_BY_PC, RET_NOPOLL, CMP_ZC, RIP_LITERAL and QPC_INLINE are disabled by default in 1.1.0. M enables CMP_ZC, RIP_LITERAL, RET_NOPOLL, HEADER_BY_PC, QPC_INLINE=5 and PAUSE=isb. “On par with Rosetta” applies to this experimental configuration on these microloops, not to release defaults or average game performance. [Full methodology and limits](docs/RELEASE-1.1.0-EN.md).
 
 ## October 7, 2026: MacRunner 1.0.9
 
