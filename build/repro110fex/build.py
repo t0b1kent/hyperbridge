@@ -23,6 +23,30 @@ import candidate_source as source
 import release_bytes
 
 
+def source_for_variant(variant, pin, product):
+    """Keep the common c32 chain for 64-bit; replay the separately shipped WOW64 snapshot."""
+    source.require(variant in ('fex64', 'fex32'), 'Unknown translator variant')
+    if variant == 'fex64':
+        return pin, product
+    config = pin.get('wow64_source')
+    source.require(type(config) is dict, 'WOW64 source pin missing')
+    selected_pin = copy.deepcopy(pin)
+    for key in ['product_manifest', 'product_manifest_sha256', 'product_postimage_count']:
+        selected_pin[key] = config[key]
+    selected_product = source.pinned_json(source.owned(HERE, selected_pin['product_manifest']),
+                                          selected_pin['product_manifest_sha256'])
+    source.require(type(selected_pin['product_postimage_count']) is int and
+                   len(selected_product['product_source_postimages']) == selected_pin['product_postimage_count'],
+                   'WOW64 source inventory count differs')
+    delta = config['post_tail']
+    source.require(selected_product['wow64_delta'] == dict(patch=delta['file'], sha256=delta['sha256']) and
+                   selected_product['reference_wow64_sha256'] == pin['reference_pe_sha256']['fex32'],
+                   'WOW64 source delta or reference differs')
+    selected_pin['post_tail'] = pin['post_tail'] + [delta]
+    source.post_tail_rows(HERE, selected_pin)
+    return selected_pin, selected_product
+
+
 def inputs():
     pin = json.loads((HERE / 'recipe.lock.json').read_bytes())
     source.require(pin.get('schema') == 1 and pin['repository'] ==
@@ -117,7 +141,9 @@ def archive(out, variants):
 def build(out, variants, stage='full', from_outputs=None):
     source.require(stage in ['full', 'inventory', 'patches', 'configure', 'compile', 'native-stand', 'admission'],
                    'Unknown source recipe stage')
-    source.require(stage == 'full' or variants == ['fex64'], 'Stage matrix requires exactly FEX64')
+    source.require(stage == 'full' or variants == ['fex64'] or
+                   (variants == ['fex32'] and stage in ['inventory', 'patches', 'configure']),
+                   'Unsupported source architecture/stage selection')
     source.require((from_outputs is not None) == (stage == 'admission'),
                    'Admission requires compiled outputs; other stages must not receive them')
     fex.cloud_only()
@@ -135,19 +161,20 @@ def build(out, variants, stage='full', from_outputs=None):
     (out / 'ENGINE-environment.json').write_text(json.dumps(engine, indent=2) + '\n')
     try:
         for variant in variants:
+            variant_pin, variant_product = source_for_variant(variant, pin, product)
             target = out / variant
             target.mkdir()
             if stage == 'inventory':
                 result['variants'][variant] = dict(status='INVENTORY_ONLY_NOT_ACCEPTED',
-                    postimages=len(product['product_source_postimages']), actual_source='NOT_ENABLED',
+                    postimages=len(variant_product['product_source_postimages']), actual_source='NOT_ENABLED',
+                    product_manifest_sha256=variant_pin['product_manifest_sha256'],
                     patches=len(sealed[variant]['patches']), compiler='NOT_ENABLED')
                 continue
             if stage == 'admission':
                 admitted = fex.admit_outputs(Path(from_outputs) / variant, target, variant)
                 result['variants'][variant] = admitted
                 continue
-            # c12: both architectures are built from the SAME patched tree (the accepted c12 source), so both
-            # take the r5 FEX64 series; only the MinGW triple, the link timestamp and the target differ.
+            # Both start with the common public series. WOW64 then replays its separately pinned source.
             lock = copy.deepcopy(sealed['fex64'])
             lock['variant'] = variant
             lock['override_hash'] = pin['override_hash']
@@ -172,16 +199,17 @@ def build(out, variants, stage='full', from_outputs=None):
                     source.require(head == pin['candidate_revision'], 'Loaded candidate revision differs')
                     def run(argv, name):
                         return fex.run(argv, src, output, name, env)
-                    applied = source.apply(src, checkout / pin['candidate_directory'], pin,
-                                           product, HERE, output, run)
+                    applied = source.apply(src, checkout / pin['candidate_directory'], variant_pin,
+                                           variant_product, HERE, output, run)
                     actual_lock['patches'].extend(applied['order'])
                     return applied
                 source.require(stage == 'submodules', 'Unknown source overlay stage')
-                verified = source.verify_product(src, product, pin['product_postimage_count'])
+                verified = source.verify_product(src, variant_product, variant_pin['product_postimage_count'])
                 (output / 'product-postimages.json').write_text(json.dumps(verified, indent=2) + '\n')
                 return verified
             stage_result = fex.build(target, lock, tools,
                 source_overlay=overlay, stage=stage)
+            stage_result['product_manifest_sha256'] = variant_pin['product_manifest_sha256']
             if stage != 'full':
                 result['variants'][variant] = stage_result
                 continue
@@ -191,6 +219,7 @@ def build(out, variants, stage='full', from_outputs=None):
                            outputs['unique_ec_binaries'] == (1 if variant == 'fex64' else 0),
                            'ARM64EC output count differs')
             result['variants'][variant] = dict(status='BUILT_SOURCE_ONLY', files=len(outputs['files']),
+                                                product_manifest_sha256=variant_pin['product_manifest_sha256'],
                                                 ec_modules=outputs['ec_modules'],
                                                 unique_ec_binaries=outputs['unique_ec_binaries'],
                                                 release_dll_sha256=canonical['expected_sha256'],

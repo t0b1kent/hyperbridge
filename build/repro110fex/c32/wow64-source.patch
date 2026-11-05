@@ -1,0 +1,2234 @@
+--- a/CodeEmitter/CodeEmitter/Emitter.h
++++ b/CodeEmitter/CodeEmitter/Emitter.h
+@@ -368,8 +368,6 @@
+   CNTFRQ_EL0 = GenSystemReg<0b11, 0b011, 0b1110, 0b0000, 0b000>,
+   CNTVCT_EL0 = GenSystemReg<0b11, 0b011, 0b1110, 0b0000, 0b010>,
+   CNTVCTSS_EL0 = GenSystemReg<0b11, 0b011, 0b1110, 0b0000, 0b110>,
+-  // MacRunner QPCJIT: Apple's non-speculative virtual counter S3_4_C15_C10_6, read by macOS libsystem when commpage USER_TIMEBASE == 3.
+-  ACNTVCT_EL0 = GenSystemReg<3, 4, 15, 10, 6>,
+ };
+ 
+ template<uint32_t op1, uint32_t CRm, uint32_t op2>
+--- a/FEXCore/Source/Interface/Context/Context.cpp
++++ b/FEXCore/Source/Interface/Context/Context.cpp
+@@ -1,6 +1,5 @@
+ // SPDX-License-Identifier: MIT
+ #include "Interface/Context/Context.h"
+-#include "Interface/Core/MRHeaderByPC.h"
+ #include "Interface/Core/OpcodeDispatcher.h"
+ #include "Interface/Core/Dispatcher/Dispatcher.h"
+ #include "Interface/Core/X86Tables/X86Tables.h"
+@@ -58,14 +57,7 @@
+ }
+ 
+ bool FEXCore::Context::ContextImpl::IsAddressInCodeBuffer(FEXCore::Core::InternalThreadState* Thread, uintptr_t Address) const {
+-  const bool In = Thread->CPUBackend->IsAddressInCodeBuffer(Address) || CodeCache.IsAddressInMappedCodeBuffer(Address);
+-  // ★ MacRunner FEXXFER MACRUNNER_FEX_HEADER_BY_PC (mode 0: nothing): every caller passes the faulting PC (ARM64EC Module.cpp,
+-  // InvalidationTracker); the PC-less readers after it (IsCurrentBlockSingleInst / IsAddressInCurrentBlock / GetGuestBlockEntry)
+-  // then see the unit of that PC.
+-  if (In) {
+-    MRHeaderByPC::Resolve(Thread, Address, MRHeaderByPC::CodeBufferCheck);
+-  }
+-  return In;
++  return Thread->CPUBackend->IsAddressInCodeBuffer(Address) || CodeCache.IsAddressInMappedCodeBuffer(Address);
+ }
+ 
+ bool FEXCore::Context::ContextImpl::RequiresRelocatableConstants() const {
+--- a/FEXCore/Source/Interface/Core/CPUBackend.cpp
++++ b/FEXCore/Source/Interface/Core/CPUBackend.cpp
+@@ -338,16 +338,6 @@
+     return nullptr;
+   }
+ 
+-  void CPUBackend::MRFindUnitBegin(uintptr_t Address, uint64_t* Out) const {
+-    uint64_t Found = CurrentCodeBuffer ? CurrentCodeBuffer->MRFindUnit(Address) : 0;
+-    for (const auto& Buffer : SignalHandlerCodeBuffers) {
+-      if (!Found) {
+-        Found = Buffer->MRFindUnit(Address);
+-      }
+-    }
+-    *Out = Found;
+-  }
+-
+   bool CPUBackend::IsAddressInCodeBuffer(uintptr_t Address) const {
+     const auto CheckCodeBuffer = [](const CodeBuffer& Buffer, uintptr_t Address) {
+       const auto BufferPtr = reinterpret_cast<uintptr_t>(Buffer.Ptr);
+--- a/FEXCore/Source/Interface/Core/CPUBackend.h
++++ b/FEXCore/Source/Interface/Core/CPUBackend.h
+@@ -125,9 +125,6 @@
+     virtual void ClearRelocations() {}
+ 
+     bool IsAddressInCodeBuffer(uintptr_t Address) const;
+-    // ★ MacRunner FEXXFER MACRUNNER_FEX_HEADER_BY_PC: begin of the compiled unit containing Address in this thread's code buffers
+-    // (current + kept signal-handler generations, as IsAddressInCodeBuffer). ALWAYS writes *Out (0 = no unit).
+-    void MRFindUnitBegin(uintptr_t Address, uint64_t* Out) const;
+ 
+     // Updates the CodeBuffer if needed and returns a reference to the old one.
+     // The returned reference should be kept alive carefully to avoid early deletion of resources.
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -1,7 +1,5 @@
+ // SPDX-License-Identifier: MIT
+ #include "MRCallRet.h"
+-#include "Interface/Core/MRHeaderByPC.h"
+-#include <FEXCore/Utils/MacRunnerXfer.h>
+ /*
+ $info$
+ category: glue ~ Logic that binds various parts together
+@@ -92,25 +90,6 @@
+ #include <unordered_map>
+ #include <utility>
+ #include <xxhash.h>
+-#include <FEXCore/Utils/MacRunnerQpcInline.h>
+-
+-// ★ MacRunner QPCJIT (03.11.2026) MACRUNNER_FEX_QPC_INLINE: the plan is filled by the ARM64EC frontend (Module.cpp ProcessInit) before
+-// any guest code runs; with the key 0 it is never armed and GenerateIR emits exactly the previous IR.
+-namespace FEXCore::Utils::MRQpcInline {
+-Plan G {};
+-std::atomic<uint64_t> InlinedCalls {0};
+-std::atomic<uint64_t> Sites {0};
+-std::atomic<uint64_t> Refused {0};
+-std::atomic<uint64_t> SiteCalls {0};
+-std::atomic<uint64_t> SiteCompiledCall {0};
+-std::atomic<uint64_t> SiteCompiledJmp {0};
+-std::atomic<uint64_t> SiteQueries {0};
+-std::atomic<uint64_t> SiteRejected {0};
+-std::atomic<uint64_t> SiteReads {0};
+-std::atomic<uint64_t> SiteReadTicks {0};
+-SiteEntry Entries[MaxSiteEntries] {};
+-std::atomic<unsigned> EntryCount {0};
+-} // namespace FEXCore::Utils::MRQpcInline
+ 
+ // ★ MacRunner Opus 19.09.2026 — счётчики JIT (только диагностика, поведение не меняют).
+ // Вопрос: почему главный поток при загрузке Elden Ring до 80 % занятости компилирует в FEX —
+@@ -647,7 +626,6 @@
+ 
+ Recovery Materialize(CpuStateFrame* Frame, uint64_t HostPC, const uint64_t* HostGPRs,
+                      const __uint128_t* HostQ) noexcept {
+-  if (Frame) MRHeaderByPC::Resolve(Frame->Thread, HostPC, MRHeaderByPC::X87Region);   // ★ MacRunner FEXXFER (mode 0: nothing)
+   const Recovery Failed {Status::Failed};
+   if (!Frame || !Frame->State.InlineJITBlockHeader) return {};
+   const uint64_t Begin = Frame->State.InlineJITBlockHeader;
+@@ -771,7 +749,6 @@
+ namespace FEXCore::Core::X87Fault {
+ // Bounded reads of the current block's tail only; no allocation, logging or lazy initialization (exception path).
+ bool Materialize(CpuStateFrame* Frame, uint64_t HostPC, const uint64_t* HostGPRs, const __uint128_t* HostQ, uint64_t HostSP) noexcept {
+-  if (Frame) MRHeaderByPC::Resolve(Frame->Thread, HostPC, MRHeaderByPC::X87Fault);   // ★ MacRunner FEXXFER (mode 0: nothing)
+   if (!Frame || !Frame->State.InlineJITBlockHeader || !HostQ) return false;
+   const uint64_t Begin = Frame->State.InlineJITBlockHeader;
+   const auto* BlockHeader = reinterpret_cast<const CPU::CPUBackend::JITCodeHeader*>(Begin);
+@@ -867,90 +844,6 @@
+ 
+ std::atomic<MRCallRet::ZeroHookFn> MRCallRet::ZeroHook {nullptr};
+ std::atomic<uint64_t> MRCallRet::Grows {0};
+-// ★ MacRunner FEXXFER MACRUNNER_FEX_HEADER_BY_PC (Interface/Core/MRHeaderByPC.h): resolve / probe of InlineJITBlockHeader readers.
+-namespace MRHeaderByPC {
+-namespace {
+-struct ReaderStats {
+-  std::atomic<uint64_t> Checks {}, Same {}, Diff {}, NoUnit {}, Poison {}, CtlOk {}, CtlBad {}, Printed {};
+-};
+-ReaderStats Stats[ReaderCount];
+-const char* const Names[ReaderCount] = {"restore_rip", "x87_region", "x87_fault", "code_buffer", "compact_loop", "unaligned_atomic"};
+-constexpr uint64_t PoisonValue = 0xF00DFEEDDEADBEEFULL;   // the lookup must overwrite it on every path
+-bool UnitContains(uint64_t Begin, uint64_t Address) {
+-  if (!Begin || Address < Begin) {
+-    return false;
+-  }
+-  const auto* Header = reinterpret_cast<const FEXCore::CPU::CPUBackend::JITCodeHeader*>(Begin);
+-  const auto* Tail = reinterpret_cast<const FEXCore::CPU::CPUBackend::JITCodeTail*>(Begin + Header->OffsetToBlockTail);
+-  return Address < Begin + Tail->Size;
+-}
+-void Print(unsigned R, const char* Why, uint64_t Address, uint64_t Stored, uint64_t Found) {
+-  const auto& S = Stats[R];
+-  char Line[384];
+-  const auto Result = fmt::format_to_n(Line, sizeof(Line) - 1,
+-    "macrunner-fex-header-probe: reader={} why={} checks={} same={} diff={} nounit={} poison={} ctl_ok={} ctl_bad={} addr={:x} stored={:x} found={:x}\n",
+-    Names[R], Why, S.Checks.load(), S.Same.load(), S.Diff.load(), S.NoUnit.load(), S.Poison.load(), S.CtlOk.load(), S.CtlBad.load(), Address,
+-    Stored, Found);
+-  Line[std::min<size_t>(Result.size, sizeof(Line) - 1)] = 0;
+-  FEX::Windows::Logging::Raw(Line);
+-}
+-} // namespace
+-
+-bool Lazy(FEXCore::Context::ContextImpl* CTX) {
+-  return FEXCore::Utils::MacRunnerHeaderByPCMode() == 1 && CTX && !CTX->CodeCache.EnableCodeCaching;
+-}
+-
+-void Resolve(FEXCore::Core::InternalThreadState* Thread, uint64_t HostAddress, unsigned R) noexcept {
+-  const unsigned Mode = FEXCore::Utils::MacRunnerHeaderByPCMode();
+-  if (!Mode || !Thread || !Thread->CPUBackend || !Thread->CurrentFrame || R >= ReaderCount) {
+-    return;
+-  }
+-  if (Mode == 1) {
+-    if (!Lazy(static_cast<FEXCore::Context::ContextImpl*>(Thread->CTX))) {
+-      return;
+-    }
+-    uint64_t Found = 0;
+-    Thread->CPUBackend->MRFindUnitBegin(HostAddress, &Found);
+-    Thread->CurrentFrame->State.InlineJITBlockHeader = Found;
+-    return;
+-  }
+-  // Mode 2: probe only, the field stays what the entries stored.
+-  auto& S = Stats[R];
+-  const uint64_t Stored = Thread->CurrentFrame->State.InlineJITBlockHeader;
+-  uint64_t Found = PoisonValue;
+-  Thread->CPUBackend->MRFindUnitBegin(HostAddress, &Found);
+-  const uint64_t N = S.Checks.fetch_add(1, std::memory_order_relaxed) + 1;
+-  const char* Bad = nullptr;
+-  if (Found == PoisonValue) {
+-    S.Poison.fetch_add(1, std::memory_order_relaxed);
+-    Bad = "poison";
+-  } else if (Found) {
+-    if (Found == Stored) {
+-      S.Same.fetch_add(1, std::memory_order_relaxed);
+-    } else {
+-      S.Diff.fetch_add(1, std::memory_order_relaxed);
+-      Bad = "diff";
+-    }
+-  } else if (UnitContains(Stored, HostAddress)) {
+-    S.Diff.fetch_add(1, std::memory_order_relaxed);   // the stored unit contains the address, the table did not find it
+-    Bad = "miss";
+-  } else {
+-    S.NoUnit.fetch_add(1, std::memory_order_relaxed);
+-  }
+-  if (Stored) {
+-    // Negative control: the byte before the stored unit is never inside it, so the comparison above can fail.
+-    uint64_t Before = PoisonValue;
+-    Thread->CPUBackend->MRFindUnitBegin(Stored - 1, &Before);
+-    (Before != Stored && Before != PoisonValue ? S.CtlOk : S.CtlBad).fetch_add(1, std::memory_order_relaxed);
+-  }
+-  if (Bad && S.Printed.fetch_add(1, std::memory_order_relaxed) < 16) {
+-    Print(R, Bad, HostAddress, Stored, Found);
+-  } else if ((N & (N - 1)) == 0) {
+-    Print(R, "count", HostAddress, Stored, Found);
+-  }
+-}
+-} // namespace MRHeaderByPC
+-
+ namespace FEXCore::Context {
+ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
+   : HostFeatures {Features}
+@@ -1011,7 +904,6 @@
+ }
+ 
+ uint64_t ContextImpl::RestoreRIPFromHostPC(FEXCore::Core::InternalThreadState* Thread, uint64_t HostPC) {
+-  MRHeaderByPC::Resolve(Thread, HostPC, MRHeaderByPC::RestoreRIP);   // ★ MacRunner FEXXFER (mode 0: nothing)
+   const auto Frame = Thread->CurrentFrame;
+   const uint64_t BlockBegin = Frame->State.InlineJITBlockHeader;
+   auto [InlineHeader, InlineTail] = GetFrameBlockInfo(Thread->CurrentFrame);
+@@ -1718,28 +1610,6 @@
+           Thread->OpDispatcher->StartNewBlock();
+         }
+ 
+-#ifdef ARCHITECTURE_arm64ec
+-        // ★ MacRunner QPCJIT: the first instruction of ntdll's RtlQueryPerformanceCounter FFS (MacRunnerQpcInline.h). Every check that
+-        // could make the inline path differ from the FFS it replaces refuses it; the plain translation below is then emitted unchanged.
+-        if (FEXCore::Utils::MRQpcInline::G.Armed && i == 0 && InstAddress == FEXCore::Utils::MRQpcInline::G.Ffs && TableInfo &&
+-            TableInfo->OpcodeDispatcher.OpDispatch) {
+-          namespace MRQ = FEXCore::Utils::MRQpcInline;
+-          bool Ok = MaxInst != 1 && Config.SMCChecks == FEXCore::Config::CONFIG_SMC_MTRACK && !Block.ForceFullSMCDetection &&
+-                    !ValidateWritableCode && !CodeCache.IsGeneratingCache && !FEXCore::Config::Get_ENABLECODECACHINGWIP();
+-          if (Ok) {
+-            const auto Range = SyscallHandler->QueryGuestExecutableRange(Thread, InstAddress);
+-            Ok = !Range.Writable && !Range.NoTrap && Range.Base <= InstAddress && InstAddress + sizeof(MRQ::G.FfsBytes) <= Range.Base + Range.Size;
+-          }
+-          Ok = Ok && !memcmp(reinterpret_cast<const void*>(MRQ::G.Ffs), MRQ::G.FfsBytes, sizeof(MRQ::G.FfsBytes)) &&
+-               !memcmp(reinterpret_cast<const void*>(MRQ::G.Body), MRQ::G.BodyBytes, sizeof(MRQ::G.BodyBytes));
+-          if (Ok) {
+-            Thread->OpDispatcher->MacRunnerQpcInline(InstAddress - GuestRIP);
+-            MRQ::Sites.fetch_add(1, std::memory_order_relaxed);
+-          } else {
+-            MRQ::Refused.fetch_add(1, std::memory_order_relaxed);
+-          }
+-        }
+-#endif
+         if (TableInfo && TableInfo->OpcodeDispatcher.OpDispatch) {
+           auto Fn = TableInfo->OpcodeDispatcher.OpDispatch;
+           Thread->OpDispatcher->ResetHandledLock();
+--- a/FEXCore/Source/Interface/Core/JIT/ALUOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/ALUOps.cpp
+@@ -61,13 +61,6 @@
+     Mask = 0xFFFF'FFFFULL;
+   }
+ 
+-  if (MRUseRipLiteral(Node, Constant & Mask)) {
+-    // ★ MacRunner FEXXFER MACRUNNER_FEX_RIP_LITERAL (MacRunnerXfer.h): one PC-relative load instead of mov/movk/movk;
+-    // the literal is placed after the unit's stubs with the existing RELOC_GUEST_RIP_LITERAL relocation.
+-    auto& Lit = MRRipLiterals.emplace_back(InsertGuestRIPLiteral(Constant & Mask));
+-    ldr(GetReg(Node).X(), &Lit.Loc);
+-    return;
+-  }
+   InsertGuestRIPMove(GetReg(Node), Constant & Mask);
+ }
+ 
+@@ -90,19 +83,6 @@
+       // If ECV isn't supported then an ISB must be emitted to synchronize all instructions and loads before the cycle read.
+       isb();
+     }
+-    mrs(GetReg(Node), ARMEmitter::SystemRegister::CNTVCT_EL0);
+-  }
+-}
+-
+-// MacRunner QPCJIT: the counter read of PE ntdll's MACRUNNER_QPC_FAST (and of libsystem mach_continuous_time), instruction for instruction.
+-DEF_OP(MRHostCounter) {
+-  auto Op = IROp->C<IR::IROp_MRHostCounter>();
+-  if (Op->Kind == 3) {
+-    mrs(GetReg(Node), ARMEmitter::SystemRegister::ACNTVCT_EL0);
+-  } else if (Op->Kind == 2) {
+-    mrs(GetReg(Node), ARMEmitter::SystemRegister::CNTVCTSS_EL0);
+-  } else {
+-    isb();
+     mrs(GetReg(Node), ARMEmitter::SystemRegister::CNTVCT_EL0);
+   }
+ }
+--- a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+@@ -291,38 +291,12 @@
+ 
+       EmitLinkedBranch(NewRIP, Op->Hint == IR::BranchHint::Call);
+       (void)Bind(&l_CallReturn);
+-      if (Op->Hint == IR::BranchHint::Call && !Op->CallReturnBlock.IsInvalid()) {
+-        MREmitReturnLanding(Op->CallReturnBlock);   // MacRunner RET_LANDING (key 0: nothing emitted)
+-      }
+ #ifdef ARCHITECTURE_arm64ec
+     }
+ #endif
+   } else {
+     ARMEmitter::ForwardLabel SkipFullLookup;
+     auto RipReg = GetReg(Op->NewRIP);
+-
+-    if (Op->Hint == IR::BranchHint::Call && MRICActive && !Op->CallReturnBlock.IsInvalid()) {
+-      // ★ MacRunner FEXXFER MACRUNNER_FEX_ICALL_IC (MacRunnerXfer.h): monomorphic inline target cache. Hit: the tag literal equals the
+-      // target -> shadow-stack push and a direct `bl` that ExitFunctionLink links to the target's host code (initially / after
+-      // delinking: the fill stub). Miss: out-of-line (fill once, or the L1 path for a different target). Flags are not touched.
+-      auto CallReturnAddressReg = GetReg(Op->CallReturnAddress).X();
+-      PendingCallReturnTargetLabel = &CallReturnTargets.try_emplace(Op->CallReturnBlock.ID()).first->second;
+-      auto& Site = MRICSites.emplace_back();
+-      Site.RipIdx = RipReg.Idx();
+-      Site.RaIdx = CallReturnAddressReg.Idx();
+-      ldr(TMP1, &Site.Tag);
+-      sub(TMP1, TMP1, RipReg.X());
+-      cbnz_OrRestart(ARMEmitter::Size::i64Bit, TMP1, &Site.Miss);
+-      ARMEmitter::ForwardLabel l_CallReturn;
+-      (void)adr(TMP1, &l_CallReturn);
+-      stp<ARMEmitter::IndexType::PRE>(CallReturnAddressReg, TMP1, REG_CALLRET_SP, -0x10);
+-      Site.SiteBl = GetCursorAddress<uint8_t*>();
+-      bl_OrRestart(&Site.Fill);
+-      (void)Bind(&l_CallReturn);
+-      Site.ReturnAddr = GetCursorAddress<uint8_t*>();
+-      MREmitReturnLanding(Op->CallReturnBlock);   // MacRunner RET_LANDING (key 0: nothing emitted)
+-      return;
+-    }
+ 
+     if (Op->Hint == IR::BranchHint::Return) {
+       // Both cached call-return labels and L1 targets enter through
+@@ -335,15 +309,7 @@
+       // First try to pop from the call-ret stack, otherwise follow the normal path (but ending in a ret)
+       ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
+       sub(TMP1, TMP1, RipReg.X());
+-      if ((FEXCore::Utils::MacRunnerHotFallthroughMask() & 2) && !MacRunnerNullHostMode()) {
+-        // MacRunner HOT_FALLTHROUGH 2: the hit falls through to the return, the miss takes the branch to the L1 lookup below.
+-        ARMEmitter::ForwardLabel RetMiss;
+-        (void)cbnz(ARMEmitter::Size::i64Bit, TMP1, &RetMiss);
+-        ret(TMP2);
+-        (void)Bind(&RetMiss);
+-      } else {
+-        (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &SkipFullLookup);
+-      }
++      (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &SkipFullLookup);
+     }
+ 
+     // L1 Cache
+@@ -358,16 +324,9 @@
+ 
+     // Note: sub+cbnz used over cmp+br to preserve flags.
+     sub(TMP1, TMP1, RipReg.X());
+-    if ((FEXCore::Utils::MacRunnerHotFallthroughMask() & 4) && !MacRunnerNullHostMode()) {
+-      // MacRunner HOT_FALLTHROUGH 4: the L1 hit falls through; the miss stub (end of the unit) loads the dispatcher, stores RIP, comes back.
+-      auto& Stub = MRL1MissStubs.emplace_back(MRL1MissStub {{}, {}, RipReg.Idx()});
+-      cbnz_OrRestart(ARMEmitter::Size::i64Bit, TMP1, &Stub.Miss);
+-      BindOrRestart(&Stub.Back);
+-    } else {
+     (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &SkipFullLookup);
+     ldr(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.DispatcherLoopTop));
+     str(RipReg.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
+-    }
+ 
+     (void)Bind(&SkipFullLookup);
+     if (MacRunnerNullHostMode()) {
+@@ -393,9 +352,6 @@
+       }
+       blr(TMP2);
+       (void)Bind(&l_CallReturn);
+-      if (!Op->CallReturnBlock.IsInvalid()) {
+-        MREmitReturnLanding(Op->CallReturnBlock);   // MacRunner RET_LANDING (key 0: nothing emitted)
+-      }
+     } else if (Op->Hint == IR::BranchHint::Return) {
+       ret(TMP2);
+     } else {
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -1,7 +1,5 @@
+ // SPDX-License-Identifier: MIT
+ #include "Interface/Core/MRCallRet.h"
+-#include "Interface/Core/MRHeaderByPC.h"
+-int MacRunnerNullHostMode();   // ★ MacRunner, defined in BranchOps.cpp (global namespace)
+ // Modifications (c) 2026 MacRunner contributors, MIT
+ #include "Interface/Core/HBX87Proof.h"
+ #ifdef ARCHITECTURE_arm64ec
+@@ -50,7 +48,6 @@
+ #include <FEXCore/HLE/SyscallHandler.h>
+ 
+ #include <cstdio>
+-#include <algorithm>
+ #include <atomic>
+ #include <cstring>
+ #include <unistd.h>
+@@ -532,27 +529,6 @@
+   ARMEmitter::Emitter::ClearICache(Caller, sizeof(*Caller));
+ }
+ 
+-// ★ MacRunner FEXXFER MACRUNNER_FEX_ICALL_IC: link record of one inline-cache site (offsets relative to the record, see CompileCode).
+-struct MRICLinkRecord {
+-  int32_t TagOffset;
+-  int32_t SiteOffset;
+-  int32_t FillOffset;
+-  int32_t Pad;
+-};
+-
+-static void MRICDelinker(FEXCore::Context::ExitFunctionLinkData* OpaqueRecord) {
+-  auto* R = reinterpret_cast<uint8_t*>(OpaqueRecord);
+-  const auto* Rec = reinterpret_cast<const MRICLinkRecord*>(R);
+-  auto* Site = reinterpret_cast<uint32_t*>(R + Rec->SiteOffset);
+-  const auto Fill = reinterpret_cast<uintptr_t>(R + Rec->FillOffset);
+-  uint32_t BranchInst = 0;
+-  ARMEmitter::Emitter BranchEmit(reinterpret_cast<uint8_t*>(&BranchInst), 4);
+-  BranchEmit.bl(Fill / 4 - reinterpret_cast<uintptr_t>(Site) / 4);
+-  FEXCore::Allocator::ScopedJITWrite JITWrite;
+-  std::atomic_ref<uint32_t>(*Site).store(BranchInst, std::memory_order::relaxed);
+-  ARMEmitter::Emitter::ClearICache(Site, sizeof(*Site));
+-}
+-
+ static void DirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record, bool Call) {
+   uintptr_t JumpThunkStartAddress = reinterpret_cast<uintptr_t>(Record) - 0x10;
+   uintptr_t CallerAddress = JumpThunkStartAddress + Record->CallerOffset;
+@@ -596,20 +572,13 @@
+   auto Thread = Frame->Thread;
+   bool TFSet = Thread->CurrentFrame->State.flags[X86State::RFLAG_TF_RAW_LOC];
+   uintptr_t HostCode {};
+-  const bool MRIC = reinterpret_cast<uintptr_t>(Record) & 2;   // ★ MacRunner FEXXFER ICALL_IC record (the IC linker stub sets bit 1)
+-  const bool CompactLoop = !MRIC && (reinterpret_cast<uintptr_t>(Record) & 1);
++  const bool CompactLoop = reinterpret_cast<uintptr_t>(Record) & 1;
+   auto LoopRecord = reinterpret_cast<CompactLoopLinkData*>(reinterpret_cast<uintptr_t>(Record) & ~uintptr_t {1});
+   uint64_t GuestRip;
+   if (CompactLoop) {
+-    if (FEXCore::Utils::MacRunnerHeaderByPCMode() == 2) {
+-      // ★ MacRunner FEXXFER probe; in mode 1 the unit's loop-dispatcher stub has just stored the header itself.
+-      MRHeaderByPC::Resolve(Thread, reinterpret_cast<uint64_t>(LoopRecord), MRHeaderByPC::CompactLoop);
+-    }
+     const auto Header = reinterpret_cast<const JITCodeHeader*>(Frame->State.InlineJITBlockHeader);
+     const auto Tail = reinterpret_cast<const JITCodeTail*>(reinterpret_cast<const uint8_t*>(Header) + Header->OffsetToBlockTail);
+     GuestRip = Tail->RIP + LoopRecord->GuestOffset;
+-  } else if (MRIC) {
+-    GuestRip = Frame->State.rip;   // the IC fill stub stored the call target
+   } else {
+     GuestRip = Record->GuestRIP;
+   }
+@@ -665,43 +634,6 @@
+   // ★ Открыть ДО CompileBlock выше нельзя: там своя, вложенная запись, и внешняя скобка
+   // растянулась бы на всю компиляцию блока.
+   FEXCore::Allocator::ScopedJITWrite JITWrite;
+-
+-  if (MRIC) {
+-    // ★ MacRunner FEXXFER ICALL_IC: fill the tag once (first target), link the site's bl to the target's host code while the tag names
+-    // it; the delinker points the bl back to the fill stub (the tag stays, so the next hit relinks the same target).
+-    auto* R = reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(Record) & ~uintptr_t {3});
+-    const auto* Rec = reinterpret_cast<const MRICLinkRecord*>(R);
+-    auto* Tag = reinterpret_cast<uint64_t*>(R + Rec->TagOffset);
+-    auto* Site = reinterpret_cast<uint32_t*>(R + Rec->SiteOffset);
+-    uint64_t Cur = std::atomic_ref<uint64_t>(*Tag).load(std::memory_order::acquire);
+-    if (!Cur && GuestRip) {
+-      std::atomic_ref<uint64_t>(*Tag).store(GuestRip, std::memory_order::release);
+-      Cur = GuestRip;
+-    }
+-    const auto SiteOffset = HostCode / 4 - reinterpret_cast<uintptr_t>(Site) / 4;
+-    {
+-      // ★ counters: calls into the IC linker (fill + relink after delinking) and links made; printed at powers of two.
+-      static std::atomic<uint64_t> Calls {0}, Links {0};
+-      const uint64_t N = Calls.fetch_add(1, std::memory_order_relaxed) + 1;
+-      const uint64_t L = Links.load(std::memory_order_relaxed) + (Cur == GuestRip && GuestRip ? 1 : 0);
+-      if (Cur == GuestRip && GuestRip) Links.fetch_add(1, std::memory_order_relaxed);
+-      if ((N & (N - 1)) == 0) {
+-        char Line[160];
+-        const auto Res = fmt::format_to_n(Line, sizeof(Line) - 1, "macrunner-fex-icall-ic: linker_calls={} links={} tag={:x} target={:x}\n", N, L, Cur, GuestRip);
+-        Line[std::min<size_t>(Res.size, sizeof(Line) - 1)] = 0;
+-        FEX::Windows::Logging::Raw(Line);
+-      }
+-    }
+-    if (Cur == GuestRip && GuestRip && ARMEmitter::Emitter::IsInt26(SiteOffset)) {
+-      uint32_t BranchInst = 0;
+-      ARMEmitter::Emitter BranchEmit(reinterpret_cast<uint8_t*>(&BranchInst), 4);
+-      BranchEmit.bl(SiteOffset);
+-      Thread->LookupCache->AddBlockLink(GuestRip, reinterpret_cast<FEXCore::Context::ExitFunctionLinkData*>(R), MRICDelinker, lk);
+-      std::atomic_ref<uint32_t>(*Site).store(BranchInst, std::memory_order::relaxed);
+-      ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(Site), 4);
+-    }
+-    return HostCode;
+-  }
+ 
+   if (CompactLoop) {
+     // Separately mapped cached code may be outside B's range. In that case
+@@ -974,31 +906,6 @@
+ #endif
+ }
+ 
+-#if defined(MACRUNNER_FEXXFER_CODEDUMP)
+-// FEXXFER diagnostic build only (build-diag, -DMACRUNNER_FEXXFER_CODEDUMP=1; never staged into an engine). Copy of the GAPS fx1d
+-// dump: MACRUNNER_FEX_CODEDUMP=<windows path>, MACRUNNER_FEX_CODEDUMP_RANGE=<lo hex>-<hi hex>: records "HBCD", u32 size, u64 guest
+-// entry, u64 host, the host bytes.
+-static void MRCodeDump(uint64_t Entry, const uint8_t* Host, uint64_t Size) {
+-  static void* File = reinterpret_cast<void*>(-2);
+-  static uint64_t Lo = 0, Hi = 0;
+-  if (File == reinterpret_cast<void*>(-2)) {
+-    File = nullptr;
+-    const char* Path = getenv("MACRUNNER_FEX_CODEDUMP");
+-    const char* Range = getenv("MACRUNNER_FEX_CODEDUMP_RANGE");
+-    if (Path && Range) {
+-      char* End = nullptr; Lo = strtoull(Range, &End, 16); Hi = (End && *End == '-') ? strtoull(End + 1, nullptr, 16) : 0;
+-      HANDLE H = CreateFileA(Path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+-      File = (H == INVALID_HANDLE_VALUE) ? nullptr : H;
+-    }
+-  }
+-  if (!File || Entry < Lo || Entry >= Hi) return;
+-  struct { char Magic[4]; uint32_t Size; uint64_t Entry, Host; } Rec = {{'H', 'B', 'C', 'D'}, static_cast<uint32_t>(Size), Entry, reinterpret_cast<uint64_t>(Host)};
+-  DWORD W = 0;
+-  WriteFile(File, &Rec, sizeof(Rec), &W, nullptr);
+-  WriteFile(File, Host, static_cast<DWORD>(Size), &W, nullptr);
+-}
+-#endif
+-
+ // These new safepoints publish a completed guest continuation. brk #0xCAFD
+ // differs from entrypoint #0xCAFE: its RIP must not be guessed from host PC.
+ void Arm64JITCore::EmitSuspendInterruptCheckAt(uint64_t GuestRIP) {
+@@ -1040,31 +947,11 @@
+ #endif
+ }
+ 
+-// ★ FEXXFER diagnostic build only (-DMACRUNNER_FEXXFER_CODEDUMP; never in a product engine): MACRUNNER_FEXXFER_DIAG_CEILING=<mask>
+-// measures the CEILING of items 3/4 on stands that neither fault nor suspend: 1 = no InlineJITBlockHeader store at block
+-// entries (exceptions would see a stale header), 2 = no suspend poll at block entries (suspension would wait for a backedge).
+-// Unsafe by construction; in product builds this is the constant 0 and the emitted code is unchanged.
+-#if defined(MACRUNNER_FEXXFER_CODEDUMP)
+-static unsigned MRDiagCeiling() {
+-  static const unsigned Mask = [] {
+-    const char* V = getenv("MACRUNNER_FEXXFER_DIAG_CEILING");
+-    return V && V[0] >= '0' && V[0] <= '3' && !V[1] ? unsigned(V[0] - '0') : 0U;
+-  }();
+-  return Mask;
+-}
+-#else
+-static constexpr unsigned MRDiagCeiling() {
+-  return 0;
+-}
+-#endif
+-
+-void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF, uint64_t GuestRIP, ARMEmitter::BiDirectionalLabel* NoPollLabel) {
++void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF, uint64_t GuestRIP) {
+   // Get the address of the JITCodeHeader and store in to the core state.
+   // Two instruction cost, each 1 cycle.
+-  if (!(MRDiagCeiling() & 1) && !MRHeaderLazy) {   // MacRunner FEXXFER HEADER_BY_PC=1: found by host PC instead (MRHeaderByPC.h)
+-    adr_OrRestart(TMP1, &HeaderLabel);
+-    str(TMP1, STATE, offsetof(FEXCore::Core::CPUState, InlineJITBlockHeader));
+-  }
++  adr_OrRestart(TMP1, &HeaderLabel);
++  str(TMP1, STATE, offsetof(FEXCore::Core::CPUState, InlineJITBlockHeader));
+ 
+ #ifdef ARCHITECTURE_arm64ec
+   if (MacRunnerWinctxExactMode && !MRGuestDebugSingleInstruction) {
+@@ -1102,89 +989,7 @@
+     }
+   }
+ 
+-#ifdef ARCHITECTURE_arm64ec
+-  if (MRDiagCeiling() & 2) {
+-    // FEXXFER diagnostic ceiling only (see MRDiagCeiling): no entry poll.
+-  } else if ((FEXCore::Utils::MacRunnerHotFallthroughMask() & 1) && !CTX->Config.NeedsPendingInterruptFaultCheck) {
+-    // MacRunner HOT_FALLTHROUGH 1: the poll falls through when no suspend is pending; the trap stub at the end of the unit maps to this
+-    // entry's guest RIP exactly like the inline brk did (same registers, spill area already allocated).
+-    PendingGuestSuspendTraps.push_back({GuestRIP - Entry, {}});
+-    ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
+-    cbnz_OrRestart(ARMEmitter::Size::i32Bit, TMP2, &PendingGuestSuspendTraps.back().Label);
+-  } else
+-#endif
+   EmitSuspendInterruptCheck();
+-  if (NoPollLabel) {
+-    // MacRunner RET_LANDING: call-return landings enter here, AFTER the poll (header and spill area are set by the landing).
+-    BindOrRestart(NoPollLabel);
+-  }
+-}
+-
+-// MacRunner RET_LANDING (MacRunnerSuspend.h): emitted right after the call's bl/blr, i.e. where a return that matched the call-return
+-// stack lands. Same effect as entering the return block through EmitEntryPoint, minus the suspend poll. Not used when the entry has
+-// extra guards (TF single-step, the WINCTX exact debug guard) or when the return block is not an entry point.
+-void Arm64JITCore::MREmitReturnLanding(IR::OrderedNodeWrapper ReturnBlock) {
+-  if (!FEXCore::Utils::MacRunnerRetLandingEnabled() || !MRHeaderLabel || MRCheckTF) {
+-    return;
+-  }
+-#ifdef ARCHITECTURE_arm64ec
+-  if (MacRunnerWinctxExactMode && !MRGuestDebugSingleInstruction) {
+-    return;
+-  }
+-#endif
+-  if (!IR->GetOp<IR::IROp_CodeBlock>(ReturnBlock)->EntryPoint) {
+-    return;
+-  }
+-  auto* NoPoll = &CallReturnNoPollTargets.try_emplace(ReturnBlock.ID()).first->second;
+-  if (!MRHeaderLazy) {
+-    adr_OrRestart(TMP1, MRHeaderLabel);
+-    str(TMP1, STATE, offsetof(FEXCore::Core::CPUState, InlineJITBlockHeader));
+-  }
+-  if (SpillSlots) {
+-    const auto TotalSpillSlotsSize = SpillSlots * MaxSpillSlotSize;
+-    if (ARMEmitter::IsImmAddSub(TotalSpillSlotsSize)) {
+-      sub(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::rsp, ARMEmitter::Reg::rsp, TotalSpillSlotsSize);
+-    } else {
+-      LoadConstant(ARMEmitter::Size::i64Bit, TMP1, TotalSpillSlotsSize);
+-      sub(ARMEmitter::Size::i64Bit, ARMEmitter::XReg::rsp, ARMEmitter::XReg::rsp, TMP1, ARMEmitter::ExtendedType::LSL_64, 0);
+-    }
+-  }
+-  b_OrRestart(NoPoll);
+-  PendingCallReturnTargetLabel = nullptr;   // the landing never falls through into the next block
+-}
+-
+-// ★ MacRunner FEXXFER MACRUNNER_FEX_RIP_LITERAL (MacRunnerXfer.h): use a literal when mov/movk needs three or four
+-// instructions (counted the way LoadConstant can: movz over non-zero halfwords or movn over non-0xffff ones).
+-bool Arm64JITCore::MRUseRipLiteral(IR::Ref Node, uint64_t Value) const {
+-  const unsigned Mask = FEXCore::Utils::MacRunnerRipLiteralMask();
+-  if (!Mask || RequiresFarARM64Jumps) {
+-    return false;
+-  }
+-  unsigned NonZero = 0, NonOnes = 0;
+-  for (unsigned i = 0; i < 4; ++i) {
+-    const uint16_t Half = static_cast<uint16_t>(Value >> (16 * i));
+-    NonZero += Half != 0;
+-    NonOnes += Half != 0xFFFF;
+-  }
+-  if (std::min(NonZero, NonOnes) < 3) {
+-    return false;
+-  }
+-  if (Mask & 2) {
+-    return true;
+-  }
+-  return (Mask & 1) && std::find(MRCallReturnAddresses.begin(), MRCallReturnAddresses.end(), Value) != MRCallReturnAddresses.end();
+-}
+-
+-void Arm64JITCore::MREmitSpillAllocation() {
+-  if (SpillSlots) {
+-    const auto TotalSpillSlotsSize = SpillSlots * MaxSpillSlotSize;
+-    if (ARMEmitter::IsImmAddSub(TotalSpillSlotsSize)) {
+-      sub(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::rsp, ARMEmitter::Reg::rsp, TotalSpillSlotsSize);
+-    } else {
+-      LoadConstant(ARMEmitter::Size::i64Bit, TMP1, TotalSpillSlotsSize);
+-      sub(ARMEmitter::Size::i64Bit, ARMEmitter::XReg::rsp, ARMEmitter::XReg::rsp, TMP1, ARMEmitter::ExtendedType::LSL_64, 0);
+-    }
+-  }
+ }
+ 
+ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size, bool SingleInst, const FEXCore::IR::IRListView* IR,
+@@ -1232,46 +1037,6 @@
+   LoopDispatcherLabel = {};
+   PendingLoopLinkRecords.clear();
+   PendingGuestSuspendTraps.clear();
+-  MRL1MissStubs.clear();
+-  // ★ MacRunner FEXXFER (MacRunnerXfer.h): per-compile state; nothing is scanned or emitted with every key 0.
+-  MRRipLiterals.clear();
+-  MRRetEntryStubs.clear();
+-  MRHeaderLazy = MRHeaderByPC::Lazy(CTX);
+-  MRICSites.clear();
+-  MRICLinkerLabel = {};
+-  MRICActive = FEXCore::Utils::MacRunnerICallICEnabled() && !::MacRunnerNullHostMode() && !RequiresFarARM64Jumps &&
+-               !CTX->CodeCache.EnableCodeCaching;
+-  MRCallReturnAddresses.clear();
+-  MRReturnBlocks.clear();
+-  MRRetNoPollActive = FEXCore::Utils::MacRunnerRetNoPollEnabled() && !CheckTF && !CTX->Config.NeedsPendingInterruptFaultCheck &&
+-                      !FEXCore::Utils::MacRunnerRetLandingEnabled();
+-#ifdef ARCHITECTURE_arm64ec
+-  if (MacRunnerWinctxExactMode && !MRGuestDebugSingleInstruction) {
+-    MRRetNoPollActive = false;   // the WINCTX exact guard runs before the poll in every entry; keep that entry form
+-  }
+-#endif
+-  if (MRRetNoPollActive || (FEXCore::Utils::MacRunnerRipLiteralMask() & 1)) {
+-    MRReturnBlocks.assign(IR->GetHeader()->BlockCount, false);
+-    for (auto [BlockNode, BlockHeader] : IR->GetBlocks()) {
+-      for (auto [CodeNode, CodeOp] : IR->GetCode(BlockNode)) {
+-        if (CodeOp->Op != IR::OP_EXITFUNCTION) {
+-          continue;
+-        }
+-        const auto Exit = CodeOp->C<IR::IROp_ExitFunction>();
+-        if (Exit->Hint != IR::BranchHint::Call) {
+-          continue;
+-        }
+-        // After register allocation the GPR arguments (CallReturnAddress) no longer name IR nodes, so the return address is
+-        // taken from the return block: its guest entry is the instruction after the CALL, i.e. the pushed address.
+-        if (!Exit->CallReturnBlock.IsInvalid()) {
+-          const auto Block = IR->GetOp<IR::IROp_CodeBlock>(Exit->CallReturnBlock);
+-          MRReturnBlocks[Block->ID] = true;
+-          const uint64_t Mask = CTX->Config.Is64BitMode() ? ~0ULL : 0xFFFF'FFFFULL;
+-          MRCallReturnAddresses.push_back((Entry + Block->GuestEntryOffset) & Mask);
+-        }
+-      }
+-    }
+-  }
+   JumpTargets.resize(IR->GetHeader()->BlockCount, {});
+   GuestTargetSuspendChecks = FEXCore::Utils::MacRunnerSuspendBackedgeEnabled();
+   // Every cycle has a backwards edge in emitted block order. Put one precise
+@@ -1359,9 +1124,6 @@
+   // Put the code header at the start of the data block.
+   ARMEmitter::BackwardLabel JITCodeHeaderLabel {};
+   (void)Bind(&JITCodeHeaderLabel);
+-  MRHeaderLabel = &JITCodeHeaderLabel;   // MacRunner RET_LANDING
+-  MRCheckTF = CheckTF;
+-  CallReturnNoPollTargets.clear();
+   JITCodeHeader* CodeHeader = GetCursorAddress<JITCodeHeader*>();
+   CursorIncrement(sizeof(JITCodeHeader));
+ 
+@@ -1445,27 +1207,10 @@
+         PendingCallReturnTargetLabel = nullptr;
+ 
+         BindOrRestart(&IsReturnTarget->second);
+-        const bool MRNoPollEntry = MRRetNoPollActive && MRReturnBlocks[BlockIROp->ID];
+-        if (!MRNoPollEntry) {
+-          CodeData.EntryPoints.emplace(BlockStartRIP, GetCursorAddress<uint8_t*>());
+-        }
++        CodeData.EntryPoints.emplace(BlockStartRIP, GetCursorAddress<uint8_t*>());
+         DebugData->GuestOpcodes.push_back({BlockIROp->GuestEntryOffset, GetCursorAddress<uint8_t*>() - CodeData.BlockBegin});
+ 
+-        if (MRNoPollEntry) {
+-          // ★ MacRunner FEXXFER MACRUNNER_FEX_RET_NOPOLL (MacRunnerXfer.h): the return landing and the fall-through after the
+-          // call enter here without the poll (no TF check / WINCTX guard in this mode, see MRRetNoPollActive). The block's
+-          // entry point for L1, links and the dispatcher is the polled stub emitted after the unit's code.
+-          auto& Stub = MRRetEntryStubs.emplace_back(MRRetEntryStub {BlockStartRIP, BlockIROp->GuestEntryOffset, {}});
+-          if (!(MRDiagCeiling() & 1) && !MRHeaderLazy) {
+-            adr_OrRestart(TMP1, &JITCodeHeaderLabel);
+-            str(TMP1, STATE, offsetof(FEXCore::Core::CPUState, InlineJITBlockHeader));
+-          }
+-          MREmitSpillAllocation();
+-          BindOrRestart(&Stub.Body);
+-        } else {
+-          EmitEntryPoint(JITCodeHeaderLabel, CheckTF, BlockStartRIP,
+-                         FEXCore::Utils::MacRunnerRetLandingEnabled() ? &CallReturnNoPollTargets.try_emplace(Node).first->second : nullptr);
+-        }
++        EmitEntryPoint(JITCodeHeaderLabel, CheckTF, BlockStartRIP);
+       }
+ 
+       if (PendingCallReturnTargetLabel) {
+@@ -1580,11 +1325,6 @@
+ 
+   if (!PendingLoopLinkRecords.empty()) {
+     BindOrRestart(&LoopDispatcherLabel);
+-    if (MRHeaderLazy) {
+-      // MacRunner FEXXFER HEADER_BY_PC=1: ExitFunctionLink reads the compact record's unit from the header (cold: first link only).
+-      adr_OrRestart(TMP1, &JITCodeHeaderLabel);
+-      str(TMP1, STATE, offsetof(FEXCore::Core::CPUState, InlineJITBlockHeader));
+-    }
+     orr(ARMEmitter::Size::i64Bit, ARMEmitter::XReg::lr, ARMEmitter::XReg::lr, 1);
+     ldr(TMP1, STATE_PTR(CpuStateFrame, Pointers.ExitFunctionLinker));
+     br(TMP1);
+@@ -1595,106 +1335,10 @@
+     }
+   }
+ 
+-  for (auto& Stub : MRL1MissStubs) {   // MacRunner HOT_FALLTHROUGH 4 (MacRunnerSuspend.h)
+-    BindOrRestart(&Stub.Miss);
+-    ldr(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.DispatcherLoopTop));
+-    str(ARMEmitter::Register(Stub.RipIdx).X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
+-    b_OrRestart(&Stub.Back);
+-  }
+-  MRL1MissStubs.clear();
+-  for (auto& Stub : MRRetEntryStubs) {
+-    // ★ MacRunner FEXXFER MACRUNNER_FEX_RET_NOPOLL: the polled entry of a return block = the inline entry of EmitEntryPoint
+-    // (header, spill area, poll in the same form), then into the body. Its own host->guest mapping names the block's RIP.
+-    CodeData.EntryPoints.emplace(Stub.GuestRIP, GetCursorAddress<uint8_t*>());
+-    DebugData->GuestOpcodes.push_back({Stub.GuestOffset, GetCursorAddress<uint8_t*>() - CodeData.BlockBegin});
+-    if (!MRHeaderLazy) {
+-      adr_OrRestart(TMP1, &JITCodeHeaderLabel);
+-      str(TMP1, STATE, offsetof(FEXCore::Core::CPUState, InlineJITBlockHeader));
+-    }
+-    MREmitSpillAllocation();
+-#ifdef ARCHITECTURE_arm64ec
+-    if (FEXCore::Utils::MacRunnerHotFallthroughMask() & 1) {
+-      PendingGuestSuspendTraps.push_back({Stub.GuestOffset, {}});
+-      ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
+-      cbnz_OrRestart(ARMEmitter::Size::i32Bit, TMP2, &PendingGuestSuspendTraps.back().Label);
+-    } else
+-#endif
+-    EmitSuspendInterruptCheck();
+-    b_OrRestart(&Stub.Body);
+-  }
+-  MRRetEntryStubs.clear();
+-  for (auto& Site : MRICSites) {
+-    // ★ MacRunner FEXXFER MACRUNNER_FEX_ICALL_IC: out-of-line part of one site (see BranchOps.cpp). Miss with an empty tag: shadow push
+-    // and the fill call; Fill (also the site bl's unlinked target): RIP to the context, ExitFunctionLink through the shared IC linker
+-    // stub (LR | 2 = this record); a filled tag that differs: the ordinary L1 lookup and blr, returning through a one-branch trampoline
+-    // so the return-stack prediction stays right. Only and/add/sub/ldp/cb(n)z: NZCV and every guest register are preserved.
+-    const auto Rip = ARMEmitter::Register(Site.RipIdx).X();
+-    const auto Ra = ARMEmitter::Register(Site.RaIdx).X();
+-    ARMEmitter::BackwardLabel Ret {};
+-    Ret.Location = Site.ReturnAddr;
+-    ARMEmitter::ForwardLabel Poly, Found, PolyRet;
+-    BindOrRestart(&Site.Miss);
+-    ldr(TMP1, &Site.Tag);
+-    cbnz_OrRestart(ARMEmitter::Size::i64Bit, TMP1, &Poly);
+-    adr_OrRestart(TMP1, &Ret);
+-    stp<ARMEmitter::IndexType::PRE>(Ra, TMP1, REG_CALLRET_SP, -0x10);
+-    Site.FillAddr = GetCursorAddress<uint8_t*>();
+-    BindOrRestart(&Site.Fill);
+-    str(Rip, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
+-    bl_OrRestart(&MRICLinkerLabel);
+-    Site.Record = GetCursorAddress<uint8_t*>();
+-    dc32(0);   // TagOffset   (patched below, relative to the record)
+-    dc32(0);   // SiteOffset
+-    dc32(0);   // FillOffset
+-    dc32(0);
+-    BindOrRestart(&Poly);
+-    ldp<ARMEmitter::IndexType::OFFSET>(TMP1, TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.L1Pointer));
+-    and_(ARMEmitter::Size::i64Bit, TMP2, TMP2, Rip, ARMEmitter::ShiftType::LSL, FEXCore::ilog2(sizeof(LookupCache::LookupCacheEntry)));
+-    add(TMP1, TMP1, TMP2);
+-    ldp<ARMEmitter::IndexType::OFFSET>(TMP2, TMP1, TMP1, 0);
+-    sub(TMP1, TMP1, Rip);
+-    (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &Found);
+-    ldr(TMP2, STATE, offsetof(FEXCore::Core::CpuStateFrame, Pointers.DispatcherLoopTop));
+-    str(Rip, STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
+-    (void)Bind(&Found);
+-    (void)adr(TMP1, &PolyRet);
+-    stp<ARMEmitter::IndexType::PRE>(Ra, TMP1, REG_CALLRET_SP, -0x10);
+-    blr(TMP2);
+-    (void)Bind(&PolyRet);
+-    b_OrRestart(&Ret);
+-  }
+-  if (!MRICSites.empty()) {
+-    BindOrRestart(&MRICLinkerLabel);
+-    orr(ARMEmitter::Size::i64Bit, ARMEmitter::XReg::lr, ARMEmitter::XReg::lr, 2);
+-    ldr(TMP1, STATE_PTR(CpuStateFrame, Pointers.ExitFunctionLinker));
+-    br(TMP1);
+-  }
+   for (auto& Trap : PendingGuestSuspendTraps) {
+     BindOrRestart(&Trap.Label);
+     DebugData->GuestOpcodes.push_back({Trap.GuestOffset, GetCursorAddress<uint8_t*>() - CodeData.BlockBegin});
+     brk(0xCAFE);
+-  }
+-  if (!MRRipLiterals.empty()) {
+-    // ★ MacRunner FEXXFER MACRUNNER_FEX_RIP_LITERAL: the unit's guest-RIP literals (8-byte aligned data, never executed).
+-    Align(8);
+-    for (auto& Lit : MRRipLiterals) {
+-      PlaceNamedSymbolLiteral(Lit);
+-    }
+-    MRRipLiterals.clear();
+-  }
+-  if (!MRICSites.empty()) {
+-    // ★ MacRunner FEXXFER MACRUNNER_FEX_ICALL_IC: the tags (8-byte aligned, written only by ExitFunctionLink) and the record offsets.
+-    Align(8);
+-    for (auto& Site : MRICSites) {
+-      uint8_t* TagAddr = GetCursorAddress<uint8_t*>();
+-      BindOrRestart(&Site.Tag);
+-      dc64(0);
+-      auto* Rec = reinterpret_cast<int32_t*>(Site.Record);
+-      Rec[0] = static_cast<int32_t>(TagAddr - Site.Record);
+-      Rec[1] = static_cast<int32_t>(Site.SiteBl - Site.Record);
+-      Rec[2] = static_cast<int32_t>(Site.FillAddr - Site.Record);
+-    }
+-    MRICSites.clear();
+   }
+ 
+   // CodeSize not including the header or tail data.
+@@ -1892,10 +1536,6 @@
+ 
+     // Copy over CodeBuffer contents
+     memcpy(GetCursorAddress<uint8_t*>(), TempCodeBuffer, TempSize);
+-    if (FEXCore::Utils::MacRunnerHeaderByPCMode()) {
+-      // MacRunner FEXXFER HEADER_BY_PC: publish the unit to the buffer's table after its bytes (MRHeaderByPC.h).
+-      CurrentCodeBuffer->MRRecordUnit(static_cast<uint64_t>(CodeData.BlockBegin - CurrentCodeBuffer->Ptr));
+-    }
+     SetCursorOffset(SharedCodeBuffers.LatestOffset + TempSize);
+ 
+     SharedCodeBuffers.LatestOffset = GetCursorOffset();
+@@ -1943,9 +1583,6 @@
+   HBStandObserveCodeSize(CodeOnlySize);
+ #endif
+   DebugData->Relocations = &Relocations;
+-#if defined(MACRUNNER_FEXXFER_CODEDUMP)
+-  MRCodeDump(Entry, CodeData.BlockBegin, CodeData.Size);
+-#endif
+ 
+   this->IR = nullptr;
+ 
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -7,7 +7,6 @@
+ 
+ #pragma once
+ 
+-#include <list>
+ #include "Interface/Core/ArchHelpers/Arm64Emitter.h"
+ #include "Interface/Core/CPUBackend.h"
+ #include "Interface/Core/Dispatcher/Dispatcher.h"
+@@ -27,7 +26,6 @@
+ #include <FEXCore/fextl/vector.h>
+ #include <FEXCore/Utils/LongJump.h>
+ #include <FEXCore/Utils/MacRunnerSuspend.h>
+-#include <FEXCore/Utils/MacRunnerXfer.h>
+ 
+ #include <CodeEmitter/Emitter.h>
+ 
+@@ -102,13 +100,6 @@
+     ARMEmitter::ForwardLabel Label;
+   };
+   fextl::vector<PendingGuestSuspendTrap> PendingGuestSuspendTraps;
+-  // MacRunner HOT_FALLTHROUGH bit 4: out-of-line L1 miss stubs (dispatcher + RIP, then back after the cbnz); std::list keeps labels in place.
+-  struct MRL1MissStub {
+-    ARMEmitter::ForwardLabel Miss;
+-    ARMEmitter::BiDirectionalLabel Back;
+-    uint32_t RipIdx;
+-  };
+-  std::list<MRL1MissStub> MRL1MissStubs;
+   // X87-CTX P5: fault records of the block being compiled. A marker opens one; it is kept once its target op is emitted.
+   fextl::vector<FEXCore::Core::X87Fault::Record> X87FaultRecords;
+   FEXCore::Core::X87Fault::Record X87FaultOpen {};
+@@ -129,11 +120,6 @@
+   }
+ 
+   fextl::map<IR::NodeID, ARMEmitter::BiDirectionalLabel> CallReturnTargets;
+-  // MacRunner RET_LANDING: per entry block, a label bound just before its suspend poll; header label / TF of this compile.
+-  fextl::map<IR::NodeID, ARMEmitter::BiDirectionalLabel> CallReturnNoPollTargets;
+-  ARMEmitter::BackwardLabel* MRHeaderLabel {};
+-  bool MRCheckTF {};
+-  void MREmitReturnLanding(IR::OrderedNodeWrapper ReturnBlock);
+ 
+   struct PendingJumpThunk {
+     uint64_t CallerAddress;
+@@ -622,39 +608,6 @@
+    */
+   void PlaceNamedSymbolLiteral(NamedSymbolLiteralPair Lit);
+ 
+-  // ★ MacRunner FEXXFER (FEXCore/Utils/MacRunnerXfer.h); all empty / false with every key 0.
+-  // RIP_LITERAL: guest-RIP literals of this unit (`ldr x, lit`), placed after the trap stubs; std::list keeps labels in place.
+-  std::list<NamedSymbolLiteralPair> MRRipLiterals;
+-  // Guest return addresses pushed by this unit's CALLs (RIP_LITERAL bit 1) and code block ids that are a CALL's return block (RET_NOPOLL).
+-  fextl::vector<uint64_t> MRCallReturnAddresses;
+-  fextl::vector<bool> MRReturnBlocks;
+-  bool MRRetNoPollActive {};
+-  // HEADER_BY_PC mode 1 in effect for this compile: entries do not store InlineJITBlockHeader (MRHeaderByPC.h).
+-  bool MRHeaderLazy {};
+-  // ICALL_IC: per indirect-call site, the out-of-line stubs and the tag literal (placed after the unit's stubs). std::list: labels stay put.
+-  struct MRICSite {
+-    ARMEmitter::ForwardLabel Miss;      // cbnz from the inline check
+-    ARMEmitter::BiDirectionalLabel Fill;   // initial / delinked target of the site's bl
+-    ARMEmitter::ForwardLabel Tag;       // the 8-byte tag literal
+-    uint8_t* ReturnAddr;                // l_CallReturn of the site (temp buffer address)
+-    uint8_t* SiteBl;                    // the site's bl (temp buffer address)
+-    uint8_t* Record;                    // the IC link record (temp buffer address)
+-    uint8_t* FillAddr;                  // where Fill is bound (temp buffer address)
+-    uint32_t RipIdx, RaIdx;
+-  };
+-  std::list<MRICSite> MRICSites;
+-  ARMEmitter::ForwardLabel MRICLinkerLabel;
+-  bool MRICActive {};
+-  // RET_NOPOLL: per return block, the out-of-line polled entry stub (registered as the block's entry point) and its body label.
+-  struct MRRetEntryStub {
+-    uint64_t GuestRIP;
+-    uint64_t GuestOffset;
+-    ARMEmitter::BiDirectionalLabel Body;
+-  };
+-  std::list<MRRetEntryStub> MRRetEntryStubs;
+-  bool MRUseRipLiteral(IR::Ref Node, uint64_t Value) const;
+-  void MREmitSpillAllocation();
+-
+   fextl::vector<FEXCore::CPU::Relocation> Relocations;
+ 
+   /**
+@@ -698,7 +651,7 @@
+   void EmitSuspendInterruptCheckAt(uint64_t GuestRIP);
+   void EmitSuspendInterruptCheckAt(ARMEmitter::Register GuestRIP);
+ 
+-  void EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF, uint64_t GuestRIP, ARMEmitter::BiDirectionalLabel* NoPollLabel = nullptr);
++  void EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool CheckTF, uint64_t GuestRIP);
+ 
+ #define DEF_OP(x) void Op_##x(IR::IROp_Header const* IROp, IR::Ref Node)
+ 
+--- a/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
+@@ -438,14 +438,6 @@
+   yield();
+ }
+ 
+-// MacRunner SYNC: MACRUNNER_FEX_PAUSE (FEXCore/Utils/MacRunnerPause.h)
+-DEF_OP(MRPause) {
+-  auto Op = IROp->C<IR::IROp_MRPause>();
+-  for (uint32_t i = 0; i < Op->Count; ++i) {
+-    isb();
+-  }
+-}
+-
+ DEF_OP(MonoBackpatcherWrite) {
+   auto Op = IROp->C<IR::IROp_MonoBackpatcherWrite>();
+ 
+--- a/FEXCore/Source/Interface/Core/MRHeaderByPC.h
++++ /dev/null
+@@ -1,30 +0,0 @@
+-// SPDX-License-Identifier: MIT
+-// Modifications (c) 2026 MacRunner contributors, MIT
+-// ★ MacRunner FEXXFER MACRUNNER_FEX_HEADER_BY_PC (FEXCore/Utils/MacRunnerXfer.h), item 3.
+-// Every reader of CPUState::InlineJITBlockHeader is given the host PC (or a host address inside the unit) and calls Resolve first:
+-//   mode 0: nothing (the field is what the last block entry stored, as before);
+-//   mode 1: the field becomes the unit containing the address (code buffer unit table), 0 when there is none;
+-//   mode 2: the field is NOT changed; the unit is looked up into a poisoned output and compared with the stored field (probe).
+-// Why mode 1 gives every reader the block it got before: entries are the only writers, every way into a unit's code passes one
+-// (direct links, L1, dispatcher, call-return landings - all bound to an entry), so while the PC is inside unit U the stored field
+-// is U. Where the PC is outside every unit (a C++ helper), the readers only use the field after checking that the PC lies inside
+-// it (RestoreRIPFromHostPC, both Materialize) or are reached only for PCs inside the code buffer (IsCurrentBlockSingleInst /
+-// IsAddressInCurrentBlock / GetGuestBlockEntry after IsAddressInCodeBuffer or RestoreRIPFromHostPC), so 0 gives the same result.
+-// The one reader on a normal path, ExitFunctionLink's compact loop record, is entered from the unit's own loop-dispatcher stub,
+-// which stores the header itself in mode 1 (cold: once per first link).
+-#pragma once
+-#include <cstdint>
+-
+-namespace FEXCore::Core {
+-struct InternalThreadState;
+-}
+-namespace FEXCore::Context {
+-class ContextImpl;
+-}
+-
+-namespace MRHeaderByPC {
+-enum Reader : unsigned { RestoreRIP, X87Region, X87Fault, CodeBufferCheck, CompactLoop, UnalignedAtomic, ReaderCount };
+-// Mode 1 in effect for this context (off while FEX code caching is on: mapped cache units are not in the table).
+-bool Lazy(FEXCore::Context::ContextImpl* CTX);
+-void Resolve(FEXCore::Core::InternalThreadState* Thread, uint64_t HostAddress, unsigned Reader) noexcept;
+-} // namespace MRHeaderByPC
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -21,7 +21,6 @@
+ #include <FEXCore/HLE/SyscallHandler.h>
+ #include <FEXCore/IR/IR.h>
+ #include <FEXCore/Utils/EnumUtils.h>
+-#include <FEXCore/Utils/MacRunnerPause.h>
+ #include <FEXCore/Utils/LogManager.h>
+ 
+ #include <FEXHeaderUtils/BitUtils.h>
+@@ -30,9 +29,6 @@
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+-#include <cstddef>
+-#include <mutex>
+-#include <FEXCore/Utils/MacRunnerQpcInline.h>
+ #include <cstdint>
+ #include <cstdlib>
+ 
+@@ -269,278 +265,6 @@
+   // Store the new RIP
+   ExitFunction(NewRIP, BranchHint::Return);
+   BlockSetRIP = true;
+-}
+-
+-// ★ MacRunner QPCJIT (03.11.2026) MACRUNNER_FEX_QPC_INLINE, see FEXCore/Utils/MacRunnerQpcInline.h. Emitted at the start of the
+-// first instruction of ntdll's RtlQueryPerformanceCounter FFS, once Core.cpp has checked address, bytes and page protection:
+-//   flag = ntdll.macrunner_ntdll_fast.qpc_enabled            (ntdll's own switch, read on every call: hot switch included)
+-//   flag == 0 -> SlowBlock: the FFS translated as before (jmp to the EC body: ntdll's syscall path)
+-//   flag != 0 -> [rcx] = floor((counter + *base) * mul / div); rax = 1; ret — the value ntdll's fast path computes, from the same data.
+-// Guest state touched: memory [rcx] (8 bytes, the same store an x64 `mov [rcx], rax` does), rax, rsp (+8 by the return), rip.
+-// Flags, every other GPR and every vector register keep their values (the call may clobber far more). A fault on [rcx] is raised
+-// at the FFS entry with the guest state of the call (rax / rsp still unchanged): the store precedes every register write.
+-// ★ MacRunner QPCJIT: (counter + *base) * mul / div exactly as ntdll's fast path, emitted in the current block (MacRunnerQpcInline.h).
+-Ref OpDispatchBuilder::MacRunnerQpcValue(const FEXCore::Utils::MRQpcInline::Scale& S) {
+-  const auto& P = FEXCore::Utils::MRQpcInline::G;
+-  Ref Ticks = _MRHostCounter(P.Kind);
+-  Ref Base = _LoadMem(RegClass::GPR, OpSize::i64Bit, Constant(P.BaseAddr), Invalid(), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-  Ref X = _Add(OpSize::i64Bit, Ticks, Base);
+-  Ref Y = S.Mul == 1 ? X : _Mul(OpSize::i64Bit, X, Constant(S.Mul));
+-  Ref Q = Y;
+-  using FEXCore::Utils::MRQpcInline::ScaleForm;
+-  if (S.Form == ScaleForm::Shift) {
+-    Q = _Lshr(OpSize::i64Bit, Y, Constant(S.Shift));
+-  } else if (S.Form == ScaleForm::MulHigh) {
+-    Q = _UMulH(OpSize::i64Bit, Y, Constant(S.Magic));
+-    if (S.Shift) {
+-      Q = _Lshr(OpSize::i64Bit, Q, Constant(S.Shift));
+-    }
+-  }
+-  return Q;
+-}
+-
+-// ★ MacRunner QPCJIT compact form (keys 5, 6, 7): the same value as MacRunnerQpcValue, constants from Entries[Idx] (one 3-mov address
+-// per block): ldp base-address/magic; base loaded through it; x*(2^k+1) as add-shift, x*2^k as shift, other multipliers loaded.
+-Ref OpDispatchBuilder::MacRunnerQpcValueCompact(unsigned Idx, const FEXCore::Utils::MRQpcInline::Scale& S) {
+-  namespace Q = FEXCore::Utils::MRQpcInline;
+-  const auto& P = Q::G;
+-  Ref E = Constant(reinterpret_cast<uint64_t>(&Q::Entries[Idx]));
+-  auto BM = LoadMemPair(RegClass::GPR, OpSize::i64Bit, E, offsetof(Q::SiteEntry, BaseAddr));
+-  Ref Ticks = _MRHostCounter(P.Kind);
+-  Ref Base = _LoadMem(RegClass::GPR, OpSize::i64Bit, BM.Low, Invalid(), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-  Ref X = _Add(OpSize::i64Bit, Ticks, Base);
+-  Ref Y = X;
+-  const uint64_t M = S.Mul;
+-  if (M != 1) {
+-    if ((M & (M - 1)) == 0) {
+-      Y = _Lshl(OpSize::i64Bit, X, Constant(__builtin_ctzll(M)));
+-    } else if (((M - 1) & (M - 2)) == 0) {
+-      Y = _AddShift(OpSize::i64Bit, X, X, ShiftType::LSL, static_cast<uint8_t>(__builtin_ctzll(M - 1)));
+-    } else {
+-      Y = _Mul(OpSize::i64Bit, X,
+-               _LoadMem(RegClass::GPR, OpSize::i64Bit, E, _InlineConstant(offsetof(Q::SiteEntry, Mul)), OpSize::i8Bit, MemOffsetType::SXTX, 1));
+-    }
+-  }
+-  Ref V = Y;
+-  using FEXCore::Utils::MRQpcInline::ScaleForm;
+-  if (S.Form == ScaleForm::Shift) {
+-    V = _Lshr(OpSize::i64Bit, Y, Constant(S.Shift));
+-  } else if (S.Form == ScaleForm::MulHigh) {
+-    V = _UMulH(OpSize::i64Bit, Y, BM.High);
+-    if (S.Shift) {
+-      V = _Lshr(OpSize::i64Bit, V, Constant(S.Shift));
+-    }
+-  }
+-  return V;
+-}
+-
+-// Entry for sites through the thunk T (compact form): found or published once; 0 = table full (the caller emits the stage-3 form).
+-static unsigned MacRunnerQpcThunkEntry(uint64_t T, uint64_t Thunk8, uint64_t Aux) {
+-  namespace Q = FEXCore::Utils::MRQpcInline;
+-  static std::mutex EntryLock;
+-  std::scoped_lock Lock(EntryLock);
+-  const unsigned N = Q::EntryCount.load(std::memory_order_acquire);
+-  for (unsigned i = 2; i < N; ++i) {
+-    if (Q::Entries[i].T == T && Q::Entries[i].Thunk8 == Thunk8 && Q::Entries[i].AuxAddr == Aux) {
+-      return i;
+-    }
+-  }
+-  if (N < 2 || N >= Q::MaxSiteEntries) {
+-    return 0;
+-  }
+-  auto& E = Q::Entries[N];
+-  E = Q::Entries[1]; // FFS, flag, FFS bytes, base, site scale
+-  E.T = T;
+-  E.AuxAddr = Aux;
+-  E.Thunk8 = Thunk8;
+-  Q::EntryCount.store(N + 1, std::memory_order_release);
+-  return N;
+-}
+-
+-// ★ MacRunner QPCJIT stage 3 (keys 3, 4, 8): QPC at the call site of `call qword [rip+disp]` / `jmp qword [rip+disp]`, see
+-// MacRunnerQpcInline.h. Returns false (nothing emitted) unless the slot, read now, holds the FFS or a `jmp [aux]` thunk to it. Otherwise
+-// emits the guard and the fast path and leaves the current block = the slow block, where the caller emits the unchanged instruction.
+-// Guard, re-checked on every execution: slot value == T (own branch, before anything is read through T); then one branch on
+-// (FFS 16 bytes) | (thunk 8 bytes) | (aux value) | (qpc_enabled ^ 1) == 0. Any other qpc_enabled value takes the unchanged path, where
+-// ntdll decides itself. Fast path: no push, no call-return stack entry, no transfer; a fault on [rcx] is raised at the call / jmp.
+-bool OpDispatchBuilder::MacRunnerQpcSite(const X86Tables::DecodedOp& Op, bool IsCall) {
+-  namespace Q = FEXCore::Utils::MRQpcInline;
+-  const auto& P = Q::G;
+-  const auto& Src = Op->Src[0];
+-  if (!Is64BitMode || !Src.IsRIPRelative() || (Op->Flags & X86Tables::DecodeFlags::FLAG_SEGMENTS) || OpSizeFromSrc(Op) != OpSize::i64Bit ||
+-      !P.SafeRead64) {
+-    return false;
+-  }
+-  const uint64_t Slot = Op->PC + Op->InstSize + static_cast<int64_t>(static_cast<int32_t>(Src.Data.RIPLiteral.Value));
+-  if (Slot & 7) {
+-    return false;
+-  }
+-  Q::SiteQueries.fetch_add(1, std::memory_order_relaxed);
+-  if (P.Periodic) {
+-    P.Periodic(); // throttled inside (compile time only)
+-  }
+-  // Every compile-time read is timed (CNTVCT) so the end marker can state what examining candidates costs.
+-  auto Read = [&](uint64_t Addr, uint64_t* Out) {
+-    uint64_t T0, T1;
+-    __asm__ __volatile__("isb\n\tmrs %0, cntvct_el0" : "=r"(T0)::"memory");
+-    const bool Ok = P.SafeRead64(Addr, Out);
+-    __asm__ __volatile__("isb\n\tmrs %0, cntvct_el0" : "=r"(T1)::"memory");
+-    Q::SiteReads.fetch_add(1, std::memory_order_relaxed);
+-    Q::SiteReadTicks.fetch_add(T1 - T0, std::memory_order_relaxed);
+-    return Ok;
+-  };
+-  // Targets already known not to be a QPC thunk (lossy, lock-free): saves the second read for every other import.
+-  static std::atomic<uint64_t> NotQpc[512];
+-  uint64_t T = 0;
+-  if (!Read(Slot, &T) || !T) {
+-    return false;
+-  }
+-  auto& Neg = NotQpc[(T >> 4) % 512];
+-  bool ViaThunk = false;
+-  uint64_t Thunk8 = 0, Aux = 0, AuxV = 0;
+-  if (T != P.Ffs) {
+-    if (Neg.load(std::memory_order_relaxed) == T) {
+-      return false;
+-    }
+-    if (!Read(T, &Thunk8) || (Thunk8 & 0xffff) != 0x25ff) {
+-      Neg.store(T, std::memory_order_relaxed);
+-      return false;
+-    }
+-    Aux = T + 6 + static_cast<int64_t>(static_cast<int32_t>(Thunk8 >> 16));
+-    if ((Aux & 7) || !Read(Aux, &AuxV) || AuxV != P.Ffs) {
+-      return false;
+-    }
+-    ViaThunk = true;
+-  }
+-  uint64_t F0 = 0, F1 = 0;
+-  if (!Read(P.Ffs, &F0) || !Read(P.Ffs + 8, &F1) || F0 != P.FfsQ[0] || F1 != P.FfsQ[1]) {
+-    Q::SiteRejected.fetch_add(1, std::memory_order_relaxed);
+-    return false;
+-  }
+-
+-  CalculateDeferredFlags();
+-  const auto GPRSize = GetGPROpSize();
+-  auto LoadAbs = [&](OpSize Size, uint64_t Addr) {
+-    return _LoadMem(RegClass::GPR, Size, Constant(Addr), Invalid(), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-  };
+-
+-  Ref Target = LoadSourceGPR(Op, Src, Op->Flags);
+-  auto C1 = CondJump(_Xor(OpSize::i64Bit, Target, Constant(T)), CondClass::NEQ);
+-  auto CurrentBlock = GetCurrentBlock();
+-  auto CheckBlock = CreateNewCodeBlockAfter(CurrentBlock);
+-  auto FastBlock = CreateNewCodeBlockAfter(CheckBlock);
+-  auto SlowBlock = CreateNewCodeBlockAfter(FastBlock);
+-  SetTrueJumpTarget(C1, SlowBlock);
+-  SetFalseJumpTarget(C1, CheckBlock);
+-
+-  // Compact form: the entry of this target (0 = table full -> the stage-3 form below).
+-  const unsigned Idx = !P.Compact ? 0 : ViaThunk ? MacRunnerQpcThunkEntry(T, Thunk8, Aux) : 1;
+-
+-  SetCurrentCodeBlock(CheckBlock);
+-  StartNewBlock();
+-  if (Idx) {
+-    namespace QQ = FEXCore::Utils::MRQpcInline;
+-    // Loads in this order on purpose: with every entry field loaded first the JIT ran out of free registers and spilled to the
+-    // stack (measured 03.11 15:59, block +5 %); interleaved, the entry address is re-materialised once (3 mov) and nothing spills.
+-    Ref E = Constant(reinterpret_cast<uint64_t>(&QQ::Entries[Idx]));
+-    auto FF = LoadMemPair(RegClass::GPR, OpSize::i64Bit, E, offsetof(QQ::SiteEntry, Ffs));   // FFS, &qpc_enabled
+-    auto QV = LoadMemPair(RegClass::GPR, OpSize::i64Bit, E, offsetof(QQ::SiteEntry, Q0));    // expected FFS bytes
+-    Ref F0 = _LoadMem(RegClass::GPR, OpSize::i64Bit, FF.Low, Invalid(), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-    Ref F1 = _LoadMem(RegClass::GPR, OpSize::i64Bit, FF.Low, _InlineConstant(8), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-    Ref D = _Or(OpSize::i64Bit, _Xor(OpSize::i64Bit, F0, QV.Low), _Xor(OpSize::i64Bit, F1, QV.High));
+-    if (ViaThunk) {
+-      auto TA = LoadMemPair(RegClass::GPR, OpSize::i64Bit, E, offsetof(QQ::SiteEntry, T));    // thunk, aux slot
+-      Ref TB = _LoadMem(RegClass::GPR, OpSize::i64Bit, E, _InlineConstant(offsetof(QQ::SiteEntry, Thunk8)), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-      Ref TV = _LoadMem(RegClass::GPR, OpSize::i64Bit, TA.Low, Invalid(), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-      Ref AV = _LoadMem(RegClass::GPR, OpSize::i64Bit, TA.High, Invalid(), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-      D = _Or(OpSize::i64Bit, D, _Or(OpSize::i64Bit, _Xor(OpSize::i64Bit, TV, TB), _Xor(OpSize::i64Bit, AV, FF.Low)));
+-    }
+-    Ref Flag = _LoadMem(RegClass::GPR, OpSize::i32Bit, FF.High, Invalid(), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-    D = _Or(OpSize::i64Bit, D, _Xor(OpSize::i32Bit, Flag, Constant(1)));
+-    auto C2 = CondJump(D, CondClass::NEQ);
+-    SetTrueJumpTarget(C2, SlowBlock);
+-    SetFalseJumpTarget(C2, FastBlock);
+-  } else {
+-    Ref D = _Or(OpSize::i64Bit, _Xor(OpSize::i64Bit, LoadAbs(OpSize::i64Bit, P.Ffs), Constant(P.FfsQ[0])),
+-                _Xor(OpSize::i64Bit, LoadAbs(OpSize::i64Bit, P.Ffs + 8), Constant(P.FfsQ[1])));
+-    if (ViaThunk) {
+-      D = _Or(OpSize::i64Bit, D,
+-              _Or(OpSize::i64Bit, _Xor(OpSize::i64Bit, LoadAbs(OpSize::i64Bit, T), Constant(Thunk8)),
+-                  _Xor(OpSize::i64Bit, LoadAbs(OpSize::i64Bit, Aux), Constant(P.Ffs))));
+-    }
+-    D = _Or(OpSize::i64Bit, D, _Xor(OpSize::i32Bit, LoadAbs(OpSize::i32Bit, P.EnabledAddr), Constant(1)));
+-    auto C2 = CondJump(D, CondClass::NEQ);
+-    SetTrueJumpTarget(C2, SlowBlock);
+-    SetFalseJumpTarget(C2, FastBlock);
+-  }
+-
+-  SetCurrentCodeBlock(FastBlock);
+-  StartNewBlock();
+-  {
+-    _GuestOpcode(Op->PC - Entry);   // a fault on [rcx] is raised at this call / jmp, guest state of before the instruction
+-    Ref Value = Idx ? MacRunnerQpcValueCompact(Idx, P.SiteS) : MacRunnerQpcValue(P.SiteS);
+-    _StoreMemAutoTSO(RegClass::GPR, OpSize::i64Bit, LoadGPRRegister(X86State::REG_RCX), Value, OpSize::i8Bit);
+-    if (P.SiteCountAddr) {
+-      _AtomicFetchAdd(OpSize::i64Bit, Constant(1), Constant(P.SiteCountAddr));
+-    }
+-    StoreGPRRegister(X86State::REG_RAX, Constant(1));
+-    if (IsCall) {
+-      // As if the call had returned: continue at the next instruction (inside this unit if it is decoded here).
+-      const uint64_t NextRIP = Op->PC + Op->InstSize;
+-      auto It = JumpTargets.find(NextRIP);
+-      if (It != JumpTargets.end()) {
+-        Jump(It->second.BlockEntry);
+-      } else {
+-        ExitFunction(_InlineEntrypointOffset(GPRSize, NextRIP - Entry));
+-      }
+-    } else {
+-      // A tail jump (import thunk): return to the caller exactly as RETOp.
+-      Ref SP = _RMWHandle(LoadGPRRegister(X86State::REG_RSP));
+-      Ref NewRIP = Pop(GPRSize, SP);
+-      StoreGPRRegister(X86State::REG_RSP, SP);
+-      ExitFunction(NewRIP, BranchHint::Return);
+-    }
+-  }
+-
+-  SetCurrentCodeBlock(SlowBlock);
+-  StartNewBlock();
+-  (IsCall ? Q::SiteCompiledCall : Q::SiteCompiledJmp).fetch_add(1, std::memory_order_relaxed);
+-  return true;
+-}
+-
+-void OpDispatchBuilder::MacRunnerQpcInline(uint64_t GuestOffset) {
+-  const auto& P = FEXCore::Utils::MRQpcInline::G;
+-  const auto GPRSize = GetGPROpSize();
+-
+-  Ref Enabled = _LoadMem(RegClass::GPR, OpSize::i32Bit, Constant(P.EnabledAddr), Invalid(), OpSize::i8Bit, MemOffsetType::SXTX, 1);
+-  auto Cond = CondJump(Enabled, CondClass::EQ);
+-  auto CurrentBlock = GetCurrentBlock();
+-  auto FastBlock = CreateNewCodeBlockAfter(CurrentBlock);
+-  auto SlowBlock = CreateNewCodeBlockAfter(FastBlock);
+-  SetTrueJumpTarget(Cond, SlowBlock);
+-  SetFalseJumpTarget(Cond, FastBlock);
+-
+-  SetCurrentCodeBlock(FastBlock);
+-  StartNewBlock();
+-  {
+-    // Fault boundary of the FFS entry for everything below (host PC -> guest RIP), whatever the block layout.
+-    _GuestOpcode(GuestOffset);
+-    Ref Q = P.Compact ? MacRunnerQpcValueCompact(0, P.S) : MacRunnerQpcValue(P.S);
+-    _StoreMemAutoTSO(RegClass::GPR, OpSize::i64Bit, LoadGPRRegister(X86State::REG_RCX), Q, OpSize::i8Bit);
+-    if (P.CountAddr) {
+-      _AtomicFetchAdd(OpSize::i64Bit, Constant(1), Constant(P.CountAddr));
+-    }
+-    StoreGPRRegister(X86State::REG_RAX, Constant(1));
+-
+-    // ret, exactly as RETOp (the call-return stack entry of the caller's CALL is consumed here, as the EC return would).
+-    Ref SP = _RMWHandle(LoadGPRRegister(X86State::REG_RSP));
+-    Ref NewRIP = Pop(GPRSize, SP);
+-    StoreGPRRegister(X86State::REG_RSP, SP);
+-    ExitFunction(NewRIP, BranchHint::Return);
+-  }
+-
+-  SetCurrentCodeBlock(SlowBlock);
+-  StartNewBlock();
+ }
+ 
+ /*
+@@ -939,11 +663,6 @@
+ }
+ 
+ void OpDispatchBuilder::CALLAbsoluteOp(OpcodeArgs) {
+-#ifdef ARCHITECTURE_arm64ec
+-  if (FEXCore::Utils::MRQpcInline::G.CallSite) {
+-    MacRunnerQpcSite(Op, true); // ★ QPCJIT stage 3: on success the code below is emitted into the slow block
+-  }
+-#endif
+   BlockSetRIP = true;
+ 
+   const auto Size = OpSizeFromSrc(Op);
+@@ -1322,11 +1041,6 @@
+ void OpDispatchBuilder::JUMPAbsoluteOp(OpcodeArgs) {
+   // Calculate flags early.
+   CalculateDeferredFlags();
+-#ifdef ARCHITECTURE_arm64ec
+-  if (FEXCore::Utils::MRQpcInline::G.CallSite) {
+-    MacRunnerQpcSite(Op, false); // ★ QPCJIT stage 3: on success the code below is emitted into the slow block
+-  }
+-#endif
+ 
+   BlockSetRIP = true;
+   // This is just an unconditional jump
+@@ -1606,12 +1320,7 @@
+       // If this instruction has a REP prefix then this is architecturally
+       // defined to be a `PAUSE` instruction. On older processors this ends up
+       // being a true `REP NOP` which is why they stuck this here.
+-      // MacRunner SYNC: MACRUNNER_FEX_PAUSE=isb|N -> N x isb (0 = the previous single yield)
+-      if (const unsigned IsbCount = FEXCore::Utils::MacRunnerPauseIsbCount()) {
+-        _MRPause(IsbCount);
+-      } else {
+-        _Yield();
+-      }
++      _Yield();
+     }
+     return;
+   }
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
+@@ -1,7 +1,6 @@
+ // SPDX-License-Identifier: MIT
+ #pragma once
+ 
+-#include <FEXCore/Utils/MacRunnerQpcInline.h>
+ #include <FEXCore/Core/MacRunnerWinctx.h>
+ #include "Interface/Core/Frontend.h"
+ #include "Interface/Core/X86Tables/X86Tables.h"
+@@ -384,12 +383,6 @@
+   void LEAOp(OpcodeArgs);
+   void NOPOp(OpcodeArgs);
+   void RETOp(OpcodeArgs);
+-  // ★ MacRunner QPCJIT (MACRUNNER_FEX_QPC_INLINE): the guarded inline QueryPerformanceCounter at the start of ntdll's FFS (Core.cpp).
+-  void MacRunnerQpcInline(uint64_t GuestOffset);
+-  // ★ MacRunner QPCJIT stage 3 (keys 3, 4, 8): QPC at `call/jmp qword [rip+disp]` sites (OpcodeDispatcher.cpp).
+-  bool MacRunnerQpcSite(const X86Tables::DecodedOp& Op, bool IsCall);
+-  Ref MacRunnerQpcValue(const FEXCore::Utils::MRQpcInline::Scale& S);
+-  Ref MacRunnerQpcValueCompact(unsigned Idx, const FEXCore::Utils::MRQpcInline::Scale& S);
+   void IRETOp(OpcodeArgs);
+   void CallbackReturnOp(OpcodeArgs);
+   void SecondaryALUOp(OpcodeArgs);
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+@@ -6,8 +6,6 @@
+ #include <FEXCore/Utils/AllocatorHooks.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/MathUtils.h>
+-#include <FEXCore/Utils/MacRunnerXfer.h>
+-#include "Interface/Core/CPUBackend.h"
+ 
+ #ifndef _WIN32
+ #include <FEXCore/Utils/PrctlUtils.h>
+@@ -37,54 +35,9 @@
+   FEXCore::Allocator::VirtualTHPControl(Ptr, Size, FEXCore::Allocator::THPControl::Enable);
+ 
+   LookupCache = fextl::make_unique<GuestToHostMap>();
+-  if (FEXCore::Utils::MacRunnerHeaderByPCMode()) {
+-    // ★ MacRunner FEXXFER: one entry per 64 bytes is more than any unit count (a unit is header + code + tail + RIP entries).
+-    MRUnitCapacity = Size / 64 + 1;
+-    MRUnitBegins = static_cast<uint32_t*>(FEXCore::Allocator::VirtualAlloc(MRUnitCapacity * sizeof(uint32_t), false));
+-    if (!MRUnitBegins) {
+-      MRUnitCapacity = 0;
+-    }
+-  }
+-}
+-
+-void CodeBuffer::MRRecordUnit(uint64_t Offset) {
+-  const size_t N = MRUnitCount.load(std::memory_order_relaxed);
+-  if (!MRUnitBegins || N >= MRUnitCapacity || Offset >= AllocatedSize || (Offset & 15) ||
+-      (N && (uint64_t(MRUnitBegins[N - 1]) << 4) >= Offset)) {
+-    return;   // writers hold CodeBufferWriteMutex; out-of-order or overflow entries are dropped (the reader then finds no unit)
+-  }
+-  MRUnitBegins[N] = static_cast<uint32_t>(Offset >> 4);
+-  MRUnitCount.store(N + 1, std::memory_order_release);
+-}
+-
+-uint64_t CodeBuffer::MRFindUnit(uintptr_t Address) const {
+-  const auto Base = reinterpret_cast<uintptr_t>(Ptr);
+-  if (!MRUnitBegins || Address < Base || Address >= Base + AllocatedSize) {
+-    return 0;
+-  }
+-  const uint64_t Off = Address - Base;
+-  size_t Lo = 0, Hi = MRUnitCount.load(std::memory_order_acquire);
+-  while (Lo < Hi) {   // first entry whose begin is > Off
+-    const size_t Mid = Lo + (Hi - Lo) / 2;
+-    if ((uint64_t(MRUnitBegins[Mid]) << 4) <= Off) {
+-      Lo = Mid + 1;
+-    } else {
+-      Hi = Mid;
+-    }
+-  }
+-  if (!Lo) {
+-    return 0;
+-  }
+-  const uint64_t Begin = Base + (uint64_t(MRUnitBegins[Lo - 1]) << 4);
+-  const auto* Header = reinterpret_cast<const CPUBackend::JITCodeHeader*>(Begin);
+-  const auto* Tail = reinterpret_cast<const CPUBackend::JITCodeTail*>(Begin + Header->OffsetToBlockTail);
+-  return Address < Begin + Tail->Size ? Begin : 0;
+ }
+ 
+ CodeBuffer::~CodeBuffer() {
+-  if (MRUnitBegins) {
+-    FEXCore::Allocator::VirtualFree(MRUnitBegins, MRUnitCapacity * sizeof(uint32_t));
+-  }
+   FEXCore::Allocator::VirtualFree(Ptr, AllocatedSize);
+ }
+ 
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.h
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.h
+@@ -11,7 +11,6 @@
+ #include <FEXCore/Utils/SignalScopeGuards.h>
+ #include <FEXCore/Utils/TypeDefines.h>
+ 
+-#include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ 
+@@ -25,17 +24,6 @@
+   size_t AllocatedSize; // including guard page; see UsableSize()
+ 
+   fextl::unique_ptr<GuestToHostMap> LookupCache;
+-
+-  // ★ MacRunner FEXXFER MACRUNNER_FEX_HEADER_BY_PC (MacRunnerXfer.h): begins of the compiled units of this buffer, (offset >> 4),
+-  // appended in increasing order under CodeBufferWriteMutex right after the unit's bytes are copied; the count is published with a
+-  // release store, so a reader (any thread, also an exception handler) sees only complete entries. Buffers are never reused from
+-  // offset 0 (a new generation is a new CodeBuffer), so the table is append-only for its whole life. Null with the key 0.
+-  uint32_t* MRUnitBegins {};
+-  size_t MRUnitCapacity {};
+-  std::atomic<size_t> MRUnitCount {0};
+-  void MRRecordUnit(uint64_t Offset);
+-  // Begin of the unit whose [header, header + tail Size) contains Address, or 0.
+-  uint64_t MRFindUnit(uintptr_t Address) const;
+ 
+   CodeBuffer(size_t Size);
+   CodeBuffer(const CodeBuffer&) = delete;
+--- a/FEXCore/Source/Interface/IR/IR.json
++++ b/FEXCore/Source/Interface/IR/IR.json
+@@ -311,11 +311,6 @@
+         "Desc": ["This is a hint instruction that the CPU is likely to do a spin so it might want to pause to help out SMP",
+                  "Can be implemented as a NOP if necessary"]
+       },
+-      "MRPause u8:$Count": {
+-        "HasSideEffects": true,
+-        "Desc": ["MacRunner SYNC (MACRUNNER_FEX_PAUSE): the x86 PAUSE as Count isb instructions instead of one yield",
+-                 "(yield retires like a nop on Apple cores; isb is ~28 cycles on M1 Pro)"]
+-      },
+       "WFET GPR:$Upper, GPR:$Lower": {
+         "HasSideEffects": true,
+         "Desc": [
+@@ -1016,14 +1011,6 @@
+         "DestSize": "OpSize::i64Bit"
+       },
+ 
+-      "GPR = MRHostCounter u8:$Kind": {
+-        "Desc": ["MacRunner QPCJIT (MACRUNNER_FEX_QPC_INLINE): the host counter read exactly as macOS libsystem mach_continuous_time() and",
+-                 "PE ntdll RtlQueryPerformanceCounter (QPC lane patch 0001) read it, by the commpage USER_TIMEBASE kind:",
+-                 "3: mrs S3_4_C15_C10_6 (Apple ACNTVCT_EL0), 2: mrs CNTVCTSS_EL0, otherwise isb; mrs CNTVCT_EL0"
+-                ],
+-        "DestSize": "OpSize::i64Bit"
+-      },
+-
+       "GPR = Neg OpSize:#Size, GPR:$Src, CondClass:$Cond{CondClass::AL}": {
+         "Desc": ["Integer negation, with optional predication",
+                  "Dest = Cond ? -Src : Src",
+--- a/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
++++ b/FEXCore/Source/Interface/IR/Passes/RedundantFlagCalculationElimination.cpp
+@@ -16,7 +16,6 @@
+ #include <FEXCore/Utils/CompilerDefs.h>
+ #include <FEXCore/Utils/MathUtils.h>
+ #include <FEXCore/Utils/MacRunnerSuspend.h>
+-#include <FEXCore/Utils/MacRunnerXfer.h>
+ #include <FEXCore/Utils/Profiler.h>
+ #include <FEXCore/fextl/deque.h>
+ #include <FEXCore/fextl/vector.h>
+@@ -172,14 +171,10 @@
+     const char* Enabled = std::getenv("MACRUNNER_FEX_PRECISE_MEM_FLAGS");
+     PreciseMemoryFlags = Enabled && std::strcmp(Enabled, "1") == 0;
+     LazyFPStatus = FEXCore::LazyMXCSR::Enabled.load(std::memory_order_relaxed);
+-    CmpZC = FEXCore::Utils::MacRunnerCmpZCEnabled();
+   }
+   void Run(IREmitter* IREmit) override;
+ 
+ private:
+-  bool CmpZC {};
+-  static bool ZeroExtendedOperand(IRListView& CurrentIR, OrderedNodeWrapper Arg, OpSize Size, bool* IsConstant, uint64_t* Constant);
+-  static void NarrowCompareZC(IREmitter* IREmit, IRListView& CurrentIR, Ref CodeNode, IROp_Header* IROp);
+   bool PreciseMemoryFlags {};
+   // LAZY-FLAGS: under MACRUNNER_FEX_LAZY_MXCSR=1 the host FPSR is the guest MXCSR status, so a
+   // guest SSE operation with a dead destination still has an architectural effect (x86 raises
+@@ -597,64 +592,6 @@
+   }
+ }
+ 
+-// ★ MacRunner FEXXFER MACRUNNER_FEX_CMP_ZC: is the value of Arg zero-extended from Size (no bits above Size)?
+-// Zero-extending GPR loads of exactly that width (ldrb / ldrh, also the TSO forms) and constants that fit.
+-bool DeadFlagCalculationEliminination::ZeroExtendedOperand(IRListView& CurrentIR, OrderedNodeWrapper Arg, OpSize Size, bool* IsConstant,
+-                                                          uint64_t* Constant) {
+-  const uint64_t Mask = Size == OpSize::i8Bit ? 0xFFULL : (Size == OpSize::i16Bit ? 0xFFFFULL : 0);
+-  if (!Mask) {
+-    return false;
+-  }
+-  auto Op = CurrentIR.GetOp<IR::IROp_Header>(Arg);
+-  switch (Op->Op) {
+-  case OP_LOADMEM: return Op->Size == Size && Op->C<IR::IROp_LoadMem>()->Class == RegClass::GPR;
+-  case OP_LOADMEMTSO: return Op->Size == Size && Op->C<IR::IROp_LoadMemTSO>()->Class == RegClass::GPR;
+-  case OP_CONSTANT: {
+-    const uint64_t Value = static_cast<uint64_t>(Op->C<IR::IROp_Constant>()->Constant);
+-    if (Value > Mask) {
+-      return false;
+-    }
+-    *IsConstant = true;
+-    *Constant = Value;
+-    return true;
+-  }
+-  case OP_INLINECONSTANT: {
+-    const uint64_t Value = static_cast<uint64_t>(Op->C<IR::IROp_InlineConstant>()->Constant);
+-    if (Value > Mask) {
+-      return false;
+-    }
+-    *IsConstant = true;
+-    *Constant = Value;
+-    return true;
+-  }
+-  default: return false;
+-  }
+-}
+-
+-// ★ MacRunner FEXXFER MACRUNNER_FEX_CMP_ZC: called for a live SubNZCV of 8/16 bits whose N and V are dead. For zero-extended
+-// operands the 32-bit difference is zero exactly when the narrow one is, and borrows exactly when the narrow one does, so the
+-// 32-bit compare gives the same Z and C as the shifted form (the JIT's `lsl #(32-bits)` on both sides). Src2 that is a
+-// constant up to 4095 becomes an inline immediate (`cmp w, #imm`); a larger constant stays in its register (still exact).
+-void DeadFlagCalculationEliminination::NarrowCompareZC(IREmitter* IREmit, IRListView& CurrentIR, Ref CodeNode, IROp_Header* IROp) {
+-  bool Src1Constant = false, Src2Constant = false;
+-  uint64_t Src1Value = 0, Src2Value = 0;
+-  if (!ZeroExtendedOperand(CurrentIR, IROp->Args[0], IROp->Size, &Src1Constant, &Src1Value) || Src1Constant) {
+-    return;
+-  }
+-  if (!ZeroExtendedOperand(CurrentIR, IROp->Args[1], IROp->Size, &Src2Constant, &Src2Value)) {
+-    return;
+-  }
+-  if (Src2Constant && Src2Value > 4095 && CurrentIR.GetOp<IR::IROp_Header>(IROp->Args[1])->Op == OP_INLINECONSTANT) {
+-    return;   // an inline immediate the 32-bit cmp cannot encode
+-  }
+-  if (Src2Constant && Src2Value <= 4095) {
+-    IREmit->SetWriteCursorBefore(CodeNode);
+-    Ref Imm = IREmit->_InlineConstant(Src2Value);
+-    IREmit->ReplaceNodeArgument(CodeNode, 1, Imm);
+-  }
+-  IROp->Size = OpSize::i32Bit;
+-}
+-
+ // General purpose dead code elimination. Returns whether flag handling should
+ // be skipped (because it was removed or could not possibly affect flags).
+ bool DeadFlagCalculationEliminination::EliminateDeadCode(IREmitter* IREmit, Ref CodeNode, IROp_Header* IROp) {
+@@ -809,13 +746,6 @@
+           IROp->Op = Info.ReplacementNoWrite();
+         }
+ 
+-        // ★ MacRunner FEXXFER MACRUNNER_FEX_CMP_ZC=1 (MacRunnerXfer.h): an 8/16-bit compare with only ZF/CF live and
+-        // zero-extended operands becomes a 32-bit compare (no shifts, an inline immediate). Monotone with the worklist:
+-        // FlagsRead only shrinks, so a rewrite made here stays valid at the fixed point.
+-        if (!Eliminated && CmpZC && IROp->Op == OP_SUBNZCV && IROp->Size < OpSize::i32Bit && !(FlagsRead & (FLAG_N | FLAG_V))) {
+-          NarrowCompareZC(IREmit, CurrentIR, CodeNode, IROp);
+-        }
+-
+         // If we don't care about the sign or carry, we can optimize testnz.
+         // Carry is inverted between testz and testnz so we check that too. Note
+         // this flag is outside of the if, since the TestNZ might result from
+--- a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
++++ b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+@@ -2,7 +2,6 @@
+ 
+ #include "Interface/Core/CPUBackend.h"
+ #include "Interface/Context/Context.h"
+-#include "Interface/Core/MRHeaderByPC.h"
+ #include <FEXCore/Utils/SpinWaitLock.h>
+ 
+ #include <FEXCore/Debug/InternalThreadState.h>
+@@ -2113,14 +2112,7 @@
+   }
+ 
+   const auto Frame = Thread->CurrentFrame;
+-  MRHeaderByPC::Resolve(Thread, ProgramCounter, MRHeaderByPC::UnalignedAtomic);   // ★ MacRunner FEXXFER (mode 0: nothing)
+   const uint64_t BlockBegin = Frame->State.InlineJITBlockHeader;
+-  if (!BlockBegin) {
+-    // MacRunner FEXXFER: no unit for this PC (only reachable with MACRUNNER_FEX_HEADER_BY_PC=1 and a unit missing from the table;
+-    // before, a null header here was a null dereference).
+-    LogMan::Msg::EFmt("Unhandled JIT SIGBUS: no JIT unit for PC 0x{:x}\n", ProgramCounter);
+-    return std::nullopt;
+-  }
+   auto InlineHeader = reinterpret_cast<const CPU::CPUBackend::JITCodeHeader*>(BlockBegin);
+   auto InlineTail = reinterpret_cast<CPU::CPUBackend::JITCodeTail*>(Frame->State.InlineJITBlockHeader + InlineHeader->OffsetToBlockTail);
+ 
+--- a/FEXCore/include/FEXCore/Utils/MacRunnerPause.h
++++ /dev/null
+@@ -1,32 +0,0 @@
+-// SPDX-License-Identifier: MIT
+-// Modifications (c) 2026 MacRunner contributors, MIT
+-// ★ MacRunner SYNC (03.11.2026): length of the x86 PAUSE (F3 90) in translated code. Private MacRunner fork, not for upstream FEX-Emu.
+-// MACRUNNER_FEX_PAUSE (read once, ARM64EC only; the WOW64 translator and the Linux frontends keep the previous code):
+-//   0 / unset / anything else = the previous code: one `yield` (on Apple M1 `yield` retires like `nop`, 0.16 cycles: a guest
+-//       spin of N x PAUSE calibrated for x86, where PAUSE is ~10-140 cycles, ends ~100x sooner and the guest parks instead);
+-//   isb = one `isb` (28 cycles on M1 Pro, measured with the rusage cycle counter; the choice of Rust core::hint::spin_loop and
+-//       OpenJDK -XX:OnSpinWaitInst=isb on aarch64);
+-//   1..16 = that many `isb` (5 ~ 140 cycles ~ one Skylake-class PAUSE).
+-// The PAUSE has no architectural effect on x86 (a hint), so only the time a spin takes changes.
+-#pragma once
+-#include <cstdlib>
+-#include <cstring>
+-
+-namespace FEXCore::Utils {
+-inline unsigned MacRunnerPauseIsbCount() {
+-#ifdef ARCHITECTURE_arm64ec
+-  static const unsigned Count = [] {
+-    const char* Value = std::getenv("MACRUNNER_FEX_PAUSE");
+-    if (!Value) return 0u;
+-    if (!std::strcmp(Value, "isb")) return 1u;
+-    char* End = nullptr;
+-    const unsigned long N = std::strtoul(Value, &End, 10);
+-    if (End == Value || *End || N > 16) return 0u;
+-    return static_cast<unsigned>(N);
+-  }();
+-  return Count;
+-#else
+-  return 0;
+-#endif
+-}
+-} // namespace FEXCore::Utils
+--- a/FEXCore/include/FEXCore/Utils/MacRunnerQpcInline.h
++++ /dev/null
+@@ -1,178 +0,0 @@
+-// SPDX-License-Identifier: MIT
+-// Modifications (c) 2026 MacRunner contributors, MIT
+-// ★ MacRunner QPCJIT (03.11.2026): MACRUNNER_FEX_QPC_INLINE — QueryPerformanceCounter of x64 code without the x64 -> ARM64EC transition.
+-//
+-// Every x64 path to QPC ends in the x64 fast-forward sequence (FFS) of ntdll's hybrid export RtlQueryPerformanceCounter
+-// (.hexpthk: `mov rax,rsp; mov [rax+20h],rbx; push rbp; pop rbp; jmp <EC body>`): kernel32!QueryPerformanceCounter is
+-// `jmp [aux IAT]` to it, kernelbase / api-ms-win-core-profile forward to it, GetProcAddress(ntdll) returns it. FEX translates the
+-// FFS like any x64 code. Under the key, the translation of the FFS's FIRST instruction begins with:
+-//
+-//     if (macrunner_ntdll_fast.qpc_enabled == 0) -> the unchanged translation of the FFS (jmp to the EC body = the old path)
+-//     else: [rcx] = (counter + *base) * mul / div;  rax = 1;  ret
+-//
+-// with exactly the data PE ntdll's RtlQueryPerformanceCounter uses under MACRUNNER_QPC_FAST (QPC lane patch 0001: the EC half's
+-// export `macrunner_ntdll_fast`, filled once by the unix side at load). The flag is read on every call, so the inline path is on
+-// exactly when ntdll's own fast path is on (also under the hot switch) and the value is the one ntdll would compute: the same
+-// counter register, the same commpage base (read every call: it moves on sleep / wake), the same 64-bit floor of x*mul/div
+-// (as umulh by a magic constant, proven exact on ntdll's whole non-wrapping domain, see ComputeScale).
+-//
+-// Recognition is by address AND bytes: the block entry is the FFS address resolved from ntdll's export at process init, its 14 bytes
+-// equal those seen at init (canonical FFS whose jmp lands on the EC body found through the CHPE redirection table), the EC body's
+-// first 16 bytes are unchanged, and the page is not writable (FEX's write tracking then invalidates the block on any later patch).
+-// A hooked IAT never reaches the FFS; a patched FFS fails the byte check; both take the old path.
+-//
+-// Keys (read once in ProcessInit): 0 (default) = nothing changes (no IR differs, the plan is never armed); 1 = on; 2 = on + count
+-// inlined calls (one atomic add, printed at process / thread end); 9 = TEST ONLY: deliberately wrong scale (divisor + 1).
+-//
+-// Stage 3 (keys 3, 4, 8; QPCJIT 03.11 by the curator's word): additionally at the CALL SITE. A `call qword [rip+disp]` /
+-// `jmp qword [rip+disp]` whose slot, when the block is compiled, holds the FFS or an x64 thunk `jmp [aux]` whose aux holds the FFS
+-// (kernel32!QueryPerformanceCounter is exactly that) gets, before the unchanged call / jump:
+-//     if (slot value == that target  &&  thunk 8 bytes, aux value, FFS 16 bytes == as now  &&  qpc_enabled == 1)
+-//         [rcx] = value; rax = 1; continue after the call (jmp: return to the caller)   — no call, no thunk, no FFS, no ret
+-// Every condition is re-checked on every execution (a hooked IAT, thunk, aux slot or FFS takes the unchanged path at once), so
+-// the site path never depends on FEX invalidation. 3 = sites + FFS; 4 = 3 + counts; 8 = TEST ONLY: wrong scale on the site path
+-// only (the FFS path stays exact) — a probe that passes under 8 did not go through the site path.
+-//
+-// Compact form (keys 5, 6, 7; curator 03.11 15:5x — the same paths as 3/4, fewer instructions): every constant of a path lives in a
+-// 16-byte-aligned entry of the table below; an IR block materialises only the entry address (3 mov) and reads the rest with ldp/ldr
+-// (addresses, expected bytes, magic). x*5 becomes add x, x, x, lsl #2. 5 = compact sites + compact FFS path; 6 = 5 + counts;
+-// 7 = TEST ONLY: deliberately wrong scale on BOTH compact paths.
+-#pragma once
+-#include <atomic>
+-#include <cstdint>
+-
+-namespace FEXCore::Utils::MRQpcInline {
+-
+-// Mirror of struct macrunner_ntdll_fast (wine dlls/ntdll/unixlib.h, QPC lane patch 0001). Layout checked by static_assert in Module.cpp.
+-struct NtdllFast {
+-  volatile uint32_t qpc_enabled;
+-  uint32_t qpc_counter;
+-  uint64_t qpc_base_addr;
+-  uint64_t qpc_mul;
+-  uint64_t qpc_div;
+-  volatile uint32_t waitaddr_direct;
+-  volatile uint32_t qpc_count;
+-  uint32_t reserved[2];
+-};
+-
+-enum class ScaleForm : uint8_t { None = 0, Identity = 1, Shift = 2, MulHigh = 3 };
+-
+-struct Scale {
+-  uint64_t Mul {};    // reduced numerator (numer / gcd)
+-  uint64_t Magic {};  // MulHigh: q = umulh(x * Mul, Magic) >> Shift
+-  uint8_t Shift {};
+-  ScaleForm Form {ScaleForm::None};
+-};
+-
+-// floor(x * Numer / Div) for every x in [0, UINT64_MAX / Numer] — the domain where ntdll's own 64-bit product x*Numer does not
+-// wrap (ntdll refuses the fast path at load unless x < UINT64_MAX / Numer / 2). With g = gcd, M = Numer/g, D = Div/g:
+-// floor(x*Numer/Div) = floor(y/D), y = x*M <= YMax = (UINT64_MAX / Numer) * M. For s >= 64, m = ceil(2^s / D) < 2^64 and
+-// e = m*D - 2^s: if e * YMax < 2^s then floor(y*m / 2^s) = floor(y/D) for all 0 <= y <= YMax (Granlund–Montgomery: the error
+-// y*e/(D*2^s) is below 1/D, and frac(y/D) <= (D-1)/D, so no integer is crossed). Returns Form None if no such s exists.
+-inline uint64_t Gcd(uint64_t a, uint64_t b) {
+-  while (b) {
+-    const uint64_t t = a % b;
+-    a = b;
+-    b = t;
+-  }
+-  return a;
+-}
+-
+-inline Scale ComputeScale(uint64_t Numer, uint64_t Div) {
+-  Scale S {};
+-  if (!Numer || !Div) {
+-    return S;
+-  }
+-  const uint64_t G = Gcd(Numer, Div);
+-  const uint64_t M = Numer / G, D = Div / G;
+-  const uint64_t XMax = UINT64_MAX / Numer;
+-  const unsigned __int128 YMax = static_cast<unsigned __int128>(XMax) * M;
+-  S.Mul = M;
+-  if (D == 1) {
+-    S.Form = ScaleForm::Identity;
+-    return S;
+-  }
+-  if ((D & (D - 1)) == 0) {
+-    S.Form = ScaleForm::Shift;
+-    S.Shift = static_cast<uint8_t>(__builtin_ctzll(D));
+-    return S;
+-  }
+-  for (unsigned s = 64; s < 128; ++s) {
+-    const unsigned __int128 P = static_cast<unsigned __int128>(1) << s;
+-    const unsigned __int128 m = (P + (D - 1)) / D;
+-    if (m >> 64) {
+-      break;
+-    }
+-    const unsigned __int128 e = m * D - P;
+-    // e < D < 2^64 and YMax < 2^64: the product fits in 128 bits.
+-    if (e * YMax < P) {
+-      S.Form = ScaleForm::MulHigh;
+-      S.Magic = static_cast<uint64_t>(m);
+-      S.Shift = static_cast<uint8_t>(s - 64);
+-      return S;
+-    }
+-  }
+-  return S;
+-}
+-
+-// What the emitted code computes (used by the init self-test against direct division).
+-inline uint64_t ApplyScale(const Scale& S, uint64_t x) {
+-  const uint64_t y = x * S.Mul;
+-  switch (S.Form) {
+-  case ScaleForm::Identity: return y;
+-  case ScaleForm::Shift: return y >> S.Shift;
+-  case ScaleForm::MulHigh: return static_cast<uint64_t>((static_cast<unsigned __int128>(y) * S.Magic) >> 64) >> S.Shift;
+-  default: return 0;
+-  }
+-}
+-
+-// One entry per target kind: [0] the FFS path, [1] sites whose slot holds the FFS, [2..] sites through one x64 `jmp [aux]` thunk each.
+-// Written before the first code that reads it is emitted (init / compile time, under EntryLock), never changed afterwards.
+-struct alignas(16) SiteEntry {
+-  uint64_t Ffs, FlagAddr;  // 0, 8
+-  uint64_t Q0, Q1;         // 16, 24: the FFS's first 16 bytes
+-  uint64_t T, AuxAddr;     // 32, 40: thunk entries only
+-  uint64_t Thunk8, Pad;    // 48, 56
+-  uint64_t BaseAddr, Magic;// 64, 72
+-  uint64_t Mul, Pad2;      // 80, 88
+-};
+-static_assert(sizeof(SiteEntry) == 96);
+-constexpr unsigned MaxSiteEntries = 8;
+-
+-struct Plan {
+-  bool Armed {};          // set once in ProcessInit before any guest code runs; never changes afterwards
+-  uint8_t Mode {};        // the key: 1, 2 (count), 9 (TEST wrong scale)
+-  uint8_t Kind {};        // counter: 1 isb + CNTVCT_EL0, 2 CNTVCTSS_EL0, 3 Apple ACNTVCT_EL0 (as ntdll / libsystem)
+-  uint64_t Ffs {};        // x64-visible entry: ntdll hybrid export thunk of RtlQueryPerformanceCounter
+-  uint64_t Body {};       // the EC body the FFS jumps to
+-  uint64_t EnabledAddr {}; // &macrunner_ntdll_fast.qpc_enabled (EC half) — read on every call
+-  uint64_t BaseAddr {};   // continuous-time base (host commpage) — read on every call
+-  uint64_t CountAddr {};  // Mode 2: &InlinedCalls
+-  Scale S {};
+-  uint8_t FfsBytes[14] {};
+-  uint8_t BodyBytes[16] {};
+-  // stage 3 (keys 3, 4, 8)
+-  bool CallSite {};
+-  uint64_t SiteCountAddr {};  // key 4: &SiteCalls
+-  Scale SiteS {};             // key 8: deliberately wrong
+-  uint64_t FfsQ[2] {};        // the FFS's first 16 bytes (14 + two int3), little-endian
+-  bool (*SafeRead64)(uint64_t Addr, uint64_t* Out) {}; // compile-time read of guest memory that cannot fault (Module.cpp)
+-  bool Compact {};            // keys 5, 6, 7
+-  void (*Periodic)() {};      // Module.cpp: the end marker, at most once per 5 s (a killed process never reaches ProcessTerm)
+-};
+-
+-extern SiteEntry Entries[MaxSiteEntries];
+-extern std::atomic<unsigned> EntryCount;    // entries [0, EntryCount) are published
+-
+-extern Plan G;
+-extern std::atomic<uint64_t> InlinedCalls;  // Mode 2: calls that took the inline path (all threads)
+-extern std::atomic<uint64_t> Sites;         // compiled FFS blocks that carry the inline path
+-extern std::atomic<uint64_t> Refused;       // FFS compiles refused by the per-compile checks (bytes / writable / single step)
+-extern std::atomic<uint64_t> SiteCalls;     // key 4: calls that took the site path (all threads)
+-extern std::atomic<uint64_t> SiteCompiledCall, SiteCompiledJmp; // compiled call / jmp sites that carry the site path
+-extern std::atomic<uint64_t> SiteQueries;   // candidate sites examined (`call/jmp qword [rip+disp]`)
+-extern std::atomic<uint64_t> SiteRejected;  // candidates whose target is QPC but the FFS bytes / readability refused it
+-extern std::atomic<uint64_t> SiteReads;     // compile-time safe reads (NtQueryVirtualMemory each) made for candidates
+-extern std::atomic<uint64_t> SiteReadTicks; // their total time in CNTVCT ticks (the price of examining candidates)
+-
+-} // namespace FEXCore::Utils::MRQpcInline
+--- a/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h
++++ b/FEXCore/include/FEXCore/Utils/MacRunnerSuspend.h
+@@ -23,38 +23,6 @@
+   return 0;
+ #endif
+ }
+-// ★ MacRunner (GAPS 02.11.2026) MACRUNNER_FEX_RET_LANDING=1 (default 0 = previous code, byte for byte): a return that hits the
+-// call-return stack lands in its return block AFTER the block's suspend poll (the header store and the spill area are redone at the
+-// landing). Suspend latency stays bounded: every endless path still crosses a polled call target, an L1 / indirect entry or a polled
+-// backedge (an endless chain of returns needs as many calls). Rosetta 2 polls nowhere; this removes one of three polls per call+ret.
+-inline bool MacRunnerRetLandingEnabled() {
+-#ifdef ARCHITECTURE_arm64ec
+-  static const bool On = [] {
+-    const char* Value = std::getenv("MACRUNNER_FEX_RET_LANDING");
+-    return Value && Value[0] == '1' && !Value[1];
+-  }();
+-  return On;
+-#else
+-  return false;
+-#endif
+-}
+-// ★ MacRunner (GAPS 02.11.2026) MACRUNNER_FEX_HOT_FALLTHROUGH=<mask> (default 0 = previous code, byte for byte). Taken branches on the
+-// hot path cost a front-end redirect each; Rosetta 2's call+ret takes 3 (bl, ret, the loop's b.ne), ours took 6 (+ cbz over each entry
+-// poll's brk, + cbz to `ret` on a call-return-stack hit, + cbz over the L1 miss stub). The mask makes the common case fall through:
+-//   1  block-entry suspend poll: `ldr; cbnz -> cold trap` (the existing PendingGuestSuspendTraps form: own host->guest mapping, brk #0xCAFE)
+-//   2  return: call-return-stack hit falls through to `ret`, a miss branches to the L1 lookup
+-//   4  indirect branch / call / return-miss L1 hit falls through; a miss goes to an out-of-line stub (dispatcher + RIP) and branches back
+-inline unsigned MacRunnerHotFallthroughMask() {
+-#ifdef ARCHITECTURE_arm64ec
+-  static const unsigned Mask = [] {
+-    const char* Value = std::getenv("MACRUNNER_FEX_HOT_FALLTHROUGH");
+-    return Value && Value[0] >= '0' && Value[0] <= '7' && !Value[1] ? static_cast<unsigned>(Value[0] - '0') : 0U;
+-  }();
+-  return Mask;
+-#else
+-  return 0;
+-#endif
+-}
+ inline bool MacRunnerSuspendBackedgeEnabled() {
+   return MacRunnerSuspendBackedgeMode() != 0;
+ }
+--- a/FEXCore/include/FEXCore/Utils/MacRunnerXfer.h
++++ /dev/null
+@@ -1,88 +0,0 @@
+-// SPDX-License-Identifier: MIT
+-// Modifications (c) 2026 MacRunner contributors, MIT
+-// ★ MacRunner FEXXFER (03.11.2026): cheaper control transfers in translated code. Every key defaults to 0 = the previous
+-// emitted code byte for byte; read once during IR passes / code generation, never from a signal handler. ARM64EC only
+-// (the WOW64 translator and the Linux frontends keep the previous code).
+-#pragma once
+-#include <cstdlib>
+-
+-namespace FEXCore::Utils {
+-namespace MRXferDetail {
+-inline unsigned ReadMask(const char* Name, unsigned Max) {
+-  const char* Value = std::getenv(Name);
+-  if (!Value || Value[0] < '0' || Value[0] > '9' || Value[1]) {
+-    return 0;
+-  }
+-  const unsigned V = static_cast<unsigned>(Value[0] - '0');
+-  return V <= Max ? V : 0;
+-}
+-} // namespace MRXferDetail
+-
+-// MACRUNNER_FEX_CMP_ZC=1 (item 1): an 8/16-bit compare (SubNZCV) whose live flags are only ZF/CF and whose operands are a
+-// zero-extending load of that width and a constant / another such load is emitted as a 32-bit compare: `ldrb; cmp w, #imm`
+-// instead of `mov w, #imm; ldrb; lsl #24; cmp w, w, lsl #24`. ZF and CF of the two forms are equal for zero-extended
+-// operands; SF/OF are not, so the rewrite needs N and V dead (the flag pass's own liveness, which already treats every unit
+-// exit, suspend edge and - with MACRUNNER_FEX_PRECISE_MEM_FLAGS=1 - every guest memory access as reading all flags).
+-inline bool MacRunnerCmpZCEnabled() {
+-#ifdef ARCHITECTURE_arm64ec
+-  static const bool On = MRXferDetail::ReadMask("MACRUNNER_FEX_CMP_ZC", 1) == 1;
+-  return On;
+-#else
+-  return false;
+-#endif
+-}
+-
+-// MACRUNNER_FEX_RIP_LITERAL=<mask> (item 2): guest-RIP constants (EntrypointOffset) that need three or four mov/movk are
+-// loaded from a PC-relative literal in the unit (one `ldr x, lit`, relocation RELOC_GUEST_RIP_LITERAL as the existing
+-// literals): 1 = the return address pushed by CALL, 2 = every other such constant (RIP-relative data addresses).
+-inline unsigned MacRunnerRipLiteralMask() {
+-#ifdef ARCHITECTURE_arm64ec
+-  static const unsigned Mask = MRXferDetail::ReadMask("MACRUNNER_FEX_RIP_LITERAL", 3);
+-  return Mask;
+-#else
+-  return 0;
+-#endif
+-}
+-
+-// MACRUNNER_FEX_RET_NOPOLL=1 (item 4, first step): a block that is the return block of a CALL in the same unit is laid out
+-// without the suspend poll inline: the call-return-stack landing (and the fall-through after `bl`) enters header + spill +
+-// body; every other entry (L1, block links, dispatcher) goes through an out-of-line entry stub that stores the header,
+-// allocates the spill area, polls exactly as the inline entry did, and branches into the body. No branch is added on the
+-// return path (MACRUNNER_FEX_RET_LANDING added one and gained nothing). Suspend latency stays bounded: an unpolled landing
+-// needs a matching call-return-stack entry, i.e. a prior CALL through a polled entry; the run of consecutive unpolled
+-// landings is at most the call-return-stack depth, and loops inside bodies keep their backedge polls.
+-inline bool MacRunnerRetNoPollEnabled() {
+-#ifdef ARCHITECTURE_arm64ec
+-  static const bool On = MRXferDetail::ReadMask("MACRUNNER_FEX_RET_NOPOLL", 1) == 1;
+-  return On;
+-#else
+-  return false;
+-#endif
+-}
+-// MACRUNNER_FEX_HEADER_BY_PC=<mode> (item 3): 1 = block entries no longer store InlineJITBlockHeader (`adr; str [x28]`, 2 per entry);
+-// every reader resolves the unit from the host PC through the code buffer's unit table (MRHeaderByPC.h) on its own rare path.
+-// 2 = probe only: entries keep the store, every reader ALSO resolves and compares (same / diff / no unit / poison / control) and
+-// prints macrunner-fex-header-probe lines; the emitted code is that of mode 0. Mode 1 stays off while FEX code caching is on
+-// (mapped cache units are not in the table).
+-inline unsigned MacRunnerHeaderByPCMode() {
+-#ifdef ARCHITECTURE_arm64ec
+-  static const unsigned Mode = MRXferDetail::ReadMask("MACRUNNER_FEX_HEADER_BY_PC", 2);
+-  return Mode;
+-#else
+-  return 0;
+-#endif
+-}
+-// MACRUNNER_FEX_ICALL_IC=1 (item 5): an indirect CALL with a known return block gets a monomorphic inline target cache:
+-// `ldr tag; sub; cbnz miss; adr; stp; bl <linked host code>` instead of the L1 lookup + blr. The tag (an 8-byte literal of the unit)
+-// is filled ONCE by ExitFunctionLink (C++, under the link lock and JIT write) with the first target, and the site's `bl` is linked to
+-// that target's host code like a direct call (delinker: back to the fill stub, the tag stays). A different target later takes the
+-// out-of-line L1 path (RAS-correct return through a one-branch trampoline). Off with NULL_HOST, far jumps and FEX code caching.
+-inline bool MacRunnerICallICEnabled() {
+-#ifdef ARCHITECTURE_arm64ec
+-  static const bool On = MRXferDetail::ReadMask("MACRUNNER_FEX_ICALL_IC", 1) == 1;
+-  return On;
+-#else
+-  return false;
+-#endif
+-}
+-} // namespace FEXCore::Utils
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -8,10 +8,6 @@
+ */
+ 
+ #include <FEXCore/fextl/fmt.h>
+-#include <FEXCore/Utils/MacRunnerPause.h>
+-#include <FEXCore/Utils/MacRunnerQpcInline.h>
+-#include <cstddef>
+-#include <cstring>
+ #include "../../../FEXCore/Source/Interface/Core/HBX87Stats.h"
+ #include "../../../FEXCore/Source/Interface/Core/HBX87StateGates.h"
+ #include <algorithm>
+@@ -75,8 +71,6 @@
+ #include <ntstatus.h>
+ #include <windef.h>
+ #include <winternl.h>
+-// ★ MacRunner QPCJIT: in ntdll.def, not declared by the headers in use.
+-extern "C" NTSTATUS NTAPI NtQueryPerformanceCounter(LARGE_INTEGER* Counter, LARGE_INTEGER* Frequency);
+ #include <winnt.h>
+ #include <wine/debug.h>
+ #include "Common/MacRunnerJournal.h"
+@@ -351,208 +345,6 @@
+ 
+ void HandleImageUnmap(uint64_t Address, uint64_t Size) {
+   ImageTracker->HandleImageUnmap(Address, Size);
+-}
+-
+-// ★ MacRunner QPCJIT (03.11.2026) MACRUNNER_FEX_QPC_INLINE — see FEXCore/Utils/MacRunnerQpcInline.h. Runs once in ProcessInit, before
+-// any guest code: finds ntdll's x64-visible RtlQueryPerformanceCounter entry (the FFS, as GetProcAddress gives it to x64 code) and the
+-// data of ntdll's own user-mode QPC (export macrunner_ntdll_fast, QPC lane patch 0001), checks everything the inline code relies on,
+-// and arms the plan. Any doubt = not armed, marker why=..., FEX translates the FFS as before. Key 0: returns at once, prints nothing.
+-uint64_t MRQpcReadCounter(uint32_t Kind) {
+-  uint64_t V;
+-  if (Kind == 3) {
+-    __asm__ __volatile__("mrs %0, s3_4_c15_c10_6" : "=r"(V)::"memory");
+-  } else if (Kind == 2) {
+-    __asm__ __volatile__("mrs %0, s3_3_c14_c0_6" : "=r"(V)::"memory");
+-  } else {
+-    __asm__ __volatile__("isb\n\tmrs %0, cntvct_el0" : "=r"(V)::"memory");
+-  }
+-  return V;
+-}
+-
+-// ★ QPCJIT stage 3: compile-time read of 8 bytes of guest memory that cannot fault in the compiler: committed, readable, not a guard
+-// page, inside one region (NtQueryVirtualMemory, local to the unix side of ntdll). Used only for `call/jmp qword [rip+disp]` candidates.
+-void MRQpcInlinePeriodic();
+-
+-bool MRQpcSafeRead64(uint64_t Addr, uint64_t* Out) {
+-  MEMORY_BASIC_INFORMATION Info;
+-  if (NtQueryVirtualMemory(NtCurrentProcess(), reinterpret_cast<void*>(Addr), MemoryBasicInformation, &Info, sizeof(Info), nullptr)) {
+-    return false;
+-  }
+-  constexpr DWORD Readable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+-  if (Info.State != MEM_COMMIT || (Info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) || !(Info.Protect & Readable) ||
+-      Addr + 8 > reinterpret_cast<uint64_t>(Info.BaseAddress) + Info.RegionSize) {
+-    return false;
+-  }
+-  memcpy(Out, reinterpret_cast<const void*>(Addr), sizeof(*Out));
+-  return true;
+-}
+-
+-void MRQpcInlineInit(HMODULE NtDll) {
+-  namespace Q = FEXCore::Utils::MRQpcInline;
+-  static_assert(offsetof(Q::NtdllFast, qpc_counter) == 4 && offsetof(Q::NtdllFast, qpc_base_addr) == 8 &&
+-                  offsetof(Q::NtdllFast, qpc_mul) == 0x10 && offsetof(Q::NtdllFast, qpc_div) == 0x18 &&
+-                  offsetof(Q::NtdllFast, qpc_count) == 0x24 && sizeof(Q::NtdllFast) == 0x30,
+-                "struct macrunner_ntdll_fast (wine dlls/ntdll/unixlib.h)");
+-  const char* Key = getenv("MACRUNNER_FEX_QPC_INLINE");
+-  if (!Key || !Key[0] || (Key[0] == '0' && !Key[1])) {
+-    return;
+-  }
+-  const unsigned Mode = (!Key[1] && Key[0] >= '1' && Key[0] <= '9') ? static_cast<unsigned>(Key[0] - '0') : 0;
+-  // 1 2 9: FFS;  3 4 8: FFS + call sites;  5 6 7: the same as 3 4 in the compact form (7: wrong scale on both compact paths)
+-  const bool Counting = Mode == 2 || Mode == 4 || Mode == 6;
+-  const bool WrongFfsScale = Mode == 9 || Mode == 7, WrongSiteScale = Mode == 8 || Mode == 7;
+-  static constexpr uint8_t FfsHead[10] = {0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x20, 0x55, 0x5d, 0xe9}; // mov rax,rsp; mov [rax+20h],rbx; push rbp; pop rbp; jmp rel32
+-  const auto* Fast = reinterpret_cast<const Q::NtdllFast*>(GetProcAddress(NtDll, "macrunner_ntdll_fast"));
+-  const uint64_t Ffs = reinterpret_cast<uint64_t>(GetProcAddress(NtDll, "RtlQueryPerformanceCounter"));
+-  const char* Why = nullptr;
+-  uint64_t Body = 0, Div = 0, Gcd = 1;
+-  unsigned Kind = 0, Bracket = 0;
+-  Q::Scale S {}, SiteS {};
+-  if (!Mode) {
+-    Why = "unknown-key-value";
+-  } else if (!Fast) {
+-    Why = "no-ntdll-export"; // ntdll without the QPC lane's patch 0001: there is no ntdll fast path to agree with
+-  } else if (!Ffs || Ffs < NtDllBase || Ffs - NtDllBase >= NtDllRedirectionLUTSize || !NtDllRedirectionLUT[Ffs - NtDllBase]) {
+-    Why = "no-redirection";
+-  } else if (memcmp(reinterpret_cast<const void*>(Ffs), FfsHead, sizeof(FfsHead))) {
+-    Why = "ffs-bytes";
+-  } else {
+-    Body = NtDllRedirectionLUT[Ffs - NtDllBase] + NtDllBase;
+-    int32_t Rel;
+-    memcpy(&Rel, reinterpret_cast<const void*>(Ffs + sizeof(FfsHead)), sizeof(Rel));
+-    Kind = Fast->qpc_counter;
+-    Div = Fast->qpc_div + (WrongFfsScale ? 1 : 0);
+-    if (Ffs + sizeof(FfsHead) + sizeof(Rel) + static_cast<int64_t>(Rel) != Body) {
+-      Why = "ffs-target";
+-    } else if (Kind < 1 || Kind > 3) {
+-      Why = "ntdll-qpc-unvalidated"; // MACRUNNER_QPC_FAST=0 without the hot-key file: ntdll never validated the commpage
+-    } else if (!Fast->qpc_base_addr || !Fast->qpc_mul || !Fast->qpc_div) {
+-      Why = "ntdll-qpc-params";
+-    } else if (Fast->qpc_count && !Counting) {
+-      Why = "ntdll-qpc-count-on"; // MACRUNNER_QPC_COUNT=1 counts in ntdll; inlined calls would be missing from it (key 2 counts them here)
+-    } else if ((S = Q::ComputeScale(Fast->qpc_mul, Div)).Form == Q::ScaleForm::None ||
+-               (SiteS = Q::ComputeScale(Fast->qpc_mul, Fast->qpc_div + (WrongSiteScale ? 1 : 0))).Form == Q::ScaleForm::None) {
+-      Why = "scale";
+-    } else {
+-      Gcd = Q::Gcd(Fast->qpc_mul, Div);
+-      const uint64_t XMax = UINT64_MAX / Fast->qpc_mul;
+-      uint64_t X = 0x9E3779B97F4A7C15ULL;
+-      for (unsigned i = 0; i < 4096 && !Why; ++i) {
+-        uint64_t V;
+-        if (i < 1024) {
+-          V = i;
+-        } else if (i < 2048) {
+-          V = XMax - (i - 1024);
+-        } else {
+-          X ^= X << 13;
+-          X ^= X >> 7;
+-          X ^= X << 17;
+-          V = X % (XMax + 1);
+-        }
+-        if (Q::ApplyScale(S, V) != V * Fast->qpc_mul / Div ||
+-            Q::ApplyScale(SiteS, V) != V * Fast->qpc_mul / (Fast->qpc_div + (WrongSiteScale ? 1 : 0))) {
+-          Why = "scale-selftest";
+-        }
+-      }
+-      // The clock itself: the inline value must lie between two NtQueryPerformanceCounter (the syscall clock), as ntdll checks its own.
+-      for (unsigned i = 0; i < 64 && !Why && !WrongFfsScale; ++i) {
+-        LARGE_INTEGER A, B;
+-        NtQueryPerformanceCounter(&A, nullptr);
+-        const uint64_t T = MRQpcReadCounter(Kind) + *reinterpret_cast<const volatile uint64_t*>(Fast->qpc_base_addr);
+-        const uint64_t V = Q::ApplyScale(S, T);
+-        NtQueryPerformanceCounter(&B, nullptr);
+-        if (V < static_cast<uint64_t>(A.QuadPart) || V > static_cast<uint64_t>(B.QuadPart)) {
+-          Why = "bracket";
+-        } else {
+-          ++Bracket;
+-        }
+-      }
+-    }
+-  }
+-  auto& P = Q::G;
+-  if (!Why) {
+-    P.Mode = static_cast<uint8_t>(Mode);
+-    P.Kind = static_cast<uint8_t>(Kind);
+-    P.Ffs = Ffs;
+-    P.Body = Body;
+-    P.EnabledAddr = reinterpret_cast<uint64_t>(&Fast->qpc_enabled);
+-    P.BaseAddr = Fast->qpc_base_addr;
+-    P.CountAddr = Counting ? reinterpret_cast<uint64_t>(&Q::InlinedCalls) : 0;
+-    P.S = S;
+-    P.SiteS = SiteS;
+-    P.CallSite = Mode >= 3 && Mode <= 8;
+-    P.Compact = Mode >= 5 && Mode <= 7;
+-    P.SiteCountAddr = Mode == 4 || Mode == 6 ? reinterpret_cast<uint64_t>(&Q::SiteCalls) : 0;
+-    memcpy(P.FfsQ, reinterpret_cast<const void*>(Ffs), sizeof(P.FfsQ));
+-    P.SafeRead64 = MRQpcSafeRead64;
+-    P.Periodic = MRQpcInlinePeriodic;
+-    // compact form: [0] the FFS path (scale S), [1] sites whose slot holds the FFS (scale SiteS); thunk entries come at compile time
+-    for (unsigned i = 0; i < 2; ++i) {
+-      auto& E = Q::Entries[i];
+-      const auto& Sc = i ? SiteS : S;
+-      E.Ffs = Ffs;
+-      E.FlagAddr = P.EnabledAddr;
+-      E.Q0 = P.FfsQ[0];
+-      E.Q1 = P.FfsQ[1];
+-      E.BaseAddr = P.BaseAddr;
+-      E.Magic = Sc.Magic;
+-      E.Mul = Sc.Mul;
+-    }
+-    Q::EntryCount.store(2, std::memory_order_release);
+-    memcpy(P.FfsBytes, reinterpret_cast<const void*>(Ffs), sizeof(P.FfsBytes));
+-    memcpy(P.BodyBytes, reinterpret_cast<const void*>(Body), sizeof(P.BodyBytes));
+-    P.Armed = true;
+-    Why = Mode == 9 ? "TEST-WRONG-SCALE" : Mode == 8 ? "TEST-WRONG-SITE-SCALE" : Mode == 7 ? "TEST-WRONG-COMPACT-SCALE" : "ok";
+-  }
+-  char Line[512];
+-  std::snprintf(Line, sizeof(Line),
+-                "macrunner-fex-qpc-inline: key=%.4s armed=%u why=%s ffs=%llx body=%llx kind=%u mul=%llu div=%llu reduced=%llu/%llu form=%u "
+-                "magic=%llx shift=%u qpc_enabled=%u bracket=%u pid=%lu\n",
+-                Key, static_cast<unsigned>(P.Armed), Why, static_cast<unsigned long long>(Ffs), static_cast<unsigned long long>(Body), Kind,
+-                static_cast<unsigned long long>(Fast ? Fast->qpc_mul : 0), static_cast<unsigned long long>(Div),
+-                static_cast<unsigned long long>(Fast && Fast->qpc_mul ? Fast->qpc_mul / Gcd : 0), static_cast<unsigned long long>(Div / Gcd),
+-                static_cast<unsigned>(S.Form), static_cast<unsigned long long>(S.Magic), static_cast<unsigned>(S.Shift),
+-                Fast ? static_cast<unsigned>(Fast->qpc_enabled) : 0U, Bracket, static_cast<unsigned long>(GetCurrentProcessId()));
+-  FEX::Windows::Logging::Raw(Line);
+-}
+-
+-void MRQpcInlineReport(const char* When) {
+-  namespace Q = FEXCore::Utils::MRQpcInline;
+-  if (!Q::G.Armed) {
+-    return;
+-  }
+-  char Line[448];
+-  const bool Counting = Q::G.Mode == 2 || Q::G.Mode == 4 || Q::G.Mode == 6;
+-  uint64_t Freq;
+-  __asm__ __volatile__("mrs %0, cntfrq_el0" : "=r"(Freq));
+-  std::snprintf(Line, sizeof(Line),
+-                "macrunner-fex-qpc-inline-end: when=%s key=%u inlined=%lld sites=%llu refused=%llu site_inlined=%lld site_call=%llu site_jmp=%llu "
+-                "site_queries=%llu site_rejected=%llu site_reads=%llu site_read_us=%llu pid=%lu tid=%lu\n", When,
+-                static_cast<unsigned>(Q::G.Mode), Counting ? static_cast<long long>(Q::InlinedCalls.load(std::memory_order_relaxed)) : -1LL,
+-                static_cast<unsigned long long>(Q::Sites.load(std::memory_order_relaxed)),
+-                static_cast<unsigned long long>(Q::Refused.load(std::memory_order_relaxed)),
+-                Q::G.Mode == 4 || Q::G.Mode == 6 ? static_cast<long long>(Q::SiteCalls.load(std::memory_order_relaxed)) : -1LL,
+-                static_cast<unsigned long long>(Q::SiteCompiledCall.load(std::memory_order_relaxed)),
+-                static_cast<unsigned long long>(Q::SiteCompiledJmp.load(std::memory_order_relaxed)),
+-                static_cast<unsigned long long>(Q::SiteQueries.load(std::memory_order_relaxed)),
+-                static_cast<unsigned long long>(Q::SiteRejected.load(std::memory_order_relaxed)),
+-                static_cast<unsigned long long>(Q::SiteReads.load(std::memory_order_relaxed)),
+-                static_cast<unsigned long long>(Q::SiteReadTicks.load(std::memory_order_relaxed) * 1000000ULL / (Freq ? Freq : 1)), // FEX CRT: no %f
+-                static_cast<unsigned long>(GetCurrentProcessId()), static_cast<unsigned long>(GetCurrentThreadId()));
+-  FEX::Windows::Logging::Raw(Line);
+-}
+-
+-// ★ QPCJIT: the same line while the process runs, at most every 5 s (CNTVCT), from compile time and thread exit.
+-void MRQpcInlinePeriodic() {
+-  static std::atomic<uint64_t> Last {0};
+-  uint64_t Now, Freq;
+-  __asm__ __volatile__("mrs %0, cntvct_el0" : "=r"(Now));
+-  __asm__ __volatile__("mrs %0, cntfrq_el0" : "=r"(Freq));
+-  uint64_t Prev = Last.load(std::memory_order_relaxed);
+-  if (Now - Prev < 5 * Freq || !Last.compare_exchange_strong(Prev, Now, std::memory_order_relaxed)) {
+-    return;
+-  }
+-  MRQpcInlineReport("periodic");
+ }
+ } // namespace
+ 
+@@ -1616,14 +1408,6 @@
+ 
+   const uintptr_t KiUserExceptionDispatcherFFS = reinterpret_cast<uintptr_t>(GetProcAddress(NtDll, "KiUserExceptionDispatcher"));
+   Exception::KiUserExceptionDispatcher = NtDllRedirectionLUT[KiUserExceptionDispatcherFFS - NtDllBase] + NtDllBase;
+-  {
+-    // ★ MacRunner SYNC: one marker per process, printed whatever the key (so a run proves which PAUSE it translated with)
+-    char Message[128];
+-    const char* Raw = getenv("MACRUNNER_FEX_PAUSE");
+-    snprintf(Message, sizeof(Message), "macrunner-fex-pause: key=%.16s isb=%u\n", Raw ? Raw : "unset", FEXCore::Utils::MacRunnerPauseIsbCount());
+-    FEX::Windows::Logging::Raw(Message);
+-  }
+-  MRQpcInlineInit(NtDll); // ★ MacRunner QPCJIT: key 0 returns at once
+ 
+   FEX_CONFIG_OPT(ProfileStats, PROFILESTATS);
+   FEX_CONFIG_OPT(StartupSleep, STARTUPSLEEP);
+@@ -1643,10 +1427,6 @@
+ 
+ void ProcessTerm(HANDLE Handle, BOOL After, NTSTATUS Status) {
+   if (FEX::Windows::MRJournal::On) FEX::Windows::MRJournal::Mark("TERM", static_cast<uint32_t>(Status), true);
+-  {
+-    static std::atomic_bool MRQpcReported {false};
+-    if (!MRQpcReported.exchange(true)) MRQpcInlineReport("process"); // ★ MacRunner QPCJIT (armed only)
+-  }
+   FEXCore::HBX87::Stats::Dump();
+ }
+ 
+@@ -2123,9 +1903,6 @@
+ }
+ 
+ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
+-  if (FEXCore::Utils::MRQpcInline::G.Armed) {
+-    MRQpcInlinePeriodic(); // ★ QPCJIT (throttled)
+-  }
+   if (!FEX::Windows::ValidateHandleAccess(Thread, THREAD_TERMINATE)) {
+     return STATUS_ACCESS_DENIED;
+   }

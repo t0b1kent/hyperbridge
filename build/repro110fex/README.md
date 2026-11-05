@@ -1,5 +1,9 @@
 # FEX c12 translator from pinned sources (REPRO-110)
 
+## MacRunner 1.1.0: separate WOW64 source replay
+
+The shipped 32-bit module predates the later c32 translator changes. `wow64_source` in `recipe.lock.json` pins a final architecture-specific patch and 6,940 source postimages, applied after the common public c12/c32 chain only for `fex32`. The reference DLL SHA is `2a48b5ce…`. The 64-bit source, defaults and reference remain unchanged. Three sealed range-v3 editor metadata files are retained; they are not compiler inputs. The replay excludes the later in-block-QPC, transfer, pause and block-header headers. Source replay is verified; PE byte convergence still requires the clean GitHub build.
+
 This directory is a copy of `build/repro109fex` (the recipe that reproduces the 1.0.9 translator byte for byte) with the
 smallest set of changes needed for the 1.1.0 c12 source state. The 1.0.9 recipe is left untouched.
 

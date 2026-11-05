@@ -61,5 +61,14 @@
   "variants": {
     "fex32": "same source with AArch64 MinGW target; new experimental switches default off",
     "fex64": "r5 + c9 + c12 + c32 cumulative source delta; ARM64EC; new experimental switches default off"
+  },
+  "wow64_source": {
+    "post_tail": {
+      "file": "c32/wow64-source.patch",
+      "sha256": "9febff5fc90e728f8dcfcac13be83c28ec283c07a5a46b78e01871a6242f941e"
+    },
+    "product_manifest": "c32/WOW64-PRODUCT-MANIFEST.json",
+    "product_manifest_sha256": "46d959823fd610abf19c4dbe717373656e865eee8e9acca40636efab06ecde22",
+    "product_postimage_count": 6940
   }
 }
