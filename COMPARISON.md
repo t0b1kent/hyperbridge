@@ -1,5 +1,18 @@
 # HyperBridge compared
 
+## November 3, 2026: 1.1.0 defaults and experimental M
+
+xbench on M1 Pro; cycles per step, median of three rounds, lower is better. Rosetta and HyperBridge/FEX execute the same x86-64 code; ARM64 is a separate native reference.
+
+| Path | Call/return | Indirect call | Byte compare | Mixed loop | Arithmetic |
+|---|---:|---:|---:|---:|---:|
+| ARM64 | 3.00 | 3.00 | 2.00 | 4.00 | 4.21 |
+| Rosetta | 4.01 | 5.54 | 2.95 | 5.01 | 4.21 |
+| HyperBridge/FEX, new switches off | 5.02 | 6.02 | 3.65 | 6.04 | 4.21 |
+| HyperBridge/FEX, experimental M | 4.01 | 4.53 | 3.01 | 5.02 | 4.21 |
+
+HEADER_BY_PC, RET_NOPOLL, CMP_ZC, RIP_LITERAL and QPC_INLINE are disabled by default in 1.1.0. M enables CMP_ZC, RIP_LITERAL, RET_NOPOLL, HEADER_BY_PC, QPC_INLINE=5 and PAUSE=isb. “On par with Rosetta” applies to this experimental configuration on these microloops, not to release defaults or average game performance. [Full methodology and limits](docs/RELEASE-1.1.0-EN.md) · [Русская версия](docs/RELEASE-1.1.0-RU.md).
+
 ## October 7, 2026: MacRunner 1.0.9
 
 MacRunner 1.0.9 ships engine 0227: the 64-bit translator of 1.0.8 with 32 more patches (integer division,
