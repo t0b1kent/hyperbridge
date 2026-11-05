@@ -1,5 +1,7 @@
 ## HyperBridge 1.1.0
 
+For a separate module download, use `HyperBridge-1.1.0-arm64-r1.zip`: it adds the separate FEX-Emu license and copyright notice to the initial packaging. The executable modules are unchanged. The full MacRunner application already includes this notice.
+
 This version includes experimental paths for block headers keyed by PC, comparisons, returns without polling, RIP literals and in-block QPC. HEADER_BY_PC, RET_NOPOLL, CMP_ZC, RIP_LITERAL and QPC_INLINE are disabled by default. The table below reports defaults and the experimental M configuration separately; “on par with Rosetta” refers to M.
 
 ### Translator measurements on M1 Pro
