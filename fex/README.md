@@ -1,5 +1,11 @@
 # fex/ — HyperBridge, the FEX-based CPU engine of MacRunner
 
+## MacRunner 1.1.0 · November 5, 2026
+
+[HyperBridge 1.1.0 release](https://github.com/t0b1kent/hyperbridge/releases/tag/v1.1.0) accompanies [MacRunner 1.1.0](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.1.0). The package was built locally under a one-time owner-approved exception. The ongoing source-build integration is on [`release/1.1.0-c32r`](https://github.com/t0b1kent/hyperbridge/tree/release/1.1.0-c32r); convergence with the release binaries has not yet been verified. The new HEADER_BY_PC, RET_NOPOLL, CMP_ZC, RIP_LITERAL and QPC_INLINE switches are disabled by default. [Measurements, experimental M and limits](../docs/RELEASE-1.1.0-EN.md).
+
+The patch inventory and historical default descriptions below document the earlier 1.0.9 / engine-0227 baseline. They must not be read as a completed byte-equivalent build recipe for 1.1.0.
+
 MacRunner runs x86-64 and x86 Windows programs on Apple Silicon through ARM64 Wine. Its CPU
 engine is [FEX-Emu](https://github.com/FEX-Emu/FEX) (MIT), ported to macOS by the MacRunner
 project. This directory holds that port as a patch series on top of an exact upstream commit.
