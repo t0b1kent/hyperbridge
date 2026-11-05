@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: Select the full recipe matrix or only the native stand producer
+        description: Select the full matrix, native stand, or separate WOW64 preflight/build
         type: choice
-        options: [all, native-stand]
+        options: [all, native-stand, fex32-inputs, fex32-full]
         default: all
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        include: ${{ fromJSON(inputs.only == 'native-stand' && '[{"slot":"fex64-native-stand","architecture":"fex64","stage":"native-stand"}]' || '[{"slot":"fex64-inventory","architecture":"fex64","stage":"inventory"},{"slot":"fex64-patches","architecture":"fex64","stage":"patches"},{"slot":"fex64-configure","architecture":"fex64","stage":"configure"},{"slot":"fex64-compile","architecture":"fex64","stage":"compile"},{"slot":"fex64-native-stand","architecture":"fex64","stage":"native-stand"},{"slot":"fex32-full","architecture":"fex32","stage":"full"}]') }}
+        include: ${{ fromJSON(inputs.only == 'native-stand' && '[{"slot":"fex64-native-stand","architecture":"fex64","stage":"native-stand"}]' || inputs.only == 'fex32-inputs' && '[{"slot":"fex32-inventory","architecture":"fex32","stage":"inventory"},{"slot":"fex32-patches","architecture":"fex32","stage":"patches"},{"slot":"fex32-configure","architecture":"fex32","stage":"configure"}]' || inputs.only == 'fex32-full' && '[{"slot":"fex32-full","architecture":"fex32","stage":"full"}]' || '[{"slot":"fex64-inventory","architecture":"fex64","stage":"inventory"},{"slot":"fex64-patches","architecture":"fex64","stage":"patches"},{"slot":"fex64-configure","architecture":"fex64","stage":"configure"},{"slot":"fex64-compile","architecture":"fex64","stage":"compile"},{"slot":"fex64-native-stand","architecture":"fex64","stage":"native-stand"},{"slot":"fex32-full","architecture":"fex32","stage":"full"}]') }}
     env:
       REPRO109_ARCHITECTURE: ${{ matrix.architecture }}
       REPRO109_STAGE: ${{ matrix.stage }}
@@ -65,7 +65,7 @@ jobs:
           set -uo pipefail
           slot="$RUNNER_TEMP/release110-fex-c32-slot"
           case "$REPRO109_ARCHITECTURE/$REPRO109_STAGE" in
-            fex64/inventory|fex64/patches|fex64/configure|fex64/compile|fex64/native-stand|fex32/full) ;;
+            fex64/inventory|fex64/patches|fex64/configure|fex64/compile|fex64/native-stand|fex32/inventory|fex32/patches|fex32/configure|fex32/full) ;;
             *) printf 'Invalid stage selector\n'; exit 2 ;;
           esac
           nice -n 20 python3 -I -B build/repro110fex/build.py --out "$slot/build" \
@@ -87,7 +87,7 @@ jobs:
   admission:
     name: FEX fex64-admission
     needs: stage
-    if: always() && inputs.only != 'native-stand'
+    if: always() && inputs.only == 'all'
     runs-on: macos-15
     timeout-minutes: 20
     steps:

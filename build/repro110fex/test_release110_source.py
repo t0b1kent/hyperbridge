@@ -22,6 +22,55 @@ class ReleaseSource(TestCase):
         self.assertEqual(product['source_verification']['base']['status'], 'PASS_EXACT_PRODUCT_SOURCE')
         self.assertEqual(product['source_verification']['changed_files'], 74)
 
+    def test_wow64_source_is_replayed_after_common_tails_without_changing_fex64(self):
+        pin, product, _, _, _ = producer.inputs()
+        selected, selected_product = producer.source_for_variant('fex64', pin, product)
+        self.assertIs(selected, pin)
+        self.assertIs(selected_product, product)
+        selected, selected_product = producer.source_for_variant('fex32', pin, product)
+        self.assertEqual(selected['post_tail'][:-1], pin['post_tail'])
+        self.assertEqual(len(pin['post_tail']), 2)
+        self.assertEqual(selected['post_tail'][-1], pin['wow64_source']['post_tail'])
+        self.assertEqual(selected['product_postimage_count'], 6940)
+        self.assertEqual(selected_product['reference_wow64_sha256'],
+                         '2a48b5cec0e48f46b5f1086cdf1d8831138cb9468438e33341acc850a737b9c7')
+        for header in ['MacRunnerQpcInline.h', 'MacRunnerPause.h', 'MacRunnerXfer.h']:
+            self.assertNotIn('FEXCore/include/FEXCore/Utils/' + header, selected_product['product_source_postimages'])
+        self.assertEqual(len(selected_product['retained_nonbuild_submodule_metadata']), 3)
+
+    def test_wow64_missing_pin_and_tampered_manifest_are_rejected_before_source_build(self):
+        pin, product, _, _, _ = producer.inputs()
+        missing = dict(pin)
+        missing.pop('wow64_source')
+        with self.assertRaisesRegex(ValueError, 'WOW64 source pin missing'):
+            producer.source_for_variant('fex32', missing, product)
+        changed = dict(pin, wow64_source=dict(pin['wow64_source'], product_manifest_sha256='0' * 64))
+        with self.assertRaises(ValueError):
+            producer.source_for_variant('fex32', changed, product)
+        self.assertIs(producer.source_for_variant('fex64', changed, product)[0], changed)
+
+    def test_wow64_delta_and_inventory_pins_cannot_silently_drift(self):
+        pin, product, _, _, _ = producer.inputs()
+        changed = dict(pin, wow64_source=dict(pin['wow64_source'], product_postimage_count=1))
+        with self.assertRaisesRegex(ValueError, 'inventory count differs'):
+            producer.source_for_variant('fex32', changed, product)
+        changed = dict(pin, wow64_source=dict(pin['wow64_source'],
+                       post_tail=dict(pin['wow64_source']['post_tail'], sha256='0' * 64)))
+        with self.assertRaisesRegex(ValueError, 'delta or reference differs'):
+            producer.source_for_variant('fex32', changed, product)
+
+    def test_wow64_inventory_uses_its_manifest_without_executing_a_source_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / 'inventory'
+            with mock.patch.object(producer.fex, 'cloud_only'), \
+                 mock.patch.object(producer.fex, 'build', side_effect=AssertionError('unexpected compilation')):
+                producer.build(out, ['fex32'], stage='inventory')
+            row = json.loads((out / 'RESULT.json').read_text())['variants']['fex32']
+            self.assertEqual(row['postimages'], 6940)
+            self.assertEqual(row['actual_source'], 'NOT_ENABLED')
+            pin = json.loads((HERE / 'recipe.lock.json').read_text())
+            self.assertEqual(row['product_manifest_sha256'], pin['wow64_source']['product_manifest_sha256'])
+
     def test_supplement_receipt_names_its_own_bytes_after_multiple_tails(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -43,7 +92,10 @@ class ReleaseSource(TestCase):
         text = (HERE.parents[1] / '.github/workflows/repro110-fex-c32-stages-macos15-arm64.yml').read_text()
         for item in ['fail-fast: false', 'max-parallel: 2', 'nice -n 20', 'build/repro110fex/build.py']:
             self.assertIn(item, text)
-        native, full = [json.loads(value) for value in re.findall(r"'(\[\{[^\n']+\}\])'", text)]
+        native, wow64_inputs, wow64_full, full = [json.loads(value) for value in re.findall(r"'(\[\{[^\n']+\}\])'", text)]
         self.assertEqual(native, [dict(slot='fex64-native-stand', architecture='fex64', stage='native-stand')])
         self.assertEqual([row['stage'] for row in full], ['inventory', 'patches', 'configure', 'compile', 'native-stand', 'full'])
-        self.assertIn("if: always() && inputs.only != 'native-stand'", text)
+        self.assertEqual([row['stage'] for row in wow64_inputs], ['inventory', 'patches', 'configure'])
+        self.assertTrue(all(row['architecture'] == 'fex32' for row in wow64_inputs))
+        self.assertEqual(wow64_full, [dict(slot='fex32-full', architecture='fex32', stage='full')])
+        self.assertIn("if: always() && inputs.only == 'all'", text)
