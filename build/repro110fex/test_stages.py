@@ -371,21 +371,31 @@ class StageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('ARG=admission', (slot / 'driver.log').read_text())
 
+    def native_frontend_fixture(self, fork):
+        for name in [native_stand.REPLAY_RUNNER, native_stand.REPLAY_RANGES,
+                     'stands/synthetic/MacHostFeatures.h']:
+            target = fork / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((HERE.parents[1] / name).read_bytes())
+        return fork / native_stand.REPLAY_RUNNER
+
     def test_native_runner_counter_adapter_keeps_instrumented_source_unchanged(self):
         fork = self.root / 'public-fork'; (fork / 'stands/synthetic').mkdir(parents=True)
-        original = (HERE.parents[1] / 'stands/synthetic/runner.cpp').read_bytes()
-        runner = fork / 'stands/synthetic/runner.cpp'; runner.write_bytes(original)
+        runner = self.native_frontend_fixture(fork)
+        original = runner.read_bytes()
         source = self.root / 'source'; self.source_fixture(source)
         (source / native_stand.GUARD_FILES[0]).write_text('MacRunnerShld16CfApplied\n')
         selected, receipt = native_stand.runner_for_product(fork, source, self.root / 'build')
-        self.assertEqual(selected, runner)
+        self.assertEqual(selected, self.root / 'build/cmake/runner.cpp')
         self.assertEqual(receipt['shld16_counter'], 'PRESENT')
         self.assertEqual(runner.read_bytes(), original)
-        self.assertFalse((self.root / 'build').exists())
+        self.assertEqual(selected.read_bytes(), original)
+        self.assertEqual((selected.parent / 'OracleRanges.h').read_bytes(),
+                         (fork / native_stand.REPLAY_RANGES).read_bytes())
 
     def test_native_runner_counter_adapter_refuses_changed_anchors(self):
         fork = self.root / 'public-fork'; (fork / 'stands/synthetic').mkdir(parents=True)
-        (fork / 'stands/synthetic/runner.cpp').write_text('// own changed runner fixture\n')
+        self.native_frontend_fixture(fork).write_text('// own changed runner fixture\n')
         source = self.root / 'source'; self.source_fixture(source)
         with self.assertRaisesRegex(ValueError, 'anchor differs'):
             native_stand.runner_for_product(fork, source, self.root / 'build')
@@ -394,8 +404,7 @@ class StageTests(unittest.TestCase):
     def test_native_wrapper_uses_the_corrected_producer(self):
         fork = self.root / 'public-fork'; (fork / 'stands/synthetic').mkdir(parents=True)
         (fork / 'stands/synthetic/LICENSE').write_text('own license fixture\n')
-        (fork / 'stands/synthetic/runner.cpp').write_bytes((HERE.parents[1] / 'stands/synthetic/runner.cpp').read_bytes())
-        (fork / 'stands/synthetic/MacHostFeatures.h').write_bytes((HERE.parents[1] / 'stands/synthetic/MacHostFeatures.h').read_bytes())
+        self.native_frontend_fixture(fork)
         adapter = fork / 'stands/synthetic/own-adapter.cpp'; adapter.write_text('// own adapter fixture\n')
         source = self.root / 'source'; self.source_fixture(source)
         out = self.root / 'out'; out.mkdir()
@@ -434,6 +443,8 @@ class StageTests(unittest.TestCase):
         self.assertIn('mr_shld16_cf\\":null', adapted)
         self.assertEqual((build / 'cmake/MacHostFeatures.h').read_bytes(),
                          (fork / 'stands/synthetic/MacHostFeatures.h').read_bytes())
+        self.assertEqual((build / 'cmake/OracleRanges.h').read_bytes(),
+                         (fork / native_stand.REPLAY_RANGES).read_bytes())
         self.assertEqual(len([a for a in commands if a[:2] == ['cmake', '--build']]), 1)
 
 

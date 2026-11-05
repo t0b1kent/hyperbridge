@@ -8,6 +8,8 @@ import shutil
 import sys
 
 HERE = Path(__file__).resolve().parent
+REPLAY_RUNNER = 'stands/cpu/artifacts/stand-diff-stage5-20261001/stand_runner_fixed.cpp'
+REPLAY_RANGES = 'stands/cpu/artifacts/stand-diff-stage4-20261001/fexmac/OracleRanges.h'
 GUARD_PATCH_SHA = '830815241bcf4e07781ab845ffd4b68b0ac93eef7d0749e1cbf51758a8140590'
 GUARD_FILES = (
     'FEXCore/Source/Interface/Core/JIT/JIT.cpp',
@@ -125,10 +127,9 @@ def compile_sources(build, native, adapter, out):
 
 
 def runner_for_product(fork, source, build_dir):
-    runner = Path(fork) / 'stands/synthetic/runner.cpp'
+    runner = Path(fork) / REPLAY_RUNNER
     original = runner.read_bytes()
-    if b'MacRunnerShld16CfApplied' in (Path(source) / GUARD_FILES[0]).read_bytes():
-        return runner, dict(shld16_counter='PRESENT', source_sha256=digest(original))
+    instrumented = b'MacRunnerShld16CfApplied' in (Path(source) / GUARD_FILES[0]).read_bytes()
     # c32 removed this old translation-time counter. Preserve semantic outputs;
     # report the unavailable diagnostic as null, never as a measured zero.
     text = original.decode()
@@ -141,19 +142,23 @@ def runner_for_product(fork, source, build_dir):
         ('          MacRunnerShld16CfApplied.load(std::memory_order_relaxed), MacRunnerNullHostChecks.load',
          '          MacRunnerNullHostChecks.load'),
     ]
-    for before, after in replacements:
-        require(text.count(before) == 1, 'Pinned runner counter adapter anchor differs')
-        text = text.replace(before, after, 1)
-    require('MacRunnerShld16CfApplied' not in text, 'Removed product counter still referenced')
+    if not instrumented:
+        for before, after in replacements:
+            require(text.count(before) == 1, 'Pinned runner counter adapter anchor differs')
+            text = text.replace(before, after, 1)
+        require('MacRunnerShld16CfApplied' not in text, 'Removed product counter still referenced')
     target = Path(build_dir) / 'cmake/runner.cpp'
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open('xb') as stream:
         stream.write(text.encode())
     header = Path(fork) / 'stands/synthetic/MacHostFeatures.h'
     shutil.copy2(header, target.parent / header.name)
-    return target, dict(shld16_counter='NOT_ENABLED_REMOVED_FROM_PRODUCT_SOURCE',
+    ranges = Path(fork) / REPLAY_RANGES
+    shutil.copy2(ranges, target.parent / ranges.name)
+    return target, dict(shld16_counter='PRESENT' if instrumented else 'NOT_ENABLED_REMOVED_FROM_PRODUCT_SOURCE',
+                        input_protocol='SPARSE_PAGES_AND_EXECUTABLE_RANGES',
                         source_sha256=digest(original), adapter_sha256=digest(target.read_bytes()),
-                        adjacent_header_sha256=digest(header.read_bytes()))
+                        adjacent_header_sha256=digest(header.read_bytes()), ranges_header_sha256=digest(ranges.read_bytes()))
 
 
 def build(fork, source, lock, build_dir, out, env, fex, clang, clangxx):
