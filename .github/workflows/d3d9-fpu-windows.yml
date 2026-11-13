@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 HyperBridge contributors
+name: d3d9-fpu-windows
+
+on:
+  push:
+    paths: ['stands/d3d9-fpu/**', '.github/workflows/d3d9-fpu-windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d3d9-fpu-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reference:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the probe in the x86 developer environment
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio with the C++ tools was not found' }
+          & (Join-Path $vs 'Common7\Tools\Launch-VsDevShell.ps1') -Arch x86 -HostArch amd64 -SkipAutomaticLocation
+          $out = Join-Path $PWD 'results'
+          $code = 'not-run'
+          try {
+            & (Join-Path $PWD 'stands\d3d9-fpu\run-windows.ps1') -OutputDirectory $out
+            $code = $LASTEXITCODE
+          } catch {
+            Write-Output "run script stopped: $($_.Exception.Message)"
+            $code = 'threw'
+          }
+          if (-not (Test-Path -LiteralPath $out)) { $null = New-Item -ItemType Directory -Path $out }
+          "run script exit: $code" | Out-File -Encoding utf8 -Append (Join-Path $out 'machine.txt')
+          Get-ChildItem -LiteralPath $out | Select-Object -ExpandProperty Name
+          Get-ChildItem -LiteralPath $out -Filter 'd3d9fpu-out-*.txt' | ForEach-Object { Get-Content -LiteralPath $_.FullName }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: d3d9-fpu-${{ matrix.os }}
+          path: results
+          if-no-files-found: warn
