@@ -23,12 +23,16 @@ static FILE *fo; static HWND wnd;
 /* x86 (32-bit) only.  mingw: i686-w64-mingw32-clang -O1 -mwindows -march=pentium4 d3d9-fpu.c -ld3d9 -luser32;
    MSVC (x86 Developer prompt): cl /O1 d3d9-fpu.c d3d9.lib user32.lib /link /subsystem:windows */
 #ifdef _MSC_VER
-static unsigned short get_fcw(void) { unsigned short c; __asm fnstcw c; return c; }
-static void set_fcw(unsigned short c) { __asm fnclex __asm fldcw c }
-static unsigned get_mxcsr(void) { unsigned m; __asm stmxcsr m; return m; }
+/* braced __asm blocks: with the one-line form MSVC swallows the closing brace of the function as assembly text (C1075) */
+static unsigned short get_fcw(void) { unsigned short c; __asm { fnstcw c } return c; }
+static void set_fcw(unsigned short c) { __asm { fnclex
+                                                fldcw c } }
+static unsigned get_mxcsr(void) { unsigned m; __asm { stmxcsr m } return m; }
 static unsigned long long third_bits(void) {
   double one = 1.0, three = 3.0, r; unsigned long long b;
-  __asm fld qword ptr one __asm fdiv qword ptr three __asm fstp qword ptr r
+  __asm { fld qword ptr one
+          fdiv qword ptr three
+          fstp qword ptr r }
   memcpy(&b, &r, 8); return b;
 }
 #else
