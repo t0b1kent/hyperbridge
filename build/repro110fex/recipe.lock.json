@@ -90,7 +90,7 @@
       "sdk": "27.0",
       "deployment_target": "26.0",
       "apple_clang_build": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
-      "linker_lc": "27037.1",
+      "linker_lc": "27037.1.0",
       "jobs": 2
     },
     "profiles": {

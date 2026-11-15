@@ -74,6 +74,16 @@ class SourceProfiles(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unknown c33r source profile'):
             step.profile(self.config, 'fex128', self.here)
 
+    def test_current_linker_pin_uses_the_load_command_version_triplet(self):
+        import build as producer
+        pin = json.loads((Path(step.__file__).parent / 'recipe.lock.json').read_bytes())
+        expected = pin['release111']['native_platform']['linker_lc']
+        actual = '@(#)PROGRAM:ld PROJECT:ld-27037.1\n'
+        result = producer.fex.native_layout.verify_linker(actual, expected)
+        self.assertEqual(result['expected_lc_build_version_ld'], '27037.1.0')
+        with self.assertRaisesRegex(ValueError, 'Apple linker differs'):
+            producer.fex.native_layout.verify_linker(actual, '27037.1')
+
 
 if __name__ == '__main__':
     unittest.main()
