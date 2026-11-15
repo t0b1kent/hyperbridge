@@ -21,6 +21,7 @@ import build_fex64 as fex
 import native_stand
 import candidate_source as source
 import release_bytes
+import release111_source
 
 
 def source_for_variant(variant, pin, product):
@@ -104,10 +105,11 @@ def inputs():
     tools = json.loads((base / 'repro109/tools.lock.json').read_bytes())
     native_pin = json.loads((HERE / 'support/native-stand.lock.json').read_bytes())
     source.require(native_pin['revision'] == pin['base_revision'], 'Native builder pin differs')
+    release111_source.read_config(pin)
     return pin, product, engine, locks, tools
 
 
-def archive(out, variants):
+def archive(out, variants, label='c12'):
     members = {}
     for variant in variants:
         for prefix in ['engine', 'licenses', 'native-stand']:
@@ -130,7 +132,7 @@ def archive(out, variants):
             members[path.relative_to(out).as_posix()] = path
     source.require(any(n.endswith('.dll') for n in members), 'No component DLL outputs')
     members['ENGINE-environment.json'] = out / 'ENGINE-environment.json'
-    target = out / 'fex-c12-unsigned.tar'
+    target = out / ('fex-' + label + '-unsigned.tar')
     with tarfile.open(target, 'x') as stream:
         for name, path in sorted(members.items()):
             source.require(path.stat().st_size <= 256 * 1024**2, 'Component archive member exceeds cap')
@@ -148,6 +150,9 @@ def build(out, variants, stage='full', from_outputs=None):
                    'Admission requires compiled outputs; other stages must not receive them')
     fex.cloud_only()
     pin, product, engine, sealed, tools = inputs()
+    current = release111_source.read_config(pin)
+    if current:
+        engine = release111_source.engine(current)
     source.require(not out.exists(), 'Preserve previous component result')
     out.mkdir(parents=True)
     result = dict(schema=1, status='STARTED', first_failure=None, variants={},
@@ -156,6 +161,10 @@ def build(out, variants, stage='full', from_outputs=None):
                   base_revision=pin['base_revision'], candidate_revision=pin['candidate_revision'],
                   product_manifest_sha256=pin['product_manifest_sha256'],
                   platform=pin['platform'], selected_variants=variants, selected_stage=stage)
+    if current:
+        result.update(classification='SOURCE_BUILD_C33R_NOT_ACCEPTED_NOT_GOLDEN',
+                      platform=current['native_platform'], candidate_profiles=current['profiles'],
+                      candidate_engine_sha256=current['candidate_engine_sha256'])
     fex.HERE = HERE / 'base/repro109'
     fex.DEADLINE = time.monotonic() + pin['platform']['minutes'] * 60
     (out / 'ENGINE-environment.json').write_text(json.dumps(engine, indent=2) + '\n')
@@ -169,6 +178,8 @@ def build(out, variants, stage='full', from_outputs=None):
                     postimages=len(variant_product['product_source_postimages']), actual_source='NOT_ENABLED',
                     product_manifest_sha256=variant_pin['product_manifest_sha256'],
                     patches=len(sealed[variant]['patches']), compiler='NOT_ENABLED')
+                if current:
+                    result['variants'][variant]['candidate_profile'] = current['profiles'][variant]
                 continue
             if stage == 'admission':
                 admitted = fex.admit_outputs(Path(from_outputs) / variant, target, variant)
@@ -187,6 +198,8 @@ def build(out, variants, stage='full', from_outputs=None):
             lock['build_jobs'] = pin['platform']['jobs']
             # Only the explicit host-stand stage builds the native runner. PE stages remain separate.
             lock['build_native_stand'] = stage == 'native-stand' and variant == 'fex64'
+            if current:
+                lock.update(release111_source.build_fields(current, variant))
             def overlay(stage, src, actual_lock, output, env):
                 if stage == 'prepared':
                     checkout = src.parent / 'public-candidate'
@@ -205,15 +218,22 @@ def build(out, variants, stage='full', from_outputs=None):
                     return applied
                 source.require(stage == 'submodules', 'Unknown source overlay stage')
                 verified = source.verify_product(src, variant_product, variant_pin['product_postimage_count'])
+                if current:
+                    verified = release111_source.apply(current, variant, src)
+                    actual_lock['release111_profile'] = current['profiles'][variant]
                 (output / 'product-postimages.json').write_text(json.dumps(verified, indent=2) + '\n')
                 return verified
             stage_result = fex.build(target, lock, tools,
                 source_overlay=overlay, stage=stage)
             if stage != 'full':
                 stage_result['product_manifest_sha256'] = variant_pin['product_manifest_sha256']
+                if current:
+                    stage_result['candidate_profile'] = current['profiles'][variant]
                 result['variants'][variant] = stage_result
                 continue
-            canonical = release_bytes.compare_outputs(target, variant, pin['reference_pe_sha256'][variant])
+            reference = (release111_source.profile(current, variant)['reference_pe_sha256'] if current
+                         else pin['reference_pe_sha256'][variant])
+            canonical = release_bytes.compare_outputs(target, variant, reference)
             outputs = json.loads((target / 'outputs.json').read_bytes())
             source.require(outputs['ec_modules'] == (2 if variant == 'fex64' else 0) and
                            outputs['unique_ec_binaries'] == (1 if variant == 'fex64' else 0),
@@ -226,7 +246,7 @@ def build(out, variants, stage='full', from_outputs=None):
                                                 actual_dll_sha256=canonical['actual_sha256'],
                                                 release_bytes=canonical['status'])
         if stage == 'full':
-            result['archive'] = archive(out, variants)
+            result['archive'] = archive(out, variants, label='c33r' if current else 'c12')
             result['status'] = 'BUILT_SOURCE_ONLY_NOT_ACCEPTED'
         else:
             result['status'] = 'STAGE_ONLY_NOT_ACCEPTED'

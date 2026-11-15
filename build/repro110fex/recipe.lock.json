@@ -70,5 +70,49 @@
     "product_manifest": "c32/WOW64-PRODUCT-MANIFEST.json",
     "product_manifest_sha256": "46d959823fd610abf19c4dbe717373656e865eee8e9acca40636efab06ecde22",
     "product_postimage_count": 6940
+  },
+  "release111": {
+    "schema": 1,
+    "classification": "C33R_SOURCE_PROFILES_NOT_RELEASE_ACCEPTED",
+    "candidate_engine_sha256": "2dff66a24b9f63ce395e9824b32b3512be618e4f6db11b10318f344e63171e35",
+    "engine": "c33r/ENGINE.json",
+    "compiler": {
+      "name": "llvm-mingw",
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/llvm-mingw-20260908-ucrt-macos-universal.tar.xz",
+      "sha256": "d1dc5d1ecf3a3ced5ed5544c72f1acd0c8e84eb3024d520ecc6b143eec62a149",
+      "size": 124244100,
+      "version": "20260908",
+      "clang": "23.1.1"
+    },
+    "native_platform": {
+      "xcode": "27.0",
+      "xcode_build": "27A266a",
+      "sdk": "27.0",
+      "deployment_target": "26.0",
+      "apple_clang_build": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+      "linker_lc": "27037.1",
+      "jobs": 2
+    },
+    "profiles": {
+      "fex32": {
+        "path": "c33r/fex32.json",
+        "sha256": "c8e4d54468a8df3f54a7ef7375de43b813b89cc164362e76f6b588894d225e45",
+        "files": 6953,
+        "changes": 66,
+        "excluded": 8
+      },
+      "fex64": {
+        "path": "c33r/fex64.json",
+        "sha256": "9f77ab7ca23b3dc044e7884e970dd0f0c83ad91e1c3116f81dc03f3aaa3a7b0b",
+        "files": 6941,
+        "changes": 19,
+        "excluded": 39
+      }
+    },
+    "native_source_proof": "Six retained producer objects are byte-exact from these profiles; private proof receipt is not a public build input.",
+    "engine_sha256": "cd91e3f181e0667302283b8b65e3b750dbe9e8027791fc8b5657e05622907901",
+    "metadata_sanitization": [
+      "report.c15.layer1_gates: local evidence path omitted; runtime fields unchanged"
+    ]
   }
 }
