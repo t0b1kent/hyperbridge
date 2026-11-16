@@ -16,11 +16,11 @@ Since 28 September 2026, HyperBridge has two parts:
   stays here as the research engine: its measured techniques, instruments and interpreter
   oracles are being carried over to the FEX-based engine behind switches.
 
-## Current release · HyperBridge 1.1.1
+## Current translator release · HyperBridge 1.1.1
 
-[Download the translator component](https://github.com/t0b1kent/hyperbridge/releases/tag/v1.1.1) · [MacRunner 1.1.1 application](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.1.1) · [Current release notes and game status](https://github.com/t0b1kent/macrunner-app/blob/main/docs/RELEASE-1.1.1-EN.md). Released November 16, 2026, as an ordinary release. The component is for MacRunner/Wine integration; use the application download to launch games. Corresponding source is at [v1.1.1](https://github.com/t0b1kent/hyperbridge/tree/v1.1.1).
+[Download translator](https://github.com/t0b1kent/hyperbridge/releases/tag/v1.1.1) · [MacRunner 1.1.2 application](https://github.com/t0b1kent/macrunner-app/releases/tag/v1.1.2) · [Current game status](https://github.com/t0b1kent/macrunner-app/blob/main/docs/RELEASE-1.1.2-EN.md).
 
-This release integrates the c33r translator and thread-state work. The owner reports about 78 versus 30 FPS for Gothic 3 against Windows on Arm / Prism (2.6 times); matching test conditions are not fully archived, so this is not a controlled translator benchmark. Gothic 3 has first-launch and Retina-input problems in the current app, and Elden Ring currently fails to start in the owner's 1.1.1 tests. Read the current notes before relying on historical game results below.
+The translator component is unchanged in MacRunner 1.1.2. Graphics startup, DX9 display modes and Retina handling were repaired in the application and graphics components. Fresh gameplay of that package is pending owner testing after publication. Historical results below do not certify the new package.
 
 ## Historical release · HyperBridge 1.1.0
 
