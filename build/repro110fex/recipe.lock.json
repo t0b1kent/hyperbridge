@@ -114,5 +114,18 @@
     "metadata_sanitization": [
       "report.c15.layer1_gates: local evidence path omitted; runtime fields unchanged"
     ]
+  },
+  "release114": {
+    "schema": 1,
+    "classification": "C34R_SOURCE_PROFILE_NOT_RELEASE_ACCEPTED",
+    "profiles": {
+      "fex32": {
+        "path": "c34r/fex32.json",
+        "sha256": "50de50c12c251d6f72a4e1e7490836cdd0482de767d9c1cb019a0237a7e60a4a",
+        "files": 6954,
+        "changes": 25
+      }
+    },
+    "note": "MacRunner 1.1.4 32-bit translator delta over c33r: x87 speed series, narrow-preshift, tier-2, FXAM class, int32 gate; same compiler and platform pins as c33r."
   }
 }

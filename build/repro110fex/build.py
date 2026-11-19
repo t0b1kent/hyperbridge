@@ -22,6 +22,7 @@ import native_stand
 import candidate_source as source
 import release_bytes
 import release111_source
+import release114_source
 
 
 def source_for_variant(variant, pin, product):
@@ -106,6 +107,7 @@ def inputs():
     native_pin = json.loads((HERE / 'support/native-stand.lock.json').read_bytes())
     source.require(native_pin['revision'] == pin['base_revision'], 'Native builder pin differs')
     release111_source.read_config(pin)
+    release114_source.read_config(pin)
     return pin, product, engine, locks, tools
 
 
@@ -151,6 +153,7 @@ def build(out, variants, stage='full', from_outputs=None):
     fex.cloud_only()
     pin, product, engine, sealed, tools = inputs()
     current = release111_source.read_config(pin)
+    step114 = release114_source.read_config(pin)
     if current:
         engine = release111_source.engine(current)
     source.require(not out.exists(), 'Preserve previous component result')
@@ -221,6 +224,9 @@ def build(out, variants, stage='full', from_outputs=None):
                 if current:
                     verified = release111_source.apply(current, variant, src)
                     actual_lock['release111_profile'] = current['profiles'][variant]
+                    if step114 and variant in step114['profiles']:
+                        verified = release114_source.apply(step114, variant, src)
+                        actual_lock['release114_profile'] = step114['profiles'][variant]
                 (output / 'product-postimages.json').write_text(json.dumps(verified, indent=2) + '\n')
                 return verified
             stage_result = fex.build(target, lock, tools,
@@ -231,7 +237,9 @@ def build(out, variants, stage='full', from_outputs=None):
                     stage_result['candidate_profile'] = current['profiles'][variant]
                 result['variants'][variant] = stage_result
                 continue
-            reference = (release111_source.profile(current, variant)['reference_pe_sha256'] if current
+            reference = (release114_source.profile(step114, variant)['reference_pe_sha256']
+                         if step114 and variant in step114['profiles'] else
+                         release111_source.profile(current, variant)['reference_pe_sha256'] if current
                          else pin['reference_pe_sha256'][variant])
             canonical = release_bytes.compare_outputs(target, variant, reference)
             outputs = json.loads((target / 'outputs.json').read_bytes())
